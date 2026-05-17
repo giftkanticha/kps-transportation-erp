@@ -220,9 +220,21 @@ const expenses: Expense[] = [
 ]
 
 const expenseHeaders: ExpenseHeader[] = [
-  { id: 'eh1', code: 'EXH-001', date: '2025-05-15', vehicleId: 'v1', partnerId: 'pa1', odometer: 245000, paid: false, dueDate: '2025-05-30', total: 13500, lineCount: 2, note: 'แบตเตอรี่ ซ่อมห้ามเบรก' },
-  { id: 'eh2', code: 'EXH-002', date: '2025-05-10', vehicleId: 'v2', partnerId: 'pa2', odometer: 510000, paid: false, dueDate: '2025-05-25', total: 45000, lineCount: 3, note: 'ยาง 11R22.5, ค่าติดตั้งยาง, ค่าตรวจสภาพทั่วไป' },
-  { id: 'eh3', code: 'EXH-003', date: '2025-04-20', vehicleId: 'v1', partnerId: 'pa3', odometer: 243800, paid: true,  dueDate: '2025-05-05', total: 8500,  lineCount: 1, note: 'ถ่ายน้ำมันเครื่อง' },
+  { id: 'eh1',  code: 'EXH-001', date: '2026-05-15', vehicleId: 'v1', partnerId: 'pa1', odometer: 245000, paid: false, dueDate: '2026-05-30', total: 13500, lineCount: 2, note: 'แบตเตอรี่ ซ่อมห้ามเบรก' },
+  { id: 'eh2',  code: 'EXH-002', date: '2026-05-10', vehicleId: 'v2', partnerId: 'pa2', odometer: 510000, paid: false, dueDate: '2026-05-25', total: 45000, lineCount: 3, note: 'ยาง 11R22.5, ติดตั้งยาง, ตรวจสภาพ' },
+  { id: 'eh3',  code: 'EXH-003', date: '2026-04-20', vehicleId: 'v1', partnerId: 'pa3', odometer: 243800, paid: true,  dueDate: '2026-05-05', total: 8500,  lineCount: 1, note: 'ถ่ายน้ำมันเครื่อง' },
+  { id: 'eh4',  code: 'EXH-004', date: '2026-04-05', vehicleId: 'v3', partnerId: 'pa1', odometer: 198000, paid: true,  dueDate: '2026-04-20', total: 22000, lineCount: 2, note: 'ซ่อมเครื่องยนต์ + เปลี่ยนสายพาน' },
+  { id: 'eh5',  code: 'EXH-005', date: '2026-03-22', vehicleId: 'v4', partnerId: 'pa2', odometer: 320000, paid: true,  dueDate: '2026-04-06', total: 38500, lineCount: 2, note: 'ยาง 11R22.5 + ผ้าเบรก' },
+  { id: 'eh6',  code: 'EXH-006', date: '2026-05-02', vehicleId: 'v5', partnerId: 'pa1', odometer: 145000, paid: false, dueDate: '2026-05-17', total: 17800, lineCount: 1, note: 'ซ่อมระบบไฟ + ตรวจเช็คทั่วไป' },
+  { id: 'eh7',  code: 'EXH-007', date: '2026-04-12', vehicleId: 'v2', partnerId: 'pa3', odometer: 508500, paid: true,  dueDate: '2026-04-27', total: 6800,  lineCount: 1, note: 'น้ำมันเครื่อง 15W-40' },
+  { id: 'eh8',  code: 'EXH-008', date: '2026-03-15', vehicleId: 'v3', partnerId: 'pa2', odometer: 196000, paid: true,  dueDate: '2026-03-30', total: 29500, lineCount: 2, note: 'ยาง 4 เส้น' },
+  { id: 'eh9',  code: 'EXH-009', date: '2026-05-08', vehicleId: 'v4', partnerId: 'pa4', odometer: 321200, paid: true,  dueDate: '2026-05-08', total: 4250,  lineCount: 3, note: 'อะไหล่จากคลัง KPS' },
+  { id: 'eh10', code: 'EXH-010', date: '2026-04-28', vehicleId: 'v5', partnerId: 'pa4', odometer: 146200, paid: true,  dueDate: '2026-04-28', total: 6800,  lineCount: 2, note: 'แบตเตอรี่ + ไส้กรอง จากคลัง' },
+  { id: 'eh11', code: 'EXH-011', date: '2026-05-12', vehicleId: 'v1', partnerId: 'pa2', odometer: 245500, paid: false, dueDate: '2026-05-27', total: 14200, lineCount: 1, note: 'ยางอะไหล่ 2 เส้น' },
+  { id: 'eh12', code: 'EXH-012', date: '2026-03-10', vehicleId: 'v3', partnerId: 'pa3', odometer: 195000, paid: true,  dueDate: '2026-03-25', total: 5500,  lineCount: 1, note: 'ถ่ายน้ำมันเครื่อง' },
+  { id: 'eh13', code: 'EXH-013', date: '2026-04-18', vehicleId: 'v5', partnerId: 'pa2', odometer: 145800, paid: true,  dueDate: '2026-05-03', total: 18900, lineCount: 1, note: 'ยาง 4 เส้น' },
+  { id: 'eh14', code: 'EXH-014', date: '2026-05-14', vehicleId: 'v2', partnerId: 'pa1', odometer: 511500, paid: false, dueDate: '2026-05-29', total: 33500, lineCount: 2, note: 'ซ่อมเกียร์' },
+  { id: 'eh15', code: 'EXH-015', date: '2026-05-09', vehicleId: 'v4', partnerId: 'pa3', odometer: 321800, paid: true,  dueDate: '2026-05-24', total: 3800,  lineCount: 1, note: 'ถ่ายน้ำมันเครื่อง' },
 ]
 
 const expenseLines: ExpenseLine[] = [
