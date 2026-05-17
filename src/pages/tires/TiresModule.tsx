@@ -164,7 +164,7 @@ interface TireMapSVGProps {
 function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable }: TireMapSVGProps) {
   const layout = TL[wc] ?? TL[10]
   return (
-    <div style={{ overflowY: 'auto', maxHeight: 520 }}>
+    <div>
       <svg
         width={300}
         height={layout.h}
@@ -680,25 +680,31 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
       alert('กรุณากรอกเลขซีเรียลและยี่ห้อ')
       return
     }
+    if (form.status === 'in-use' && !form.vehicleId) {
+      alert('กรุณาเลือกรถที่จะติดตั้งยาง')
+      return
+    }
+    const finalVehicleId = (form.status === 'in-use' || form.status === 'spare') ? (form.vehicleId || null) : null
+    const finalPosition = form.status === 'in-use' ? (form.position || null) : null
     const newTire = db.add<Tire>('tires', {
       ...form,
       id: uid('t'),
       installedOdometer: +(form.installedOdometer) || 0,
       accumulatedKm: 0,
       status: form.status as Tire['status'],
-      vehicleId: form.vehicleId || null,
-      position: form.position || null,
+      vehicleId: finalVehicleId,
+      position: finalPosition,
     })
-    if (form.status === 'in-use' && form.vehicleId) {
+    if (form.status === 'in-use' && finalVehicleId) {
       db.add<TireEvent>('tire_events', {
         id: uid('te'),
         tireId: newTire.id,
-        vehicleId: form.vehicleId,
+        vehicleId: finalVehicleId,
         eventType: 'install',
         date: form.installedDate,
         odometer: +(form.installedOdometer) || 0,
         fromPos: null,
-        toPos: form.position,
+        toPos: finalPosition,
         note: 'ยางใหม่',
         userId: 'e10',
       })
@@ -932,6 +938,7 @@ function TiresLayout() {
               ผังยาง {wc} ล้อ
             </div>
             <TireMapSVG
+              key={`${picked}-${wc}`}
               wc={wc}
               tireMap={tireMap}
               selectedPos={popup?.pos ?? null}
@@ -1667,52 +1674,39 @@ function TiresManageFull() {
 
 // ── Tab 4: History Timeline ───────────────────────────────────────
 function TiresHistoryFull() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
   const tires = db.getAll<Tire>('tires')
   const [q, setQ] = useState('')
-  const [vf, setVf] = useState('all')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+  const [searched, setSearched] = useState('')
 
-  const filtered = useMemo(() => {
-    let evts = db
+  const tire = searched
+    ? tires.find((t) => t.serial.toLowerCase().includes(searched.toLowerCase()))
+    : null
+  const vehicle = tire?.vehicleId ? db.get<Vehicle>('vehicles', tire.vehicleId) : null
+
+  const events = useMemo(() => {
+    if (!tire) return []
+    return db
       .getAll<TireEvent>('tire_events')
+      .filter((e) => e.tireId === tire.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    if (q) {
-      const t = tires.find((tt) => tt.serial.toLowerCase().includes(q.toLowerCase()))
-      evts = t ? evts.filter((e) => e.tireId === t.id) : []
-    }
-    if (vf !== 'all') evts = evts.filter((e) => e.vehicleId === vf)
-    if (from) evts = evts.filter((e) => e.date >= from)
-    if (to) evts = evts.filter((e) => e.date <= to)
-    return evts
-  }, [q, vf, from, to, tires])
+  }, [tire?.id])
 
-  const iconMap: Record<string, string> = {
-    install: '📌',
-    swap: '↔',
-    remove: '📍',
-    sell: '🏪',
-  }
-  const colorMap: Record<string, string> = {
-    install: 'green',
-    swap: 'blue',
-    remove: 'amber',
-    sell: 'red',
-  }
-  const labelMap: Record<string, string> = {
-    install: 'ติดตั้ง',
-    swap: 'สลับตำแหน่ง',
-    remove: 'ถอด',
-    sell: 'ขาย',
+  const handleSearch = () => setSearched(q.trim())
+
+  const EVT_CFG: Record<string, { label: string; icon: string; color: string; bg: string }> = {
+    install: { label: 'ซื้อ / ติดตั้งยางใหม่', icon: '🛒', color: '#16a34a', bg: '#dcfce7' },
+    swap: { label: 'สลับตำแหน่ง', icon: '↔', color: '#2563eb', bg: '#dbeafe' },
+    remove: { label: 'ถอดซ่อม / ปะยาง', icon: '🔧', color: '#d97706', bg: '#fef3c7' },
+    sell: { label: 'ขายออก / จำหน่าย', icon: '💰', color: '#dc2626', bg: '#fee2e2' },
   }
 
   return (
     <div>
-      {/* Filter bar */}
+      {/* Search bar */}
       <div className="card pad" style={{ marginBottom: 18 }}>
-        <div className="row" style={{ gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div style={{ position: 'relative', flex: 1, minWidth: 260 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>ค้นหาประวัติยางรายเส้น</div>
+        <div className="row" style={{ gap: 10 }}>
+          <div style={{ position: 'relative', flex: 1 }}>
             <Icon
               name="search"
               size={14}
@@ -1727,186 +1721,240 @@ function TiresHistoryFull() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="ค้นหา เลขซีเรียล"
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              placeholder="กรอกเลขซีเรียลยาง เช่น TIR0001"
               style={{
                 width: '100%',
-                height: 38,
+                height: 42,
                 padding: '0 12px 0 36px',
                 border: '1px solid var(--line)',
                 borderRadius: 8,
                 background: 'var(--bg)',
-                fontSize: 13,
+                fontSize: 14,
               }}
             />
           </div>
-          <Field label="ทะเบียน">
-            <select
-              value={vf}
-              onChange={(e) => setVf(e.target.value)}
-              style={{ width: 160, height: 38, fontSize: 13 }}
-            >
-              <option value="all">ทั้งหมด</option>
-              {vehicles.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.plate}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="จากวันที่">
-            <input
-              type="date"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-              style={{ height: 38, fontSize: 13 }}
-            />
-          </Field>
-          <Field label="ถึงวันที่">
-            <input
-              type="date"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-              style={{ height: 38, fontSize: 13 }}
-            />
-          </Field>
+          <button
+            className="btn primary"
+            onClick={handleSearch}
+            style={{ height: 42, paddingInline: 20 }}
+          >
+            ค้นหา
+          </button>
         </div>
       </div>
 
-      {/* Timeline feed */}
-      <div className="col" style={{ gap: 12 }}>
-        {filtered.length === 0 && (
-          <div
-            className="card pad"
-            style={{ textAlign: 'center', color: 'var(--text-muted)' }}
-          >
-            ไม่พบประวัติตามเงื่อนไขที่เลือก
-          </div>
-        )}
-        {filtered.map((e, i) => {
-          const t = db.get<Tire>('tires', e.tireId)
-          const v = db.get<Vehicle>('vehicles', e.vehicleId)
-          const icon = iconMap[e.eventType] ?? '📋'
-          const color = colorMap[e.eventType] ?? 'gray'
-          const label = labelMap[e.eventType] ?? e.eventType
+      {/* Not found */}
+      {searched && !tire && (
+        <div className="card pad" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
+          ไม่พบยางที่มีซีเรียล: <strong>{searched}</strong>
+        </div>
+      )}
 
-          return (
-            <div key={e.id} style={{ display: 'grid', gridTemplateColumns: '60px 1fr', gap: 16 }}>
-              {/* Icon circle */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                <div
-                  style={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: '50%',
-                    background: `var(--${color}-50)`,
-                    border: `2px solid var(--${color})`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 20,
-                  }}
-                >
-                  {icon}
-                </div>
-                {i < filtered.length - 1 && (
-                  <div
-                    style={{
-                      width: 2,
-                      height: 32,
-                      background: 'var(--line)',
-                      marginTop: 8,
-                    }}
-                  />
-                )}
+      {/* Tire info header card */}
+      {tire && (
+        <>
+          <div className="card" style={{ padding: 20, marginBottom: 18 }}>
+            <div className="row" style={{ gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: '50%',
+                  background: '#dbeafe',
+                  border: '3px solid #2563eb',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <span style={{ fontWeight: 800, fontSize: 12, color: '#1d4ed8', textAlign: 'center' }}>
+                  {tire.position ?? 'คลัง'}
+                </span>
               </div>
-              {/* Card */}
-              <div className="card" style={{ padding: 16 }}>
-                <div className="row" style={{ marginBottom: 10, alignItems: 'flex-start' }}>
-                  <div>
-                    <h4
-                      style={{
-                        margin: '0 0 4px',
-                        fontSize: 14,
-                        fontWeight: 700,
-                        color: `var(--${color})`,
-                      }}
-                    >
-                      {icon} {label}
-                    </h4>
-                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                      {db.thaiDate(e.date)}
-                    </div>
-                  </div>
-                  <div className="spacer" />
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontWeight: 600, fontSize: 13 }}>{t?.serial ?? '—'}</div>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
-                      {t?.brand} {t?.model}
-                    </div>
-                  </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="row" style={{ gap: 10, marginBottom: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span className="mono" style={{ fontWeight: 800, fontSize: 18 }}>{tire.serial}</span>
+                  <span className={`badge ${LOC_LABEL[tire.status]?.cls ?? 'gray'}`}>
+                    {LOC_LABEL[tire.status]?.label ?? tire.status}
+                  </span>
                 </div>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr 1fr',
-                    gap: 12,
-                    fontSize: 13,
-                    paddingTop: 10,
-                    borderTop: '1px solid var(--line)',
-                  }}
-                >
-                  <Info
-                    label="ทะเบียน"
-                    value={
-                      <span className="mono" style={{ fontWeight: 600 }}>
-                        {v?.plate}
-                      </span>
-                    }
-                  />
-                  <Info
-                    label="เลขไมล์"
-                    value={<span className="mono">{db.fmt(e.odometer)} km</span>}
-                  />
-                  {e.fromPos && (
-                    <Info
-                      label="สลับจาก"
-                      value={
-                        <span className="badge gray" style={{ fontSize: 11 }}>
-                          {e.fromPos.startsWith('spare') ? 'สำรอง' : e.fromPos}
-                        </span>
-                      }
-                    />
+                <div style={{ fontSize: 13.5, color: 'var(--text-2)', marginBottom: 6 }}>
+                  {tire.brand} {tire.model} · {tire.size}
+                </div>
+                <div className="row" style={{ gap: 18, fontSize: 13, flexWrap: 'wrap' }}>
+                  {vehicle ? (
+                    <span>
+                      รถ:{' '}
+                      <strong className="mono" style={{ color: 'var(--primary)' }}>
+                        {vehicle.plate}
+                      </strong>
+                      <span className="muted"> ({vehicle.type})</span>
+                    </span>
+                  ) : (
+                    <span className="muted">ไม่ได้ติดตั้งบนรถ</span>
                   )}
-                  {e.toPos && (
-                    <Info
-                      label="สลับไป"
-                      value={
-                        <span className="badge blue" style={{ fontSize: 11 }}>
-                          {e.toPos.startsWith('spare') ? 'สำรอง' : e.toPos}
-                        </span>
-                      }
-                    />
-                  )}
-                  {e.note && (
-                    <div
-                      style={{
-                        gridColumn: '1/-1',
-                        fontSize: 12,
-                        color: 'var(--text-2)',
-                        padding: '8px 10px',
-                        background: 'var(--bg-sunk)',
-                        borderRadius: 6,
-                      }}
-                    >
-                      {e.note}
-                    </div>
-                  )}
+                  <span>
+                    Km สะสม:{' '}
+                    <strong style={{ color: kmStatus(tire.accumulatedKm ?? 0).color }}>
+                      {db.fmt(tire.accumulatedKm ?? 0)} km
+                    </strong>
+                  </span>
+                  <span className="muted">ติดตั้งเมื่อ: {db.thaiDate(tire.installedDate)}</span>
                 </div>
               </div>
             </div>
-          )
-        })}
-      </div>
+          </div>
+
+          {/* Timeline */}
+          {events.length === 0 ? (
+            <div className="card pad" style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 40 }}>
+              ยังไม่มีประวัติการใช้งานยางเส้นนี้
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14, color: 'var(--text-2)' }}>
+                ประวัติการใช้งาน ({events.length} รายการ)
+              </div>
+              {events.map((e, i) => {
+                const v = db.get<Vehicle>('vehicles', e.vehicleId)
+                const cfg = EVT_CFG[e.eventType] ?? EVT_CFG.install
+                const isLast = i === events.length - 1
+                return (
+                  <div
+                    key={e.id}
+                    style={{ display: 'grid', gridTemplateColumns: '48px 1fr', gap: 14 }}
+                  >
+                    {/* Spine */}
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <div
+                        style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: '50%',
+                          background: cfg.bg,
+                          border: `2px solid ${cfg.color}`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 16,
+                          color: cfg.color,
+                          fontWeight: 800,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {cfg.icon}
+                      </div>
+                      {!isLast && (
+                        <div
+                          style={{
+                            width: 2,
+                            flex: 1,
+                            minHeight: 20,
+                            background: 'var(--line)',
+                            marginTop: 4,
+                          }}
+                        />
+                      )}
+                    </div>
+                    {/* Event card */}
+                    <div className="card" style={{ padding: 16, marginBottom: isLast ? 0 : 12 }}>
+                      <div className="row" style={{ marginBottom: 10, alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: cfg.color }}>
+                            {cfg.label}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                            {db.thaiDate(e.date)}
+                          </div>
+                        </div>
+                        {v && (
+                          <span
+                            className="mono"
+                            style={{
+                              fontWeight: 600,
+                              color: 'var(--primary)',
+                              marginLeft: 'auto',
+                              fontSize: 13,
+                            }}
+                          >
+                            {v.plate}
+                          </span>
+                        )}
+                      </div>
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1fr 1fr',
+                          gap: 10,
+                          fontSize: 13,
+                          paddingTop: 10,
+                          borderTop: '1px solid var(--line)',
+                        }}
+                      >
+                        <Info
+                          label="เลขไมล์"
+                          value={<span className="mono">{db.fmt(e.odometer)} km</span>}
+                        />
+                        {(e.fromPos || e.toPos) && (
+                          <Info
+                            label="ตำแหน่ง"
+                            value={
+                              <span className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+                                {e.fromPos && (
+                                  <span className="badge gray" style={{ fontSize: 11 }}>
+                                    {e.fromPos.startsWith('spare') ? 'สำรอง' : e.fromPos}
+                                  </span>
+                                )}
+                                {e.fromPos && e.toPos && (
+                                  <span style={{ color: 'var(--text-muted)' }}>→</span>
+                                )}
+                                {e.toPos && (
+                                  <span className="badge blue" style={{ fontSize: 11 }}>
+                                    {e.toPos.startsWith('spare') ? 'สำรอง' : e.toPos}
+                                  </span>
+                                )}
+                              </span>
+                            }
+                          />
+                        )}
+                      </div>
+                      {e.note && (
+                        <div
+                          style={{
+                            marginTop: 10,
+                            padding: '8px 12px',
+                            background: '#fee2e2',
+                            borderRadius: 6,
+                            fontSize: 12.5,
+                            color: '#991b1b',
+                          }}
+                        >
+                          หมายเหตุ: {e.note}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Empty state — no search yet */}
+      {!searched && (
+        <div
+          className="card pad"
+          style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 48 }}
+        >
+          <Icon name="search" size={40} style={{ opacity: 0.2, marginBottom: 12 }} />
+          <div style={{ fontSize: 14 }}>
+            กรอกเลขซีเรียลยางแล้วกด "ค้นหา" เพื่อดูประวัติรายเส้น
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -12,6 +12,7 @@ interface VehicleForm {
   brand: string
   year: string
   type: string
+  customType: string
   status: string
   driverId: string
   odometer: number
@@ -29,6 +30,7 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
     brand: '',
     year: '',
     type: '10ล้อ',
+    customType: '',
     status: 'available',
     driverId: '',
     odometer: 0,
@@ -49,6 +51,7 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
     }
     db.add<Partial<Vehicle>>('vehicles', {
       ...form,
+      type: form.type === 'อื่นๆ' ? (form.customType.trim() || 'อื่นๆ') : form.type,
       status: form.status as Vehicle['status'],
       odometer: +form.odometer || 0,
       nextServiceKm: +form.nextServiceKm || 0,
@@ -130,8 +133,18 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
                 <option>22ล้อ</option>
                 <option>ตู้คอนเทนเนอร์</option>
                 <option>พ่วงข้าง</option>
+                <option value="อื่นๆ">อื่นๆ (กำหนดเอง)</option>
               </select>
             </Field>
+            {form.type === 'อื่นๆ' && (
+              <Field label="ระบุประเภทรถ *">
+                <input
+                  value={form.customType}
+                  onChange={e => set('customType', e.target.value)}
+                  placeholder="เช่น รถพ่วง 18ล้อ, รถบรรทุก 6 ล้อเล็ก"
+                />
+              </Field>
+            )}
             <Field label="สถานะเริ่มต้น">
               <select value={form.status} onChange={e => set('status', e.target.value)}>
                 <option value="available">พร้อมใช้งาน</option>

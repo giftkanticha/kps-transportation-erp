@@ -86,16 +86,6 @@ const MENU: MenuItem[] = [
     ],
   },
   {
-    id: 'master', label: 'ลูกค้า & คู่ค้า', icon: 'client', roles: ['admin', 'manager'],
-    sub: [
-      { id: 'customers', label: 'ลูกค้า' },
-      { id: 'partners', label: 'คู่ค้า / ช่าง' },
-    ],
-  },
-  {
-    id: 'maintenance', label: 'การบำรุงรักษา', icon: 'wrench', roles: ['admin', 'manager'],
-  },
-  {
     id: 'settings', label: 'ตั้งค่า', icon: 'settings', roles: ['admin'],
     sub: [
       { id: 'settings.users', label: 'จัดการผู้ใช้งาน' },
