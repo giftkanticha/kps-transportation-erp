@@ -11,6 +11,7 @@ interface EmployeeForm {
   code: string
   name: string
   position: string
+  customPosition: string
   status: string
   phone: string
   lineId: string
@@ -20,12 +21,17 @@ interface EmployeeForm {
 
 export function EmployeeAdd({ setActive }: EmployeeAddProps) {
   const employees = db.getAll<Employee>('employees')
-  const next = String(employees.length + 1).padStart(3, '0')
+  const maxNum = employees.reduce((max, e) => {
+    const n = parseInt(e.code.replace(/\D/g, ''), 10)
+    return isNaN(n) ? max : Math.max(max, n)
+  }, 0)
+  const autoCode = 'E' + String(maxNum + 1).padStart(3, '0')
 
   const [form, setForm] = useState<EmployeeForm>({
-    code: 'E' + next,
+    code: autoCode,
     name: '',
     position: 'คนขับ',
+    customPosition: '',
     status: 'active',
     phone: '',
     lineId: '',
@@ -43,6 +49,7 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
     }
     db.add<Partial<Employee>>('employees', {
       ...form,
+      position: form.position === 'อื่นๆ' ? (form.customPosition.trim() || 'อื่นๆ') : form.position,
       licenseStatus: form.licenseStatus as Employee['licenseStatus'],
       license: '',
       licenseExpire: '',
@@ -88,11 +95,11 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>ข้อมูลส่วนตัว</h3>
           </div>
           <div className="grid-3" style={{ gap: 14, marginBottom: 14 }}>
-            <Field label="เลขที่ ID *">
+            <Field label="เลขที่ ID">
               <input
                 value={form.code}
-                onChange={e => set('code', e.target.value)}
-                placeholder="เช่น E003"
+                readOnly
+                style={{ background: 'var(--bg-2)', color: 'var(--text-muted)', cursor: 'default' }}
               />
             </Field>
             <Field label="ชื่อ-สกุล *">
@@ -109,8 +116,18 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
                 <option>ผู้จัดการขนส่ง</option>
                 <option>ผู้ดูแลระบบ</option>
                 <option>เจ้าหน้าที่บัญชี</option>
+                <option value="อื่นๆ">อื่นๆ (กำหนดเอง)</option>
               </select>
             </Field>
+            {form.position === 'อื่นๆ' && (
+              <Field label="ระบุตำแหน่ง *">
+                <input
+                  value={form.customPosition}
+                  onChange={e => set('customPosition', e.target.value)}
+                  placeholder="เช่น เจ้าหน้าที่ฝ่ายขาย"
+                />
+              </Field>
+            )}
           </div>
           <Field label="สถานะ *">
             <select
@@ -160,7 +177,7 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>เอกสารและวันเริ่มงาน</h3>
           </div>
           <div className="grid-2" style={{ gap: 14 }}>
-            <Field label="วันเริ่มงาน *">
+            <Field label="วันเริ่มงาน">
               <input
                 type="date"
                 value={form.joined}

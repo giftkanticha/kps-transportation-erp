@@ -146,9 +146,6 @@ export function VehicleDetail({ setActive, subject }: VehicleDetailProps) {
           <button className="btn">
             <Icon name="edit" size={15} /> แก้ไข
           </button>
-          <button className="btn primary">
-            <Icon name="plus" size={15} /> สั่งบำรุงรักษา
-          </button>
         </div>
       </div>
 

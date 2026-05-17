@@ -14,11 +14,6 @@ interface FilterStatus {
   unavailable: boolean
 }
 
-interface FilterType {
-  all: boolean
-  '4ล้อ': boolean
-  '10ล้อ': boolean
-}
 
 interface DocWarning {
   text: string
@@ -86,17 +81,17 @@ function docWarn(v: Vehicle): DocWarning | null {
 export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
   const vehicles = db.getAll<Vehicle>('vehicles')
   const employees = db.getAll<Employee>('employees')
+  const vehicleTypes = useMemo(() => {
+    const types = [...new Set(vehicles.map(v => v.type))].sort()
+    return ['ทั้งหมด', ...types]
+  }, [vehicles])
   const [q, setQ] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>({
     available: true,
     maintenance: true,
     unavailable: true,
   })
-  const [filterType, setFilterType] = useState<FilterType>({
-    all: true,
-    '4ล้อ': false,
-    '10ล้อ': false,
-  })
+  const [filterType, setFilterType] = useState<string>('ทั้งหมด')
 
   const inStatusBucket = (v: Vehicle): boolean => {
     if (v.status === 'available') return filterStatus.available
@@ -105,10 +100,8 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
   }
 
   const inTypeBucket = (v: Vehicle): boolean => {
-    if (filterType.all) return true
-    if (filterType['4ล้อ'] && v.type.includes('4')) return true
-    if (filterType['10ล้อ'] && (v.type.includes('10') || v.type.includes('18'))) return true
-    return false
+    if (filterType === 'ทั้งหมด') return true
+    return v.type === filterType
   }
 
   const filtered = useMemo(() => {
@@ -187,16 +180,18 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
             state={filterStatus as unknown as Record<string, boolean>}
             onChange={s => setFilterStatus(s as unknown as FilterStatus)}
           />
-          <FilterCheckGroup
-            label="ประเภท"
-            options={[
-              { k: 'all', l: 'ทั้งหมด' },
-              { k: '4ล้อ', l: '4ล้อ' },
-              { k: '10ล้อ', l: '10ล้อ' },
-            ]}
-            state={filterType as unknown as Record<string, boolean>}
-            onChange={s => setFilterType(s as unknown as FilterType)}
-          />
+          <div className="row" style={{ gap: 10, alignItems: 'center' }}>
+            <span className="muted" style={{ fontWeight: 600, fontSize: 13 }}>ประเภท:</span>
+            <select
+              value={filterType}
+              onChange={e => setFilterType(e.target.value)}
+              style={{ height: 34, padding: '0 28px 0 10px', fontSize: 13, borderRadius: 7, border: '1px solid var(--line)', background: 'var(--bg)', minWidth: 120 }}
+            >
+              {vehicleTypes.map(t => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>

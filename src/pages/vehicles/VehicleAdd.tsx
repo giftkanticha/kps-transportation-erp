@@ -223,7 +223,7 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
                 onChange={e => set('insurance', e.target.value)}
               />
             </Field>
-            <Field label="วันหมดอายุใบอนุญาตขนส่ง">
+            <Field label="วันหมดอายุพรบ.">
               <input
                 type="date"
                 value={form.dispatchPermit}

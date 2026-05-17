@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import type { Employee } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
@@ -75,8 +75,86 @@ function LicenseLabel({ status, expire }: { status: string; expire: string }) {
   )
 }
 
+interface ActionMenuProps {
+  employee: Employee
+  onClose: () => void
+  onChanged: () => void
+}
+
+function ActionMenu({ employee, onClose, onChanged }: ActionMenuProps) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose()
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [onClose])
+
+  const changeStatus = (status: Employee['status']) => {
+    db.update<Employee>('employees', employee.id, { status })
+    onClose()
+    onChanged()
+  }
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: 'absolute',
+        right: 0,
+        top: '100%',
+        zIndex: 100,
+        background: 'var(--card)',
+        border: '1px solid var(--line)',
+        borderRadius: 8,
+        boxShadow: '0 4px 16px rgba(0,0,0,.15)',
+        minWidth: 160,
+        padding: '4px 0',
+      }}
+    >
+      <button
+        className="btn ghost"
+        style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13 }}
+        onClick={onClose}
+      >
+        <Icon name="edit" size={14} /> แก้ไขข้อมูล
+      </button>
+      {employee.status !== 'active' && (
+        <button
+          className="btn ghost"
+          style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: 'var(--green)' }}
+          onClick={() => changeStatus('active')}
+        >
+          <Icon name="check" size={14} /> เปลี่ยนเป็น ทำงาน
+        </button>
+      )}
+      {employee.status !== 'training' && (
+        <button
+          className="btn ghost"
+          style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: 'var(--amber)' }}
+          onClick={() => changeStatus('training')}
+        >
+          <Icon name="check" size={14} /> เปลี่ยนเป็น อบรม
+        </button>
+      )}
+      {employee.status !== 'leave' && (
+        <button
+          className="btn ghost"
+          style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: 'var(--red)' }}
+          onClick={() => changeStatus('leave')}
+        >
+          <Icon name="close" size={14} /> ลาออก
+        </button>
+      )}
+    </div>
+  )
+}
+
 export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
-  const all = db.getAll<Employee>('employees')
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [tick, setTick] = useState(0)
   const [q, setQ] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>({ active: true, leave: false })
 
@@ -85,7 +163,8 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
     (filterStatus.leave && e.status === 'leave')
 
   const filtered = useMemo(() => {
-    return all.filter(e => {
+    const employees = db.getAll<Employee>('employees')
+    return employees.filter(e => {
       if (
         q &&
         !e.name.toLowerCase().includes(q.toLowerCase()) &&
@@ -96,7 +175,7 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
       if (!inBucket(e)) return false
       return true
     })
-  }, [all, q, filterStatus])
+  }, [tick, q, filterStatus])
 
   return (
     <div>
@@ -210,12 +289,24 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
                     )}
                   </td>
                   <td>
-                    <button
-                      className="btn ghost icon sm"
-                      onClick={ev => ev.stopPropagation()}
-                    >
-                      <Icon name="more" size={16} />
-                    </button>
+                    <div style={{ position: 'relative', display: 'inline-block' }}>
+                      <button
+                        className="btn ghost icon sm"
+                        onClick={ev => {
+                          ev.stopPropagation()
+                          setOpenMenuId(openMenuId === e.id ? null : e.id)
+                        }}
+                      >
+                        <Icon name="more" size={16} />
+                      </button>
+                      {openMenuId === e.id && (
+                        <ActionMenu
+                          employee={e}
+                          onClose={() => setOpenMenuId(null)}
+                          onChanged={() => setTick(t => t + 1)}
+                        />
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
