@@ -5,6 +5,7 @@ import { LoginScreen } from './pages/auth/LoginScreen'
 import { Sidebar } from './components/layout/Sidebar'
 import { Topbar } from './components/layout/Topbar'
 import { Dashboard } from './pages/dashboard/Dashboard'
+import { AlertsTasksPage } from './pages/dashboard/AlertsTasksPage'
 import { VehiclesPage } from './pages/vehicles/VehiclesPage'
 import { VehicleAdd } from './pages/vehicles/VehicleAdd'
 import { VehicleDetail } from './pages/vehicles/VehicleDetail'
@@ -27,6 +28,7 @@ import { SettingsCompany } from './pages/settings/SettingsCompany'
 
 const crumbMap: Record<string, string> = {
   dashboard: 'Dashboard',
+  alerts: 'แจ้งเตือนและแผนงาน',
   vehicles: 'จัดการรถ',
   'vehicles.add': 'เพิ่มรถใหม่',
   'vehicles.detail': 'รายละเอียดรถ',
@@ -94,6 +96,9 @@ export default function App() {
     switch (active) {
       case 'dashboard':
         return <Dashboard user={user} setActive={setActive} />
+
+      case 'alerts':
+        return <AlertsTasksPage />
 
       case 'vehicles':
         return <VehiclesPage setActive={setActive} setSubject={setSubject} />

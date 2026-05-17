@@ -17,6 +17,7 @@ interface SubMenuItem {
 
 const MENU: MenuItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', roles: ['admin', 'manager', 'driver'] },
+  { id: 'alerts', label: 'แจ้งเตือนและแผนงาน', icon: 'alert', roles: ['admin', 'manager'] },
   {
     id: 'vehicles', label: 'จัดการรถ', icon: 'truck', roles: ['admin', 'manager'],
     sub: [
