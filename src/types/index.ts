@@ -327,6 +327,19 @@ export interface ActivityLog {
   type: string
 }
 
+export interface TaskCompletion {
+  id: string
+  alertKind: 'tax' | 'permit' | 'insurance' | 'mileage' | 'repair'
+  vehicleId: string
+  vehiclePlate: string
+  completedAt: string
+  userId: string
+  nextDate: string
+  nextMileage: number | null
+  nextMaintenanceDate: string
+  note: string
+}
+
 // ─── Root app state ──────────────────────────────────────────────────────────
 
 export interface AppState {
@@ -352,4 +365,5 @@ export interface AppState {
   subDrivers: SubDriver[]
   subJobs: SubJob[]
   activity: ActivityLog[]
+  taskCompletions: TaskCompletion[]
 }

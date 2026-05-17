@@ -316,4 +316,5 @@ export const SEED: AppState = {
   subDrivers,
   subJobs,
   activity,
+  taskCompletions: [],
 }

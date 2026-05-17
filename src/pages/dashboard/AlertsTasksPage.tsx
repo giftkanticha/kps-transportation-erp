@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { Icon } from '../../components/ui'
-import type { Vehicle, Maintenance } from '../../types'
+import type { Vehicle, Maintenance, TaskCompletion } from '../../types'
 
 const TODAY = new Date('2026-05-17')
 const SOON_DAYS = 30
@@ -134,10 +134,63 @@ interface NextRoundForm {
 interface CompleteModalProps {
   alert: AlertItem
   onClose: () => void
-  onSaved: () => void
+  onSuccess: () => void
+  onError: (msg: string) => void
 }
 
-function CompleteModal({ alert, onClose, onSaved }: CompleteModalProps) {
+function saveNextRound(alert: AlertItem, form: NextRoundForm): void {
+  const patch: Partial<Vehicle> = {}
+
+  if (alert.kind === 'tax' && form.nextDate) patch.tax = form.nextDate
+  if (alert.kind === 'permit' && form.nextDate) patch.dispatchPermit = form.nextDate
+  if (alert.kind === 'insurance' && form.nextDate) patch.insurance = form.nextDate
+  if (alert.kind === 'mileage' && form.nextMileage) {
+    const n = Number(form.nextMileage)
+    if (isNaN(n) || n <= 0) throw new Error('เลขไมล์ไม่ถูกต้อง')
+    patch.nextServiceKm = n
+  }
+  if (alert.kind === 'repair' && form.nextMaintenance) {
+    patch.nextService = form.nextMaintenance
+  }
+
+  if (form.nextDate && (alert.kind === 'tax' || alert.kind === 'permit' || alert.kind === 'insurance')) {
+    const d = new Date(form.nextDate)
+    if (isNaN(d.getTime())) throw new Error('วันที่ไม่ถูกต้อง')
+    if (d.getTime() < TODAY.getTime()) throw new Error('วันที่รอบถัดไปต้องเป็นอนาคต')
+  }
+
+  const user = db.currentUser()
+  if (!user) throw new Error('ไม่พบข้อมูลผู้ใช้งาน')
+
+  if (alert.kind === 'repair' && alert.maintenanceId) {
+    const existing = db.get<Maintenance>('maintenance', alert.maintenanceId)
+    if (!existing) throw new Error('ไม่พบงานซ่อมในระบบ')
+    db.update<Maintenance>('maintenance', alert.maintenanceId, {
+      status: 'completed',
+      endDate: TODAY.toISOString().slice(0, 10),
+    })
+  }
+
+  if (Object.keys(patch).length > 0) {
+    const existing = db.get<Vehicle>('vehicles', alert.vehicleId)
+    if (!existing) throw new Error('ไม่พบรถในระบบ')
+    db.update<Vehicle>('vehicles', alert.vehicleId, patch)
+  }
+
+  db.add<Partial<TaskCompletion>>('taskCompletions', {
+    alertKind: alert.kind,
+    vehicleId: alert.vehicleId,
+    vehiclePlate: alert.plate,
+    completedAt: new Date().toISOString(),
+    userId: user.id,
+    nextDate: form.nextDate,
+    nextMileage: form.nextMileage ? Number(form.nextMileage) : null,
+    nextMaintenanceDate: form.nextMaintenance,
+    note: '',
+  })
+}
+
+function CompleteModal({ alert, onClose, onSuccess, onError }: CompleteModalProps) {
   const [form, setForm] = useState<NextRoundForm>({
     nextDate: '',
     nextMileage: alert.kind === 'mileage' && alert.targetKm
@@ -145,33 +198,21 @@ function CompleteModal({ alert, onClose, onSaved }: CompleteModalProps) {
       : '',
     nextMaintenance: '',
   })
+  const [saving, setSaving] = useState(false)
 
   const set = (k: keyof NextRoundForm, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const save = () => {
-    const patch: Partial<Vehicle> = {}
-
-    if (alert.kind === 'tax' && form.nextDate) patch.tax = form.nextDate
-    if (alert.kind === 'permit' && form.nextDate) patch.dispatchPermit = form.nextDate
-    if (alert.kind === 'insurance' && form.nextDate) patch.insurance = form.nextDate
-    if (alert.kind === 'mileage' && form.nextMileage) {
-      patch.nextServiceKm = Number(form.nextMileage)
+    if (saving) return
+    setSaving(true)
+    try {
+      saveNextRound(alert, form)
+      onSuccess()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'
+      onError(msg)
+      setSaving(false)
     }
-    if (alert.kind === 'repair') {
-      if (alert.maintenanceId) {
-        db.update<Maintenance>('maintenance', alert.maintenanceId, {
-          status: 'completed',
-          endDate: TODAY.toISOString().slice(0, 10),
-        })
-      }
-      if (form.nextMaintenance) patch.nextService = form.nextMaintenance
-    }
-
-    if (Object.keys(patch).length > 0) {
-      db.update<Vehicle>('vehicles', alert.vehicleId, patch)
-    }
-
-    onSaved()
   }
 
   const labelOfDateField = () => {
@@ -250,11 +291,11 @@ function CompleteModal({ alert, onClose, onSaved }: CompleteModalProps) {
         </div>
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn" onClick={onClose}>
+          <button className="btn" onClick={onClose} disabled={saving}>
             <Icon name="close" size={14} /> ยกเลิก
           </button>
-          <button className="btn primary" onClick={save}>
-            <Icon name="check" size={14} /> บันทึก
+          <button className="btn primary" onClick={save} disabled={saving}>
+            <Icon name="check" size={14} /> {saving ? 'กำลังบันทึก…' : 'บันทึก'}
           </button>
         </div>
       </div>
@@ -357,6 +398,68 @@ function AlertCard({ alert, onComplete }: AlertCardProps) {
   )
 }
 
+interface ToastState {
+  kind: 'success' | 'error'
+  msg: string
+}
+
+interface ToastProps {
+  toast: ToastState
+  onClose: () => void
+}
+
+function Toast({ toast, onClose }: ToastProps) {
+  useEffect(() => {
+    const t = setTimeout(onClose, toast.kind === 'success' ? 2800 : 4000)
+    return () => clearTimeout(t)
+  }, [toast, onClose])
+
+  const isSuccess = toast.kind === 'success'
+  return (
+    <div
+      role="status"
+      style={{
+        position: 'fixed',
+        bottom: 24,
+        right: 24,
+        zIndex: 1100,
+        background: isSuccess ? '#16a34a' : '#A32D2D',
+        color: '#fff',
+        padding: '12px 18px',
+        borderRadius: 10,
+        boxShadow: '0 8px 24px rgba(0,0,0,.25)',
+        fontSize: 14,
+        fontWeight: 500,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        minWidth: 280,
+        maxWidth: 420,
+        animation: 'kpsToastIn .25s ease-out',
+      }}
+    >
+      <span style={{ fontSize: 18 }}>{isSuccess ? '✅' : '⚠️'}</span>
+      <span style={{ flex: 1 }}>{toast.msg}</span>
+      <button
+        onClick={onClose}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: '#fff',
+          cursor: 'pointer',
+          fontSize: 16,
+          padding: 0,
+          opacity: 0.85,
+          lineHeight: 1,
+        }}
+        aria-label="ปิด"
+      >
+        ×
+      </button>
+    </div>
+  )
+}
+
 interface SectionProps {
   kind: AlertKind
   alerts: AlertItem[]
@@ -420,6 +523,7 @@ function Section({ kind, alerts, onComplete }: SectionProps) {
 export function AlertsTasksPage() {
   const [tick, setTick] = useState(0)
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null)
+  const [toast, setToast] = useState<ToastState | null>(null)
 
   const alerts = useMemo(() => {
     const vehicles = db.getAll<Vehicle>('vehicles')
@@ -507,12 +611,18 @@ export function AlertsTasksPage() {
         <CompleteModal
           alert={selectedAlert}
           onClose={() => setSelectedAlert(null)}
-          onSaved={() => {
+          onSuccess={() => {
             setSelectedAlert(null)
             setTick(t => t + 1)
+            setToast({ kind: 'success', msg: 'บันทึกรอบถัดไปเรียบร้อย' })
+          }}
+          onError={msg => {
+            setToast({ kind: 'error', msg: `บันทึกไม่สำเร็จ: ${msg}` })
           }}
         />
       )}
+
+      {toast && <Toast toast={toast} onClose={() => setToast(null)} />}
     </div>
   )
 }
