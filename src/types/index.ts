@@ -1,7 +1,7 @@
 // ─── Shared literal types ───────────────────────────────────────────────────
 
 export type KPSRole = 'admin' | 'manager' | 'driver'
-export type TireStatus = 'in-use' | 'spare' | 'stock' | 'sold'
+export type TireStatus = 'in-use' | 'spare' | 'stock' | 'sold' | 'scrapped'
 export type VehicleStatus = 'available' | 'on-trip' | 'maintenance' | 'warning'
 
 // ─── Domain models ───────────────────────────────────────────────────────────
@@ -151,12 +151,22 @@ export interface TireEvent {
   id: string
   tireId: string
   vehicleId: string
-  eventType: 'install' | 'swap' | 'remove' | 'sell'
+  eventType: 'install' | 'swap' | 'remove' | 'sell' | 'scrap'
   date: string
   odometer: number
   fromPos: string | null
   toPos: string | null
   note: string
+  userId: string
+}
+
+export interface TireScrapSale {
+  id: string
+  tireId: string
+  serial: string
+  buyer: string
+  price: number
+  date: string
   userId: string
 }
 
@@ -313,6 +323,7 @@ export interface AppState {
   maintenance: Maintenance[]
   tires: Tire[]
   tire_events: TireEvent[]
+  tire_scrap_sales: TireScrapSale[]
   fuel: FuelRecord[]
   fuelStock: FuelStock[]
   expenses: Expense[]

@@ -291,6 +291,7 @@ export const SEED: AppState = {
   maintenance,
   tires,
   tire_events,
+  tire_scrap_sales: [],
   fuel,
   fuelStock,
   expenses,

@@ -39,6 +39,7 @@ const MENU: MenuItem[] = [
       { id: 'tires.layout', label: 'ผังยางปัจจุบัน' },
       { id: 'tires.manage', label: 'จัดการและสลับยาง' },
       { id: 'tires.history', label: 'ประวัติยางรายเส้น' },
+      { id: 'tires.scrapped', label: 'ยางหมดสภาพ' },
     ],
   },
   {

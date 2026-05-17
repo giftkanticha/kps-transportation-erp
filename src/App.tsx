@@ -35,6 +35,7 @@ const crumbMap: Record<string, string> = {
   'tires.layout': 'ระบบยาง • ผังยาง',
   'tires.manage': 'ระบบยาง • จัดการ',
   'tires.history': 'ระบบยาง • ประวัติ',
+  'tires.scrapped': 'ระบบยาง • ยางหมดสภาพ',
   fuel: 'ระบบน้ำมัน • ภาพรวม',
   'fuel.logs': 'ระบบน้ำมัน • บันทึก',
   'fuel.report': 'ระบบน้ำมัน • รายงาน',
@@ -112,6 +113,8 @@ export default function App() {
         return <TiresModule tab="manage" setActive={setActive} />
       case 'tires.history':
         return <TiresModule tab="history" setActive={setActive} />
+      case 'tires.scrapped':
+        return <TiresModule tab="scrapped" setActive={setActive} />
 
       case 'fuel':
         return <FuelModule tab="overview" setActive={setActive} />

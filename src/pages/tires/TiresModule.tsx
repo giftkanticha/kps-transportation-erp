@@ -3,7 +3,7 @@ import { db, uid } from '../../lib/db'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import { Info } from '../../components/ui/Info'
-import type { Tire, TireEvent, Vehicle } from '../../types'
+import type { Tire, TireEvent, TireScrapSale, Vehicle } from '../../types'
 
 // ── Thresholds ────────────────────────────────────────────────────
 const KM_WARN_T = 40000
@@ -20,6 +20,16 @@ const LOC_LABEL: Record<string, { label: string; cls: string }> = {
   spare: { label: 'สำรอง', cls: 'gray' },
   stock: { label: 'คลัง', cls: 'violet' },
   sold: { label: 'ขาย', cls: 'red' },
+  scrapped: { label: 'หมดสภาพ', cls: 'red' },
+}
+
+// Compute real accumulated km (in-use tires count live from vehicle odometer)
+const computeAccumKm = (tire: Tire, vehicles: Vehicle[]): number => {
+  if (tire.status === 'in-use' && tire.vehicleId) {
+    const v = vehicles.find((vv) => vv.id === tire.vehicleId)
+    if (v) return tire.accumulatedKm + Math.max(0, v.odometer - tire.installedOdometer)
+  }
+  return tire.accumulatedKm
 }
 
 const wcFrom = (type: string): number => {
@@ -159,12 +169,43 @@ interface TireMapSVGProps {
   selectedPos: string | null
   onSelect?: (pos: string, tire: Tire | undefined) => void
   selectable?: boolean
+  showHoverTip?: boolean
 }
 
-function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable }: TireMapSVGProps) {
+function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverTip }: TireMapSVGProps) {
   const layout = TL[wc] ?? TL[10]
+  const [hoverTip, setHoverTip] = useState<{ pos: string; tire: Tire | undefined; x: number; y: number } | null>(null)
   return (
-    <div>
+    <div style={{ position: 'relative' }}>
+      {showHoverTip && hoverTip && (
+        <div style={{
+          position: 'absolute',
+          left: hoverTip.x + 12,
+          top: hoverTip.y - 10,
+          zIndex: 50,
+          background: 'var(--card)',
+          border: '1px solid var(--line)',
+          borderRadius: 8,
+          padding: '8px 12px',
+          boxShadow: '0 4px 12px rgba(0,0,0,.15)',
+          fontSize: 12.5,
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+          minWidth: 140,
+        }}>
+          {hoverTip.tire ? (
+            <>
+              <div style={{ fontWeight: 700, color: 'var(--primary)', marginBottom: 4 }}>{hoverTip.tire.serial}</div>
+              <div style={{ color: 'var(--text-muted)' }}>{hoverTip.pos}</div>
+              <div style={{ color: kmStatus(hoverTip.tire.accumulatedKm ?? 0).color, fontWeight: 600, marginTop: 4 }}>
+                {db.fmt(hoverTip.tire.accumulatedKm ?? 0)} km สะสม
+              </div>
+            </>
+          ) : (
+            <div style={{ color: 'var(--text-muted)' }}>{hoverTip.pos}: ว่าง</div>
+          )}
+        </div>
+      )}
       <svg
         width={300}
         height={layout.h}
@@ -234,6 +275,11 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable }: TireMapS
               key={p.pos}
               onClick={() => selectable && onSelect && onSelect(p.pos, t)}
               style={{ cursor: selectable ? 'pointer' : 'default' }}
+              onMouseEnter={showHoverTip ? (e) => {
+                const rect = (e.currentTarget.closest('svg')!.parentElement as HTMLElement).getBoundingClientRect()
+                setHoverTip({ pos: p.pos, tire: t, x: e.clientX - rect.left, y: e.clientY - rect.top })
+              } : undefined}
+              onMouseLeave={showHoverTip ? () => setHoverTip(null) : undefined}
             >
               <circle
                 cx={p.cx}
@@ -272,13 +318,34 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable }: TireMapS
 }
 
 // ── Tab 1: All Tires ─────────────────────────────────────────────
-function TireActionMenu({ tire: _tire }: { tire: Tire }) {
+
+function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void }) {
   const [open, setOpen] = useState(false)
+  const vehicles = db.getAll<Vehicle>('vehicles')
+
+  const markScrapped = () => {
+    const km = computeAccumKm(tire, vehicles)
+    db.update<Tire>('tires', tire.id, {
+      status: 'scrapped',
+      vehicleId: null,
+      position: null,
+      accumulatedKm: km,
+    })
+    db.add<TireEvent>('tire_events', {
+      id: uid('te'), tireId: tire.id, vehicleId: tire.vehicleId ?? '',
+      eventType: 'scrap', date: new Date().toISOString().slice(0, 10),
+      odometer: 0, fromPos: tire.position, toPos: null,
+      note: 'หมดสภาพ', userId: 'e10',
+    })
+    setOpen(false)
+    onRefresh()
+  }
+
   const actions = [
-    { icon: 'dashboard', label: 'ดูประวัติ' },
-    { icon: 'arrow-right', label: 'สลับยาง' },
-    { icon: 'edit', label: 'แก้ไข' },
-    { icon: 'trash', label: 'ลบ', danger: true },
+    { icon: 'dashboard', label: 'ดูประวัติ', action: () => setOpen(false) },
+    { icon: 'arrow-right', label: 'สลับยาง', action: () => setOpen(false) },
+    { icon: 'edit', label: 'แก้ไข', action: () => setOpen(false) },
+    { icon: 'trash', label: 'หมดสภาพ', danger: true, action: markScrapped },
   ]
   return (
     <div style={{ position: 'relative' }}>
@@ -306,7 +373,7 @@ function TireActionMenu({ tire: _tire }: { tire: Tire }) {
               <button
                 key={a.label}
                 className="btn ghost"
-                onClick={() => setOpen(false)}
+                onClick={a.action}
                 style={{
                   width: '100%',
                   justifyContent: 'flex-start',
@@ -326,7 +393,8 @@ function TireActionMenu({ tire: _tire }: { tire: Tire }) {
 }
 
 function TiresAll() {
-  const allTires = db.getAll<Tire>('tires')
+  const [tick, setTick] = useState(0)
+  const allTires = useMemo(() => { void tick; return db.getAll<Tire>('tires') }, [tick])
   const events = db.getAll<TireEvent>('tire_events')
   const vehicles = db.getAll<Vehicle>('vehicles')
   const brands = [...new Set(allTires.map((t) => t.brand))]
@@ -630,7 +698,7 @@ function TiresAll() {
                       )}
                     </td>
                     <td>
-                      <TireActionMenu tire={t} />
+                      <TireActionMenu tire={t} onRefresh={() => setTick(n => n + 1)} />
                     </td>
                   </tr>
                 )
@@ -660,6 +728,7 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState({
     serial: nextSerial,
     brand: 'Bridgestone',
+    customBrand: '',
     model: 'T001',
     size: '11.00R20',
     status: 'in-use',
@@ -688,6 +757,7 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
     const finalPosition = form.status === 'in-use' ? (form.position || null) : null
     const newTire = db.add<Tire>('tires', {
       ...form,
+      brand: form.brand === 'อื่นๆ' ? (form.customBrand.trim() || 'อื่นๆ') : form.brand,
       id: uid('t'),
       installedOdometer: +(form.installedOdometer) || 0,
       accumulatedKm: 0,
@@ -751,13 +821,24 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
                 <option>Dunlop</option>
                 <option>Yokohama</option>
                 <option>Continental</option>
+                <option value="อื่นๆ">อื่นๆ (พิมพ์เอง)</option>
               </select>
             </Field>
-            <Field label="รุ่น *">
+            {form.brand === 'อื่นๆ' && (
+              <Field label="ระบุยี่ห้อ *">
+                <input
+                  value={form.customBrand}
+                  onChange={(e) => set('customBrand', e.target.value)}
+                  placeholder="เช่น Triangle, Double Coin"
+                />
+              </Field>
+            )}
+            <Field label="รุ่น">
               <input value={form.model} onChange={(e) => set('model', e.target.value)} />
             </Field>
-            <Field label="ขนาด *">
+            <Field label="ขนาด">
               <select value={form.size} onChange={(e) => set('size', e.target.value)}>
+                <option value="">-- ไม่ระบุ --</option>
                 {[
                   '11.00R20',
                   '11R22.5',
@@ -944,6 +1025,7 @@ function TiresLayout() {
               selectedPos={popup?.pos ?? null}
               onSelect={(pos, t) => setPopup({ pos, tire: t })}
               selectable={true}
+              showHoverTip={true}
             />
 
             {/* Spare tires */}
@@ -1128,6 +1210,81 @@ function TiresLayout() {
   )
 }
 
+// ── Move to Stock Panel ───────────────────────────────────────────
+function MoveToStockPanel() {
+  const vehicles = db.getAll<Vehicle>('vehicles')
+  const [vehicleId, setVehicleId] = useState('')
+  const [pos, setPos] = useState('')
+  const [done, setDone] = useState(false)
+
+  const vTires = vehicleId ? db.getAll<Tire>('tires').filter((t) => t.vehicleId === vehicleId && t.status === 'in-use') : []
+  const wc = wcFrom(db.get<Vehicle>('vehicles', vehicleId)?.type ?? '')
+  const layout = TL[wc] ?? TL[10]
+  const allPos = layout.pos.map((p) => p.pos)
+  const tireAtPos = vTires.find((t) => t.position === pos)
+
+  const doMove = () => {
+    if (!tireAtPos) return
+    const allVehicles = db.getAll<Vehicle>('vehicles')
+    const km = computeAccumKm(tireAtPos, allVehicles)
+    db.update<Tire>('tires', tireAtPos.id, {
+      status: 'stock', vehicleId: null, position: null, accumulatedKm: km,
+    })
+    db.add<TireEvent>('tire_events', {
+      id: uid('te'), tireId: tireAtPos.id, vehicleId,
+      eventType: 'remove', date: new Date().toISOString().slice(0, 10),
+      odometer: db.get<Vehicle>('vehicles', vehicleId)?.odometer ?? 0,
+      fromPos: pos, toPos: null, note: 'ย้ายเข้าคลัง', userId: 'e10',
+    })
+    setDone(true)
+    setPos('')
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 18 }}>
+      <div className="head">
+        <h3>ย้ายยางเข้าคลังสินค้า</h3>
+      </div>
+      <div style={{ padding: 20 }}>
+        {done && (
+          <div style={{ padding: '10px 16px', background: 'var(--bg-sunk)', borderRadius: 8, marginBottom: 16, color: 'var(--green)', fontWeight: 600, fontSize: 13.5 }}>
+            ✓ ย้ายยางเข้าคลังเรียบร้อย
+            <button className="btn ghost sm" style={{ marginLeft: 12 }} onClick={() => { setDone(false); setVehicleId(''); setPos('') }}>ทำรายการใหม่</button>
+          </div>
+        )}
+        {!done && (
+          <div className="row" style={{ gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <Field label="เลือกรถ">
+              <select value={vehicleId} onChange={(e) => { setVehicleId(e.target.value); setPos('') }} style={{ height: 38, minWidth: 200 }}>
+                <option value="">-- เลือกรถ --</option>
+                {vehicles.map((v) => <option key={v.id} value={v.id}>{v.plate} ({v.type})</option>)}
+              </select>
+            </Field>
+            <Field label="ตำแหน่งยาง">
+              <select value={pos} onChange={(e) => setPos(e.target.value)} style={{ height: 38, minWidth: 160 }} disabled={!vehicleId}>
+                <option value="">-- เลือกตำแหน่ง --</option>
+                {allPos.map((p) => {
+                  const t = vTires.find((tt) => tt.position === p)
+                  return <option key={p} value={p}>{p} {t ? `— ${t.serial}` : '(ว่าง)'}</option>
+                })}
+              </select>
+            </Field>
+            {tireAtPos && (
+              <div style={{ padding: '8px 14px', background: 'var(--primary-50)', borderRadius: 8, fontSize: 13 }}>
+                <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>{tireAtPos.serial}</span>
+                <span className="muted" style={{ marginLeft: 8 }}>{tireAtPos.brand}</span>
+              </div>
+            )}
+            <button className="btn primary" disabled={!tireAtPos} onClick={doMove}>
+              ย้ายเข้าคลัง
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Tab 3: Manage & Swap ──────────────────────────────────────────
 function TiresManageFull() {
   const vehicles = db.getAll<Vehicle>('vehicles')
@@ -1154,8 +1311,16 @@ function TiresManageFull() {
     if (!sw.vehicleId || !sw.fromPos || !sw.toPos) return
     const odometer = veh?.odometer ?? 0
     const userId = 'e10'
-    if (fromTire) db.update<Tire>('tires', fromTire.id, { position: sw.toPos })
-    if (toTire) db.update<Tire>('tires', toTire.id, { position: sw.fromPos })
+    const allVehicles = db.getAll<Vehicle>('vehicles')
+    // Snapshot accumulated km for both tires before swapping
+    if (fromTire) {
+      const km = computeAccumKm(fromTire, allVehicles)
+      db.update<Tire>('tires', fromTire.id, { position: sw.toPos, accumulatedKm: km, installedOdometer: odometer })
+    }
+    if (toTire) {
+      const km = computeAccumKm(toTire, allVehicles)
+      db.update<Tire>('tires', toTire.id, { position: sw.fromPos, accumulatedKm: km, installedOdometer: odometer })
+    }
     db.add<TireEvent>('tire_events', {
       id: uid('te'),
       tireId: fromTire?.id ?? '',
@@ -1614,6 +1779,9 @@ function TiresManageFull() {
         )}
       </div>
 
+      {/* Move to stock */}
+      <MoveToStockPanel />
+
       {/* Swap history */}
       <div className="card" style={{ marginTop: 18 }}>
         <div className="head">
@@ -1959,6 +2127,158 @@ function TiresHistoryFull() {
   )
 }
 
+// ── Tab 5: Scrapped Tires ─────────────────────────────────────────
+function SellScrapModal({ tire, onClose, onSaved }: { tire: Tire; onClose: () => void; onSaved: () => void }) {
+  const [buyer, setBuyer] = useState('')
+  const [price, setPrice] = useState('')
+
+  const save = () => {
+    if (!buyer || !price) { alert('กรุณากรอกผู้ซื้อและราคา'); return }
+    db.add<TireScrapSale>('tire_scrap_sales', {
+      id: uid('tss'), tireId: tire.id, serial: tire.serial,
+      buyer: buyer.trim(), price: +price || 0,
+      date: new Date().toISOString().slice(0, 10), userId: 'e10',
+    })
+    db.update<Tire>('tires', tire.id, { status: 'sold' })
+    onSaved()
+    onClose()
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+      <div className="card" style={{ width: 420, maxWidth: '95vw' }}>
+        <div className="row" style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>บันทึกขายซาก</h3>
+          <button className="btn ghost icon sm" onClick={onClose}><Icon name="close" size={16} /></button>
+        </div>
+        <div style={{ padding: 22 }} className="col">
+          <div style={{ padding: '10px 14px', background: 'var(--bg-sunk)', borderRadius: 8, marginBottom: 14 }}>
+            <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)', marginRight: 10 }}>{tire.serial}</span>
+            <span className="muted">{tire.brand} {tire.model}</span>
+          </div>
+          <Field label="ผู้ซื้อ *">
+            <input value={buyer} onChange={(e) => setBuyer(e.target.value)} placeholder="ชื่อผู้ซื้อ / ร้าน" />
+          </Field>
+          <Field label="ราคาขาย (บาท) *">
+            <input type="number" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0" style={{ marginTop: 10 }} />
+          </Field>
+        </div>
+        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn" onClick={onClose}>ยกเลิก</button>
+          <button className="btn primary" onClick={save}>บันทึก</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function TiresScrapped() {
+  const [tick, setTick] = useState(0)
+  const scrapped = useMemo(() => { void tick; return db.getAll<Tire>('tires').filter((t) => t.status === 'scrapped') }, [tick])
+  const sales = useMemo(() => { void tick; return db.getAll<TireScrapSale>('tire_scrap_sales') }, [tick])
+  const [sellTire, setSellTire] = useState<Tire | null>(null)
+
+  const saleByTireId = useMemo(() => {
+    const m: Record<string, TireScrapSale> = {}
+    sales.forEach((s) => { m[s.tireId] = s })
+    return m
+  }, [sales])
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: 18 }}>
+        <div className="head">
+          <h3>รายการยางหมดสภาพ ({scrapped.length} เส้น)</h3>
+        </div>
+        <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>เลขซีเรียล</th>
+                <th>ยี่ห้อ</th>
+                <th>ขนาด</th>
+                <th className="right">Km สะสม</th>
+                <th>สถานะขายซาก</th>
+                <th>ดำเนิน</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scrapped.length === 0 && (
+                <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ยังไม่มียางหมดสภาพ</td></tr>
+              )}
+              {scrapped.map((t) => {
+                const sale = saleByTireId[t.id]
+                return (
+                  <tr key={t.id}>
+                    <td><span className="mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>{t.serial}</span></td>
+                    <td>{t.brand}</td>
+                    <td className="mono muted">{t.size || '—'}</td>
+                    <td className="num right mono">{db.fmt(t.accumulatedKm ?? 0)}</td>
+                    <td>
+                      {sale ? (
+                        <span className="badge green">ขายซากแล้ว</span>
+                      ) : (
+                        <span className="badge gray">ยังไม่ขาย</span>
+                      )}
+                    </td>
+                    <td>
+                      {!sale && (
+                        <button className="btn sm primary" onClick={() => setSellTire(t)}>
+                          บันทึกขายซาก
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Scrap sale history */}
+      <div className="card">
+        <div className="head">
+          <h3>ประวัติขายซาก ({sales.length} รายการ)</h3>
+        </div>
+        <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>วันที่</th>
+                <th>เลขซีเรียล</th>
+                <th>ผู้ซื้อ</th>
+                <th className="right">ราคา</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sales.length === 0 && (
+                <tr><td colSpan={4} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ยังไม่มีประวัติขายซาก</td></tr>
+              )}
+              {sales.map((s) => (
+                <tr key={s.id}>
+                  <td className="num muted">{db.thaiDate(s.date)}</td>
+                  <td><span className="mono" style={{ fontWeight: 600 }}>{s.serial}</span></td>
+                  <td>{s.buyer}</td>
+                  <td className="num right mono">{db.thb(s.price)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {sellTire && (
+        <SellScrapModal
+          tire={sellTire}
+          onClose={() => setSellTire(null)}
+          onSaved={() => setTick((n) => n + 1)}
+        />
+      )}
+    </div>
+  )
+}
+
 // ── Module Router ─────────────────────────────────────────────────
 export function TiresModule({ tab, setActive }: { tab: string; setActive: (id: string) => void }) {
   const cur =
@@ -1968,7 +2288,9 @@ export function TiresModule({ tab, setActive }: { tab: string; setActive: (id: s
         ? 'manage'
         : tab === 'history'
           ? 'history'
-          : 'all'
+          : tab === 'scrapped'
+            ? 'scrapped'
+            : 'all'
   const [showAdd, setShowAdd] = useState(false)
 
   return (
@@ -1992,6 +2314,7 @@ export function TiresModule({ tab, setActive }: { tab: string; setActive: (id: s
             ['layout', 'layout', 'ผังยางปัจจุบัน'],
             ['manage', 'manage', 'จัดการและสลับยาง'],
             ['history', 'history', 'ประวัติยางรายเส้น'],
+            ['scrapped', 'scrapped', 'ยางหมดสภาพ'],
           ] as [string, string, string][]
         ).map(([id, route, label]) => (
           <button
@@ -2007,6 +2330,7 @@ export function TiresModule({ tab, setActive }: { tab: string; setActive: (id: s
       {cur === 'layout' && <TiresLayout />}
       {cur === 'manage' && <TiresManageFull />}
       {cur === 'history' && <TiresHistoryFull />}
+      {cur === 'scrapped' && <TiresScrapped />}
       {showAdd && <AddTireModal onClose={() => setShowAdd(false)} />}
     </div>
   )
