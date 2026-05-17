@@ -232,6 +232,17 @@ export interface ExpenseLine {
   unitPrice: number
   amount: number
   note: string
+  stockItemId?: string
+}
+
+export interface StockReceipt {
+  id: string
+  date: string
+  partnerId: string
+  stockItemId: string
+  qty: number
+  unitPrice: number
+  total: number
 }
 
 export interface StockItem {
@@ -263,8 +274,10 @@ export interface Partner {
   type: string
   contact: string
   phone: string
+  address: string
   bank: string
   account: string
+  accountName: string
   taxId: string
   balance: number
   status: string
@@ -332,6 +345,7 @@ export interface AppState {
   expenses: Expense[]
   expenseHeaders: ExpenseHeader[]
   expenseLines: ExpenseLine[]
+  stockReceipts: StockReceipt[]
   stock: StockItem[]
   fixedCosts: FixedCost[]
   partners: Partner[]

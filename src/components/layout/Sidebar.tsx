@@ -75,7 +75,7 @@ const MENU: MenuItem[] = [
       { id: 'expenses.finance', label: 'สถานะการเงิน' },
       { id: 'expenses.stock', label: 'สต๊อคคลัง KPS' },
       { id: 'expenses.report', label: 'รายงานสรุป' },
-      { id: 'expenses.vendors', label: 'ทะเบียนช่าง/ผู้ขาย' },
+      { id: 'expenses.vendors', label: 'ทะเบียนร้านค้า/ช่าง' },
     ],
   },
   {

@@ -253,10 +253,10 @@ const fixedCosts: FixedCost[] = [
 ]
 
 const partners: Partner[] = [
-  { id: 'pa1', code: 'VND-001', name: 'ศูนย์ซ่อม ABC',  type: 'ช่างภายนอก',   contact: 'K. Sirichai', phone: '02-123-4567', bank: 'ธนาคารกสิกรไทย',    account: '123-4-56789-0', taxId: '1234567890123', balance: 13500, status: 'active' },
-  { id: 'pa2', code: 'VND-002', name: 'ร้านอะไหล่ XYZ', type: 'ร้านอะไหล่',   contact: 'K. Manat',    phone: '02-987-6543', bank: 'ธนาคารไทยพาณิชย์', account: '987-6-54321-0', taxId: '9876543210123', balance: 45000, status: 'active' },
-  { id: 'pa3', code: 'VND-003', name: 'ปั๊มน้ำมัน PTT', type: 'ร้านค้าทั่วไป', contact: '—',           phone: '02-456-7890', bank: '—',                 account: '—',             taxId: '—',             balance: 0,     status: 'active' },
-  { id: 'pa4', code: 'VND-004', name: 'คลังอะไหล่ KPS', type: 'คลัง KPS',      contact: '—',           phone: '—',           bank: '—',                 account: '—',             taxId: '—',             balance: 0,     status: 'active' },
+  { id: 'pa1', code: 'VND-001', name: 'ศูนย์ซ่อม ABC',  type: 'ช่างภายนอก',   contact: 'K. Sirichai', phone: '02-123-4567', address: '88 ถ.รามคำแหง แขวงหัวหมาก เขตบางกะปิ กรุงเทพฯ 10240', bank: 'ธนาคารกสิกรไทย',    account: '123-4-56789-0', accountName: 'บริษัท เอบีซีออโต้ จำกัด',   taxId: '1234567890123', balance: 13500, status: 'active' },
+  { id: 'pa2', code: 'VND-002', name: 'ร้านอะไหล่ XYZ', type: 'ร้านอะไหล่',   contact: 'K. Manat',    phone: '02-987-6543', address: '199 ถ.สุขุมวิท แขวงพระโขนง เขตคลองเตย กรุงเทพฯ 10110', bank: 'ธนาคารไทยพาณิชย์', account: '987-6-54321-0', accountName: 'บริษัท เอ็กซ์วายแซด พาร์ทส์ จำกัด', taxId: '9876543210123', balance: 45000, status: 'active' },
+  { id: 'pa3', code: 'VND-003', name: 'ปั๊มน้ำมัน PTT', type: 'ร้านค้าทั่วไป', contact: '—',           phone: '02-456-7890', address: 'สาขาบางนา-ตราด กม.7',                                bank: '—',                 account: '—',             accountName: '—',                              taxId: '—',             balance: 0,     status: 'active' },
+  { id: 'pa4', code: 'VND-004', name: 'คลังอะไหล่ KPS', type: 'คลัง KPS',      contact: '—',           phone: '—',           address: 'ภายในบริษัท',                                       bank: '—',                 account: '—',             accountName: '—',                              taxId: '—',             balance: 0,     status: 'active' },
 ]
 
 const subDrivers: SubDriver[] = [
@@ -297,6 +297,7 @@ export const SEED: AppState = {
   expenses,
   expenseHeaders,
   expenseLines,
+  stockReceipts: [],
   stock,
   fixedCosts,
   partners,
