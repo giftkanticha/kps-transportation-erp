@@ -1,0 +1,327 @@
+// ─── Shared literal types ───────────────────────────────────────────────────
+
+export type KPSRole = 'admin' | 'manager' | 'driver'
+export type TireStatus = 'in-use' | 'spare' | 'stock' | 'sold'
+export type VehicleStatus = 'available' | 'on-trip' | 'maintenance' | 'warning'
+
+// ─── Domain models ───────────────────────────────────────────────────────────
+
+export interface User {
+  id: string
+  email: string
+  name: string
+  role: KPSRole
+  avatar: string
+  phone: string
+  title: string
+}
+
+export interface Employee {
+  id: string
+  code: string
+  name: string
+  position: string
+  license: string
+  licenseStatus: 'ok' | 'warning' | 'expired'
+  licenseExpire: string
+  lineId: string
+  phone: string
+  idCard: string
+  accountBank: string
+  accountNo: string
+  joined: string
+  salary: number
+  vehicleId: string | null
+  status: string
+}
+
+export interface Vehicle {
+  id: string
+  plate: string
+  type: string
+  brand: string
+  year: number
+  status: VehicleStatus
+  driverId: string | null
+  odometer: number
+  nextServiceKm: number
+  fuel: number
+  lastService: string
+  nextService: string
+  purchaseDate: string
+  tax: string
+  insurance: string
+  dispatchPermit: string
+}
+
+export interface Customer {
+  id: string
+  code: string
+  name: string
+  contact: string
+  phone: string
+  credit: number
+  totalJobs: number
+  openInvoice: number
+  status: string
+  industry: string
+  since: string
+  address: string
+}
+
+export interface Subcontractor {
+  id: string
+  code: string
+  name: string
+  contact: string
+  phone: string
+  vehicles: number
+  rating: number
+  openJobs: number
+  totalPaid: number
+  status: string
+}
+
+export interface DispatchLeg {
+  origin: string
+  destination: string
+  cargo: string
+  cargoType: string
+  priceMode: 'per_ton' | 'per_kg' | 'lump'
+  weight: number
+  price: number
+  amount: number
+}
+
+export interface Dispatch {
+  id: string
+  code: string
+  customerId: string
+  driverId: string | null
+  vehicleId: string | null
+  subcontractorId: string | null
+  date: string
+  depart: string
+  eta: string
+  status: 'scheduled' | 'in-progress' | 'completed' | 'cancelled'
+  progress: number
+  startOdometer: number | null
+  endOdometer: number | null
+  distance: number | null
+  liters: number | null
+  kmPerL: number | null
+  perDiem: number | null
+  notes: string
+  legs: DispatchLeg[]
+  totalAmount: number
+  revenue: number
+  cost: number
+}
+
+export interface Maintenance {
+  id: string
+  code: string
+  vehicleId: string
+  type: string
+  workshop: string
+  partnerId: string | null
+  status: string
+  cost: number
+  startDate: string
+  endDate: string | null
+  odometer: number
+  items: string[]
+}
+
+export interface Tire {
+  id: string
+  serial: string
+  brand: string
+  model: string
+  size: string
+  vehicleId: string | null
+  position: string | null
+  installedDate: string
+  installedOdometer: number
+  accumulatedKm: number
+  status: TireStatus
+}
+
+export interface TireEvent {
+  id: string
+  tireId: string
+  vehicleId: string
+  eventType: 'install' | 'swap' | 'remove' | 'sell'
+  date: string
+  odometer: number
+  fromPos: string | null
+  toPos: string | null
+  note: string
+  userId: string
+}
+
+export interface FuelRecord {
+  id: string
+  code: string
+  vehicleId: string
+  driverId: string
+  station: string
+  liters: number
+  pricePerL: number
+  total: number
+  odometer: number
+  date: string
+  type: string
+}
+
+export interface FuelStock {
+  id: string
+  date: string
+  supplier: string
+  liters: number
+  pricePerL: number
+  invoiceNo: string
+  total: number
+}
+
+export interface Expense {
+  id: string
+  code: string
+  vehicleId: string | null
+  category: string
+  note: string
+  amount: number
+  paidBy: string
+  date: string
+  driverId: string | null
+  status: string
+  partnerId?: string
+}
+
+export interface ExpenseHeader {
+  id: string
+  code: string
+  date: string
+  vehicleId: string
+  partnerId: string
+  odometer: number
+  paid: boolean
+  dueDate: string
+  total: number
+  lineCount: number
+  note: string
+}
+
+export interface ExpenseLine {
+  id: string
+  headerId: string
+  invoiceNo: string
+  item: string
+  category: string
+  qty: number
+  unitPrice: number
+  amount: number
+  note: string
+}
+
+export interface StockItem {
+  id: string
+  code: string
+  name: string
+  category: string
+  in: number
+  out: number
+  qty: number
+  unit: string
+  unitCost: number
+  reorderAt: number
+}
+
+export interface FixedCost {
+  id: string
+  name: string
+  category: string
+  monthly: number
+  paid: boolean
+  vehicleId: string | null
+}
+
+export interface Partner {
+  id: string
+  code: string
+  name: string
+  type: string
+  contact: string
+  phone: string
+  bank: string
+  account: string
+  taxId: string
+  balance: number
+  status: string
+}
+
+export interface SubDriver {
+  id: string
+  code: string
+  name: string
+  plate: string
+  phone: string
+  idCard: string
+  license: string
+  licenseExpire: string
+  licenseStatus: string
+  accountBank: string
+  accountNo: string
+  status: string
+  subId: string
+}
+
+export interface SubJob {
+  id: string
+  code: string
+  date: string
+  subId: string
+  plate: string
+  driverName: string
+  destination: string
+  origin: string
+  weight: number
+  mode: string
+  price: number
+  total: number
+  status: string
+  bank: string
+}
+
+export interface ActivityLog {
+  id: string
+  at: string
+  who: string
+  text: string
+  type: string
+}
+
+// ─── Root app state ──────────────────────────────────────────────────────────
+
+export interface AppState {
+  users: User[]
+  employees: Employee[]
+  vehicles: Vehicle[]
+  customers: Customer[]
+  subcontractors: Subcontractor[]
+  dispatch: Dispatch[]
+  maintenance: Maintenance[]
+  tires: Tire[]
+  tire_events: TireEvent[]
+  fuel: FuelRecord[]
+  fuelStock: FuelStock[]
+  expenses: Expense[]
+  expenseHeaders: ExpenseHeader[]
+  expenseLines: ExpenseLine[]
+  stock: StockItem[]
+  fixedCosts: FixedCost[]
+  partners: Partner[]
+  subDrivers: SubDriver[]
+  subJobs: SubJob[]
+  activity: ActivityLog[]
+}
