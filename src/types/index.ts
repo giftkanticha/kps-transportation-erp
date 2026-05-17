@@ -327,6 +327,31 @@ export interface ActivityLog {
   type: string
 }
 
+export interface VehicleChangeField {
+  key: 'status' | 'odometer' | 'fuel' | 'nextService'
+  label: string
+  before: string
+  after: string
+}
+
+export interface EditApprovalRequest {
+  id: string
+  requesterId: string
+  requesterName: string
+  requesterRole: KPSRole
+  vehicleId: string
+  vehiclePlate: string
+  reason: string
+  changes: Partial<Vehicle>
+  changeFields: VehicleChangeField[]
+  requestedAt: string
+  status: 'pending' | 'approved' | 'rejected'
+  reviewerId: string | null
+  reviewerName: string | null
+  reviewedAt: string | null
+  reviewNote: string
+}
+
 export interface TaskCompletion {
   id: string
   alertKind: 'tax' | 'permit' | 'insurance' | 'mileage' | 'repair'
@@ -366,4 +391,5 @@ export interface AppState {
   subJobs: SubJob[]
   activity: ActivityLog[]
   taskCompletions: TaskCompletion[]
+  editApprovals: EditApprovalRequest[]
 }

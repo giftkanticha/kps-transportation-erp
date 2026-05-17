@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { db } from '../../lib/db'
-import type { Vehicle, Employee, Tire, FuelRecord, Maintenance, Dispatch } from '../../types'
+import { can } from '../../lib/permissions'
+import type { Vehicle, Employee, Tire, FuelRecord, Maintenance, Dispatch, User } from '../../types'
 import { Icon, StatusBadge, Info } from '../../components/ui'
 
 interface VehicleDetailProps {
   setActive: (id: string) => void
   subject: unknown
+  user: User
 }
 
 type TabKey = 'overview' | 'tires' | 'fuel' | 'maintenance' | 'trips'
@@ -60,7 +62,7 @@ function TireSummary({ tires }: { tires: Tire[] }) {
   )
 }
 
-export function VehicleDetail({ setActive, subject }: VehicleDetailProps) {
+export function VehicleDetail({ setActive, subject, user }: VehicleDetailProps) {
   const subjectObj = subject as { type?: string; id?: string } | null
   const v = db.get<Vehicle>('vehicles', subjectObj?.id ?? '')
   const [tab, setTab] = useState<TabKey>('overview')
@@ -143,9 +145,15 @@ export function VehicleDetail({ setActive, subject }: VehicleDetailProps) {
           </div>
         </div>
         <div className="actions">
-          <button className="btn">
-            <Icon name="edit" size={15} /> แก้ไข
-          </button>
+          {can.editVehicle(user.role) ? (
+            <button className="btn" onClick={() => setActive('vehicles')}>
+              <Icon name="edit" size={15} /> แก้ไข
+            </button>
+          ) : (
+            <button className="btn" onClick={() => setActive('vehicles')}>
+              <Icon name="bell" size={15} /> ขออนุมัติแก้ไข
+            </button>
+          )}
         </div>
       </div>
 

@@ -98,14 +98,14 @@ export default function App() {
         return <Dashboard user={user} setActive={setActive} />
 
       case 'alerts':
-        return <AlertsTasksPage />
+        return <AlertsTasksPage user={user} />
 
       case 'vehicles':
-        return <VehiclesPage setActive={setActive} setSubject={setSubject} />
+        return <VehiclesPage setActive={setActive} setSubject={setSubject} user={user} />
       case 'vehicles.add':
         return <VehicleAdd setActive={setActive} />
       case 'vehicles.detail':
-        return <VehicleDetail setActive={setActive} subject={subject} />
+        return <VehicleDetail setActive={setActive} subject={subject} user={user} />
 
       case 'employees':
         return <EmployeesPage setActive={setActive} setSubject={setSubject} />

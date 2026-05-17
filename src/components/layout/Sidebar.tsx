@@ -19,7 +19,7 @@ const MENU: MenuItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', roles: ['admin', 'manager', 'driver'] },
   { id: 'alerts', label: 'แจ้งเตือนและแผนงาน', icon: 'alert', roles: ['admin', 'manager'] },
   {
-    id: 'vehicles', label: 'จัดการรถ', icon: 'truck', roles: ['admin', 'manager'],
+    id: 'vehicles', label: 'จัดการรถ', icon: 'truck', roles: ['admin', 'manager', 'driver'],
     sub: [
       { id: 'vehicles', label: 'รายการรถทั้งหมด' },
       { id: 'vehicles.add', label: 'เพิ่มรถใหม่' },

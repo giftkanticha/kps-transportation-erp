@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { Icon } from '../../components/ui'
-import type { Vehicle, Maintenance, TaskCompletion } from '../../types'
+import { can } from '../../lib/permissions'
+import type { Vehicle, Maintenance, TaskCompletion, EditApprovalRequest, User } from '../../types'
 
 const TODAY = new Date('2026-05-17')
 const SOON_DAYS = 30
@@ -520,10 +521,190 @@ function Section({ kind, alerts, onComplete }: SectionProps) {
   )
 }
 
-export function AlertsTasksPage() {
+interface PendingApprovalsSectionProps {
+  user: User
+  requests: EditApprovalRequest[]
+  onReview: (req: EditApprovalRequest, decision: 'approved' | 'rejected') => void
+}
+
+function PendingApprovalsSection({ user, requests, onReview }: PendingApprovalsSectionProps) {
+  if (!can.reviewApprovals(user.role)) return null
+
+  const formatWhen = (iso: string): string => {
+    const d = new Date(iso)
+    const diffMs = Date.now() - d.getTime()
+    const hours = Math.floor(diffMs / (1000 * 60 * 60))
+    if (hours < 1) return 'ไม่กี่นาทีที่แล้ว'
+    if (hours < 24) return `${hours} ชม.ที่แล้ว`
+    return db.thaiDate(iso.slice(0, 10))
+  }
+
+  return (
+    <div style={{ marginBottom: 26 }}>
+      <div className="row" style={{ marginBottom: 12, gap: 10, alignItems: 'center' }}>
+        <Icon name="bell" size={18} style={{ color: 'var(--primary)' }} />
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>รอการอนุมัติ</h3>
+        {requests.length > 0 ? (
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              padding: '2px 8px',
+              borderRadius: 999,
+              background: 'var(--primary-50)',
+              color: 'var(--primary)',
+            }}
+          >
+            {requests.length} คำขอ
+          </span>
+        ) : (
+          <span className="muted" style={{ fontSize: 12 }}>— ไม่มีคำขอที่รอการอนุมัติ —</span>
+        )}
+      </div>
+
+      {requests.length > 0 && (
+        <div className="grid-2" style={{ gap: 14 }}>
+          {requests.map(req => (
+            <div
+              key={req.id}
+              className="card"
+              style={{
+                padding: 16,
+                borderLeft: '4px solid var(--primary)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13.5, lineHeight: 1.5 }}>
+                    <strong>{req.requesterName}</strong>
+                    <span className="muted"> ขอแก้ไข </span>
+                    <span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                      {req.vehiclePlate}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}>
+                    เหตุผล: {req.reason}
+                  </div>
+                </div>
+                <span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                  {formatWhen(req.requestedAt)}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  background: 'var(--bg-sunk)',
+                  borderRadius: 6,
+                  padding: '8px 10px',
+                  fontSize: 12,
+                }}
+              >
+                {req.changeFields.map((f, i) => (
+                  <div key={i} className="row" style={{ gap: 6, alignItems: 'center', marginTop: i > 0 ? 4 : 0 }}>
+                    <span style={{ color: 'var(--text-2)', minWidth: 110 }}>{f.label}:</span>
+                    <span className="mono muted">{f.before}</span>
+                    <Icon name="arrow-right" size={11} style={{ color: 'var(--text-faint)' }} />
+                    <span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{f.after}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+                <button
+                  onClick={() => onReview(req, 'rejected')}
+                  style={{
+                    background: '#A32D2D',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '7px 14px',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Icon name="close" size={13} /> ปฏิเสธ
+                </button>
+                <button
+                  onClick={() => onReview(req, 'approved')}
+                  style={{
+                    background: '#16a34a',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '7px 14px',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontWeight: 500,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Icon name="check" size={13} /> อนุมัติ
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface AlertsTasksPageProps {
+  user: User
+}
+
+export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
   const [tick, setTick] = useState(0)
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
+
+  const pendingApprovals = useMemo(() => {
+    if (!can.reviewApprovals(user.role)) return []
+    return db.getAll<EditApprovalRequest>('editApprovals')
+      .filter(r => r.status === 'pending')
+      .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
+  }, [tick, user.role])
+
+  const reviewRequest = (req: EditApprovalRequest, decision: 'approved' | 'rejected') => {
+    try {
+      const fresh = db.get<EditApprovalRequest>('editApprovals', req.id)
+      if (!fresh) throw new Error('ไม่พบคำขอในระบบ')
+      if (fresh.status !== 'pending') throw new Error('คำขอนี้ถูกพิจารณาแล้ว')
+
+      if (decision === 'approved') {
+        const vehicle = db.get<Vehicle>('vehicles', req.vehicleId)
+        if (!vehicle) throw new Error('ไม่พบรถในระบบ')
+        db.update<Vehicle>('vehicles', req.vehicleId, req.changes)
+      }
+
+      db.update<EditApprovalRequest>('editApprovals', req.id, {
+        status: decision,
+        reviewerId: user.id,
+        reviewerName: user.name,
+        reviewedAt: new Date().toISOString(),
+      })
+
+      setTick(t => t + 1)
+      setToast({
+        kind: 'success',
+        msg: decision === 'approved'
+          ? `อนุมัติคำขอจาก ${req.requesterName} เรียบร้อย`
+          : `ปฏิเสธคำขอจาก ${req.requesterName} แล้ว`,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'ดำเนินการไม่สำเร็จ'
+      setToast({ kind: 'error', msg })
+    }
+  }
 
   const alerts = useMemo(() => {
     const vehicles = db.getAll<Vehicle>('vehicles')
@@ -592,6 +773,8 @@ export function AlertsTasksPage() {
           </div>
         </div>
       </div>
+
+      <PendingApprovalsSection user={user} requests={pendingApprovals} onReview={reviewRequest} />
 
       <Section kind="tax" alerts={grouped.tax} onComplete={setSelectedAlert} />
       <Section kind="permit" alerts={grouped.permit} onComplete={setSelectedAlert} />
