@@ -78,10 +78,11 @@ function LicenseLabel({ status, expire }: { status: string; expire: string }) {
 interface ActionMenuProps {
   employee: Employee
   onClose: () => void
-  onChanged: () => void
+  onEdit: () => void
+  onChangeStatus: () => void
 }
 
-function ActionMenu({ employee, onClose, onChanged }: ActionMenuProps) {
+function ActionMenu({ employee, onClose, onEdit, onChangeStatus }: ActionMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -91,12 +92,6 @@ function ActionMenu({ employee, onClose, onChanged }: ActionMenuProps) {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose])
-
-  const changeStatus = (status: Employee['status']) => {
-    db.update<Employee>('employees', employee.id, { status })
-    onClose()
-    onChanged()
-  }
 
   return (
     <div
@@ -117,43 +112,239 @@ function ActionMenu({ employee, onClose, onChanged }: ActionMenuProps) {
       <button
         className="btn ghost"
         style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13 }}
-        onClick={onClose}
+        onClick={() => {
+          onClose()
+          onEdit()
+        }}
       >
         <Icon name="edit" size={14} /> แก้ไขข้อมูล
       </button>
-      {employee.status !== 'active' && (
-        <button
-          className="btn ghost"
-          style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: 'var(--green)' }}
-          onClick={() => changeStatus('active')}
-        >
-          <Icon name="check" size={14} /> เปลี่ยนเป็น ทำงาน
-        </button>
-      )}
-      {employee.status !== 'training' && (
-        <button
-          className="btn ghost"
-          style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: 'var(--amber)' }}
-          onClick={() => changeStatus('training')}
-        >
-          <Icon name="check" size={14} /> เปลี่ยนเป็น อบรม
-        </button>
-      )}
-      {employee.status !== 'leave' && (
-        <button
-          className="btn ghost"
-          style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: 'var(--red)' }}
-          onClick={() => changeStatus('leave')}
-        >
-          <Icon name="close" size={14} /> ลาออก
-        </button>
-      )}
+      <button
+        className="btn ghost"
+        style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: 'var(--amber)' }}
+        onClick={() => {
+          onClose()
+          onChangeStatus()
+        }}
+      >
+        <Icon name="refresh" size={14} /> เปลี่ยนสถานะ
+      </button>
+      <button
+        className="btn ghost"
+        style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: 'var(--red)' }}
+        onClick={() => {
+          onClose()
+          const confirmed = confirm(`ยืนยันการลาออกของ ${employee.name}?`)
+          if (confirmed) {
+            db.update<Employee>('employees', employee.id, { status: 'leave' })
+          }
+        }}
+      >
+        <Icon name="close" size={14} /> ลาออก
+      </button>
+    </div>
+  )
+}
+
+interface EmployeeEditModalProps {
+  employee: Employee
+  onClose: () => void
+  onChanged: () => void
+}
+
+function EmployeeEditModal({ employee, onClose, onChanged }: EmployeeEditModalProps) {
+  const [form, setForm] = useState({
+    name: employee.name,
+    position: employee.position,
+    phone: employee.phone,
+    lineId: employee.lineId,
+    joined: employee.joined,
+  })
+
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  const save = () => {
+    if (!form.name || !form.phone) {
+      alert('กรุณากรอกชื่อและเบอร์โทร')
+      return
+    }
+    db.update<Employee>('employees', employee.id, {
+      name: form.name,
+      position: form.position,
+      phone: form.phone,
+      lineId: form.lineId,
+      joined: form.joined,
+    })
+    onClose()
+    onChanged()
+  }
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,.4)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+    }}>
+      <div style={{
+        background: 'var(--card)',
+        borderRadius: 12,
+        width: '90%',
+        maxWidth: 500,
+        padding: 24,
+        boxShadow: '0 10px 40px rgba(0,0,0,.2)',
+      }}>
+        <h2 style={{ margin: '0 0 18px 0', fontSize: 18, fontWeight: 600 }}>แก้ไขข้อมูลพนักงาน</h2>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 18 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
+              เลขที่ ID
+            </label>
+            <input
+              value={employee.code}
+              readOnly
+              style={{ width: '100%', background: 'var(--bg-2)', color: 'var(--text-muted)', cursor: 'default' }}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
+              ชื่อ-สกุล *
+            </label>
+            <input
+              value={form.name}
+              onChange={e => set('name', e.target.value)}
+              placeholder="เช่น สมชาย ใจดี"
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
+              ตำแหน่ง
+            </label>
+            <input
+              value={form.position}
+              onChange={e => set('position', e.target.value)}
+              placeholder="เช่น คนขับ"
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
+              เบอร์โทรศัพท์ *
+            </label>
+            <input
+              value={form.phone}
+              onChange={e => set('phone', e.target.value)}
+              placeholder="เช่น 0812345678"
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
+              Line ID
+            </label>
+            <input
+              value={form.lineId}
+              onChange={e => set('lineId', e.target.value)}
+              placeholder="เช่น @somchai"
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
+              วันเริ่มงาน
+            </label>
+            <input
+              type="date"
+              value={form.joined}
+              onChange={e => set('joined', e.target.value)}
+            />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose}>
+            ยกเลิก
+          </button>
+          <button className="btn primary" onClick={save}>
+            บันทึกการแก้ไข
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface StatusChangeDialogProps {
+  employee: Employee
+  onClose: () => void
+  onChanged: () => void
+}
+
+function StatusChangeDialog({ employee, onClose, onChanged }: StatusChangeDialogProps) {
+  const changeStatus = (status: Employee['status']) => {
+    db.update<Employee>('employees', employee.id, { status })
+    onClose()
+    onChanged()
+  }
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,.4)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1000,
+    }}>
+      <div style={{
+        background: 'var(--card)',
+        borderRadius: 12,
+        width: '90%',
+        maxWidth: 400,
+        padding: 24,
+        boxShadow: '0 10px 40px rgba(0,0,0,.2)',
+      }}>
+        <h2 style={{ margin: '0 0 18px 0', fontSize: 18, fontWeight: 600 }}>เปลี่ยนสถานะพนักงาน</h2>
+        <p style={{ margin: '0 0 20px 0', color: 'var(--text-2)', fontSize: 14 }}>
+          {employee.name}
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+          <button
+            className={`btn ${employee.status === 'active' ? 'primary' : ''}`}
+            onClick={() => changeStatus('active')}
+            style={{ justifyContent: 'flex-start', padding: '12px 14px', fontSize: 14 }}
+          >
+            <span style={{ color: 'var(--green)' }}>●</span> ทำงาน
+          </button>
+          <button
+            className={`btn ${employee.status === 'training' ? 'primary' : ''}`}
+            onClick={() => changeStatus('training')}
+            style={{ justifyContent: 'flex-start', padding: '12px 14px', fontSize: 14 }}
+          >
+            <span style={{ color: 'var(--amber)' }}>●</span> อบรม
+          </button>
+          <button
+            className={`btn ${employee.status === 'leave' ? 'primary' : ''}`}
+            onClick={() => changeStatus('leave')}
+            style={{ justifyContent: 'flex-start', padding: '12px 14px', fontSize: 14 }}
+          >
+            <span style={{ color: 'var(--red)' }}>●</span> ลาออก
+          </button>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose}>
+            ปิด
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
 
 export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [statusChangingId, setStatusChangingId] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const [q, setQ] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>({ active: true, leave: false })
@@ -303,7 +494,8 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
                         <ActionMenu
                           employee={e}
                           onClose={() => setOpenMenuId(null)}
-                          onChanged={() => setTick(t => t + 1)}
+                          onEdit={() => setEditingId(e.id)}
+                          onChangeStatus={() => setStatusChangingId(e.id)}
                         />
                       )}
                     </div>
@@ -314,6 +506,28 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
           </table>
         </div>
       </div>
+
+      {editingId && (
+        <EmployeeEditModal
+          employee={filtered.find(e => e.id === editingId)!}
+          onClose={() => setEditingId(null)}
+          onChanged={() => {
+            setEditingId(null)
+            setTick(t => t + 1)
+          }}
+        />
+      )}
+
+      {statusChangingId && (
+        <StatusChangeDialog
+          employee={filtered.find(e => e.id === statusChangingId)!}
+          onClose={() => setStatusChangingId(null)}
+          onChanged={() => {
+            setStatusChangingId(null)
+            setTick(t => t + 1)
+          }}
+        />
+      )}
     </div>
   )
 }
