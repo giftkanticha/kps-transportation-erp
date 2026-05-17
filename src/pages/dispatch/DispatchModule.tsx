@@ -2,6 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react'
 import type { User, Dispatch, DispatchLeg } from '../../types'
 import { db } from '../../lib/db'
 import { Icon, Field, StatusBadge, Info } from '../../components/ui'
+import { DispatchFuelReport } from './DispatchFuelReport'
+import { DispatchMonthlyReport } from './DispatchMonthlyReport'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -99,6 +101,8 @@ function DispatchTabs({ current, onChange }: TabsProps) {
   const items = [
     { id: 'open',    label: 'เปิดงาน',              icon: <SendIcon /> },
     { id: 'close',   label: 'ปิดงาน',               icon: <CheckBoxIcon /> },
+    { id: 'fuel',    label: 'รายงานประจำวัน',        icon: <FuelBadgeIcon /> },
+    { id: 'monthly', label: 'รายงานประจำเดือน',      icon: <DocIcon /> },
     { id: 'report',  label: 'รายงานสรุป',            icon: <DocIcon /> },
     { id: 'history', label: 'ประวัติการวิ่งงาน',     icon: <HistoryIcon /> },
   ]
@@ -264,6 +268,7 @@ function DispatchOpenForm({ setActive }: OpenFormProps) {
   const [form, setForm] = useState({
     code: newJobCode,
     date: today,
+    customerId: '',
     vehicleId: '',
     driverId: '',
     startOdometer: '',
@@ -303,7 +308,7 @@ function DispatchOpenForm({ setActive }: OpenFormProps) {
       vehicleId: form.vehicleId || null,
       driverId: form.driverId || null,
       subcontractorId: null,
-      customerId: '',
+      customerId: form.customerId,
       legs,
       startOdometer: parseFloat(form.startOdometer) || null,
       endOdometer: null,
@@ -326,31 +331,51 @@ function DispatchOpenForm({ setActive }: OpenFormProps) {
 
   const vehicles = db.getAll<{ id: string; plate: string; brand: string; type: string }>('vehicles')
   const employees = db.getAll<{ id: string; name: string; code: string; position: string; status: string }>('employees')
+  const customers = db.getAll<{ id: string; name: string; code: string }>('customers')
   const drivers = employees.filter(e => e.position.includes('ขับ') && e.status === 'active')
+
+  const selectedVehicle = vehicles.find(v => v.id === form.vehicleId)
+  const selectedDriver = drivers.find(e => e.id === form.driverId)
+  const selectedCustomer = customers.find(c => c.id === form.customerId)
+
+  const handlePrint = () => window.print()
 
   return (
     <div>
       {/* Page head */}
-      <div className="row" style={{ alignItems: 'flex-end', marginBottom: 18 }}>
+      <div className="row no-print" style={{ alignItems: 'flex-end', marginBottom: 18 }}>
         <div>
           <h1 className="page-title">เปิดงานขนส่ง</h1>
           <div className="page-sub">รองรับหลายขา (Multi-leg) ในรอบเดียว</div>
         </div>
         <div className="spacer"/>
-        <span className="badge blue" style={{ padding: '5px 14px', fontSize: 12.5 }}>{dateLabel}</span>
+        <span className="badge blue" style={{ padding: '5px 14px', fontSize: 12.5, marginRight: 8 }}>{dateLabel}</span>
+        <button className="btn" onClick={handlePrint} title="พิมพ์ใบปล่อยรถ">
+          <PrintIcon/> พิมพ์ใบปล่อยรถ
+        </button>
       </div>
 
       {/* Card 1: รถและคนขับ */}
-      <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card no-print" style={{ marginBottom: 16 }}>
         <div className="head">
           <span style={{ color: 'var(--primary)' }}><TruckIcon/></span>
           <h3>ข้อมูลรถและคนขับ</h3>
         </div>
         <div style={{ padding: '20px 22px' }}>
-          <div className="grid-3" style={{ gap: 14, marginBottom: 14 }}>
+          <div className="grid-2" style={{ gap: 14, marginBottom: 14 }}>
             <Field label="วันที่ *">
               <input type="date" value={form.date} onChange={e => set('date', e.target.value)}/>
             </Field>
+            <Field label="ลูกค้า *">
+              <select value={form.customerId} onChange={e => set('customerId', e.target.value)}>
+                <option value="">— เลือกลูกค้า —</option>
+                {customers.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.code})</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="grid-3" style={{ gap: 14, marginBottom: 14 }}>
             <Field label="รถ *">
               <select value={form.vehicleId} onChange={e => set('vehicleId', e.target.value)}>
                 <option value="">— เลือกรถ —</option>
@@ -367,20 +392,18 @@ function DispatchOpenForm({ setActive }: OpenFormProps) {
                 ))}
               </select>
             </Field>
-          </div>
-          <div className="grid-2" style={{ gap: 14 }}>
             <Field label={<>เลขไมล์ต้นรอบ (km) <span style={{ verticalAlign: -2, color: 'var(--text-faint)' }}><InfoIcon/></span></> as unknown as string}>
               <input type="number" value={form.startOdometer} onChange={e => set('startOdometer', e.target.value)} placeholder="0"/>
             </Field>
-            <Field label="หมายเหตุรอบงาน">
-              <input value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="ระบุหมายเหตุ (ถ้ามี)"/>
-            </Field>
           </div>
+          <Field label="หมายเหตุรอบงาน">
+            <input value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="ระบุหมายเหตุ (ถ้ามี)"/>
+          </Field>
         </div>
       </div>
 
       {/* Card 2: เส้นทางและสินค้า */}
-      <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card no-print" style={{ marginBottom: 16 }}>
         <div className="head">
           <span style={{ color: 'var(--primary)' }}><RouteIcon/></span>
           <h3>เส้นทางและสินค้า</h3>
@@ -408,7 +431,7 @@ function DispatchOpenForm({ setActive }: OpenFormProps) {
       </div>
 
       {/* Total */}
-      <div className="card pad" style={{ marginBottom: 16, display: 'flex', alignItems: 'center' }}>
+      <div className="card pad no-print" style={{ marginBottom: 16, display: 'flex', alignItems: 'center' }}>
         <div>
           <div className="muted" style={{ fontSize: 12.5 }}>รวมค่าขนส่งทั้งรอบ ({form.legs.length} ขา)</div>
           <div className="mono" style={{ fontSize: 30, fontWeight: 700, color: 'var(--primary)', letterSpacing: '-.02em' }}>
@@ -418,7 +441,7 @@ function DispatchOpenForm({ setActive }: OpenFormProps) {
       </div>
 
       {/* Actions */}
-      <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+      <div className="row no-print" style={{ justifyContent: 'flex-end', gap: 8 }}>
         <button className="btn" onClick={() => setActive('dispatch.history')}>
           <Icon name="close" size={15}/> ยกเลิก
         </button>
@@ -432,6 +455,92 @@ function DispatchOpenForm({ setActive }: OpenFormProps) {
         <button className="btn primary" onClick={() => submit(false)}>
           <Icon name="check" size={15}/> เปิดงาน ({form.legs.length} ขา)
         </button>
+      </div>
+
+      {/* Print-only: ใบปล่อยรถ */}
+      <div className="print-only">
+        <div style={{ textAlign: 'center', marginBottom: 14, paddingBottom: 10, borderBottom: '2px solid #000' }}>
+          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>KPS Transportations</h1>
+          <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>ใบปล่อยรถ (Vehicle Release Slip)</div>
+          <div style={{ fontSize: 12, marginTop: 4 }}>
+            เลขที่: <strong className="mono">{form.code}</strong> · วันที่: {dateLabel}
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14, fontSize: 13 }}>
+          <div>
+            <div style={{ color: '#666', fontSize: 11 }}>ลูกค้า</div>
+            <div style={{ fontWeight: 600 }}>{selectedCustomer?.name || '—'}</div>
+          </div>
+          <div>
+            <div style={{ color: '#666', fontSize: 11 }}>เลขไมล์ต้นรอบ</div>
+            <div className="mono" style={{ fontWeight: 600 }}>{form.startOdometer ? `${db.fmt(parseFloat(form.startOdometer))} km` : '—'}</div>
+          </div>
+          <div>
+            <div style={{ color: '#666', fontSize: 11 }}>ทะเบียนรถ</div>
+            <div className="mono" style={{ fontWeight: 700, fontSize: 15 }}>
+              {selectedVehicle ? `${selectedVehicle.plate} (${selectedVehicle.brand} · ${selectedVehicle.type})` : '—'}
+            </div>
+          </div>
+          <div>
+            <div style={{ color: '#666', fontSize: 11 }}>คนขับ</div>
+            <div style={{ fontWeight: 600 }}>{selectedDriver?.name || '—'} {selectedDriver?.code && `(${selectedDriver.code})`}</div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <h3 style={{ fontSize: 13, margin: '0 0 6px 0' }}>เส้นทางและสินค้า ({form.legs.length} ขา)</h3>
+          <table className="tbl" style={{ width: '100%', fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th style={{ width: 32 }}>ขา</th>
+                <th>ต้นทาง</th>
+                <th>ปลายทาง</th>
+                <th>สินค้า</th>
+                <th>ประเภท</th>
+                <th className="right">น้ำหนัก</th>
+                <th className="right">ราคา</th>
+                <th className="right">จำนวน</th>
+              </tr>
+            </thead>
+            <tbody>
+              {form.legs.map((l, i) => (
+                <tr key={i}>
+                  <td>{i + 1}</td>
+                  <td>{l.origin || '—'}</td>
+                  <td>{l.destination || '—'}</td>
+                  <td>{l.cargo || '—'}</td>
+                  <td>{l.cargoType || '—'}</td>
+                  <td className="num right mono">{l.weight || '—'} {l.priceMode === 'per_kg' ? 'กก.' : l.priceMode === 'per_ton' ? 'ตัน' : ''}</td>
+                  <td className="num right mono">{l.price || '—'}</td>
+                  <td className="num right mono">{legAmounts[i].toFixed(2)}</td>
+                </tr>
+              ))}
+              <tr style={{ background: '#f3f4f6', fontWeight: 700 }}>
+                <td colSpan={7} style={{ textAlign: 'right' }}>รวมค่าขนส่งทั้งรอบ:</td>
+                <td className="num right mono">{total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {form.notes && (
+          <div style={{ marginBottom: 14, fontSize: 12 }}>
+            <div style={{ color: '#666', fontSize: 11 }}>หมายเหตุ</div>
+            <div>{form.notes}</div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 30, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 60 }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 36, fontSize: 12 }}>ผู้ปล่อยรถ</div>
+            <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
+          </div>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 36, fontSize: 12 }}>คนขับ</div>
+            <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -489,9 +598,16 @@ function DispatchCloseForm() {
   const totalAmount = picked ? db.amountOf(picked) : 0
   const costPerKm = distance > 0 ? totalAmount / distance : 0
 
+  const originWeight = picked ? db.legsOf(picked).reduce((s, l) => s + (l.weight || 0), 0) : 0
+  const endWeight = parseFloat(form.endWeight) || 0
+  const weightLoss = endWeight > 0 ? originWeight - endWeight : 0
+  const weightLossPct = originWeight > 0 && endWeight > 0 ? (weightLoss / originWeight) * 100 : 0
+  const weightLossExceeds = weightLossPct > 5
+
   const submit = () => {
     if (!picked) return
     if (!form.endOdometer) { alert('กรุณากรอกเลขไมล์ปลายทาง'); return }
+    if (weightLossExceeds && !confirm(`⚠️ น้ำหนักสูญหายเกิน 5% (${weightLossPct.toFixed(1)}%)\nยืนยันปิดงานหรือไม่?`)) return
     db.update<Dispatch>('dispatch', picked.id, {
       endOdometer: parseFloat(form.endOdometer),
       liters: parseFloat(form.liters) || 0,
@@ -505,14 +621,24 @@ function DispatchCloseForm() {
     setPickedId('')
   }
 
+  const handlePrint = () => window.print()
+
   return (
     <div>
-      <div style={{ marginBottom: 18 }}>
-        <h1 className="page-title">ปิดงานขนส่ง</h1>
-        <div className="page-sub">สรุปรอบงานทั้งหมดเมื่อกลับถึงที่หมาย</div>
+      <div className="row no-print" style={{ alignItems: 'flex-end', marginBottom: 18 }}>
+        <div>
+          <h1 className="page-title">ปิดงานขนส่ง</h1>
+          <div className="page-sub">สรุปรอบงานทั้งหมดเมื่อกลับถึงที่หมาย</div>
+        </div>
+        <div className="spacer"/>
+        {picked && (
+          <button className="btn" onClick={handlePrint}>
+            <PrintIcon/> พิมพ์สรุปงาน
+          </button>
+        )}
       </div>
 
-      <div className="card pad" style={{ marginBottom: 16 }}>
+      <div className="card pad no-print" style={{ marginBottom: 16 }}>
         <Field label="เลือกงานที่ต้องปิด">
           <select value={pickedId} onChange={e => setPickedId(e.target.value)}>
             <option value="">— เลือกงานที่กำลังดำเนินการ (In Progress) —</option>
@@ -528,7 +654,7 @@ function DispatchCloseForm() {
       {picked && (
         <>
           {/* Job summary */}
-          <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card no-print" style={{ marginBottom: 16 }}>
             <div className="head">
               <span style={{ color: 'var(--primary)' }}><TruckIcon/></span>
               <h3>ที่มา (ตอนเปิดงาน)</h3>
@@ -563,7 +689,7 @@ function DispatchCloseForm() {
           </div>
 
           {/* Close form */}
-          <div className="card" style={{ marginBottom: 16 }}>
+          <div className="card no-print" style={{ marginBottom: 16 }}>
             <div className="head"><h3>ข้อมูลปิดงาน</h3></div>
             <div style={{ padding: 22, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
               <div>
@@ -571,8 +697,8 @@ function DispatchCloseForm() {
                   <Field label="เลขไมล์ปลายทาง (km) *">
                     <input type="number" value={form.endOdometer} onChange={e => setForm(f => ({ ...f, endOdometer: e.target.value }))} placeholder={String(start)}/>
                   </Field>
-                  <Field label="น้ำหนักสินค้าสุทธิ (ตัน)">
-                    <input type="number" value={form.endWeight} onChange={e => setForm(f => ({ ...f, endWeight: e.target.value }))}/>
+                  <Field label={`น้ำหนักสินค้าปลายทาง (ตัน) · ต้นทาง ${db.fmt(originWeight)}`}>
+                    <input type="number" value={form.endWeight} onChange={e => setForm(f => ({ ...f, endWeight: e.target.value }))} placeholder={String(originWeight)}/>
                   </Field>
                   <Field label="ลิตรน้ำมันที่เติม">
                     <input type="number" value={form.liters} onChange={e => setForm(f => ({ ...f, liters: e.target.value }))} placeholder="0.0"/>
@@ -586,6 +712,12 @@ function DispatchCloseForm() {
                 <h3 className="section-title">คำนวณอัตโนมัติ</h3>
                 <div className="col" style={{ gap: 12 }}>
                   <CalcRow label="ระยะทาง" value={distance > 0 ? `${db.fmt(distance)} km` : '—'} ok={distance > 0}/>
+                  <CalcRow
+                    label="น้ำหนักสูญหาย"
+                    value={endWeight > 0 ? `${db.fmt(weightLoss)} ตัน (${weightLossPct.toFixed(1)}%)` : '—'}
+                    ok={endWeight > 0 && !weightLossExceeds}
+                    warn={weightLossExceeds}
+                  />
                   <CalcRow label="ค่าขนส่ง" value={db.thb(totalAmount)} ok/>
                   <CalcRow label="km/L" value={kmPerL > 0 ? `${kmPerL.toFixed(1)} km/l` : '—'} ok={kmPerL >= 2.5} warn={kmPerL > 0 && kmPerL < 2.5}/>
                   <CalcRow label="Cost/km" value={costPerKm > 0 ? `฿${costPerKm.toFixed(2)}/km` : '—'} ok={costPerKm > 0}/>
@@ -594,9 +726,132 @@ function DispatchCloseForm() {
             </div>
           </div>
 
-          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+          {/* Weight loss warning */}
+          {weightLossExceeds && (
+            <div
+              className="no-print"
+              style={{
+                marginBottom: 16,
+                padding: '12px 16px',
+                background: 'rgba(163,45,45,.08)',
+                border: '1px solid #A32D2D',
+                borderRadius: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                color: '#A32D2D',
+                fontSize: 13.5,
+                fontWeight: 500,
+              }}
+            >
+              <Icon name="alert" size={18}/>
+              <div>
+                <strong>คำเตือน:</strong> น้ำหนักสินค้าสูญหายเกิน 5% (
+                <strong>{weightLossPct.toFixed(1)}%</strong>) — กรุณาตรวจสอบก่อนปิดงาน
+              </div>
+            </div>
+          )}
+
+          <div className="row no-print" style={{ justifyContent: 'flex-end', gap: 8 }}>
             <button className="btn" onClick={() => setPickedId('')}><Icon name="close" size={15}/> ยกเลิก</button>
             <button className="btn primary" onClick={submit}><Icon name="check" size={15}/> ปิดงาน</button>
+          </div>
+
+          {/* Print-only summary */}
+          <div className="print-only">
+            <div style={{ textAlign: 'center', marginBottom: 14, paddingBottom: 10, borderBottom: '2px solid #000' }}>
+              <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>KPS Transportations</h1>
+              <div style={{ fontSize: 15, fontWeight: 700, marginTop: 6 }}>สรุปงานขนส่ง (Job Summary)</div>
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                เลขที่: <strong className="mono">{picked.code}</strong> · วันที่: {db.thaiDate(picked.date)}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 14, fontSize: 13 }}>
+              <div>
+                <div style={{ color: '#666', fontSize: 11 }}>ลูกค้า</div>
+                <div style={{ fontWeight: 600 }}>{picked.customerId ? db.nameOf('customers', picked.customerId) : '—'}</div>
+              </div>
+              <div>
+                <div style={{ color: '#666', fontSize: 11 }}>เลขไมล์</div>
+                <div className="mono" style={{ fontWeight: 600 }}>
+                  {db.fmt(picked.startOdometer)} → {form.endOdometer ? db.fmt(parseFloat(form.endOdometer)) : '—'} km
+                </div>
+              </div>
+              <div>
+                <div style={{ color: '#666', fontSize: 11 }}>ทะเบียนรถ</div>
+                <div className="mono" style={{ fontWeight: 700, fontSize: 15 }}>
+                  {db.nameOf('vehicles', picked.vehicleId ?? '')}
+                </div>
+              </div>
+              <div>
+                <div style={{ color: '#666', fontSize: 11 }}>คนขับ</div>
+                <div style={{ fontWeight: 600 }}>{db.nameOf('employees', picked.driverId ?? '')}</div>
+              </div>
+            </div>
+
+            <table className="tbl" style={{ width: '100%', fontSize: 12, marginBottom: 14 }}>
+              <thead>
+                <tr>
+                  <th style={{ width: 32 }}>ขา</th>
+                  <th>เส้นทาง</th>
+                  <th>สินค้า</th>
+                  <th className="right">น้ำหนัก</th>
+                  <th className="right">จำนวน</th>
+                </tr>
+              </thead>
+              <tbody>
+                {db.legsOf(picked).map((leg, i) => (
+                  <tr key={i}>
+                    <td>{i + 1}</td>
+                    <td>{leg.origin} → {leg.destination}</td>
+                    <td>{leg.cargo}</td>
+                    <td className="num right mono">{leg.weight}</td>
+                    <td className="num right mono">{leg.amount.toFixed(2)}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: '#f3f4f6', fontWeight: 700 }}>
+                  <td colSpan={4} style={{ textAlign: 'right' }}>รวม:</td>
+                  <td className="num right mono">{totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 14, fontSize: 12 }}>
+              <div>
+                <div style={{ color: '#666', fontSize: 11 }}>ระยะทาง</div>
+                <div className="mono" style={{ fontWeight: 700 }}>{db.fmt(distance)} km</div>
+              </div>
+              <div>
+                <div style={{ color: '#666', fontSize: 11 }}>ลิตรน้ำมัน</div>
+                <div className="mono" style={{ fontWeight: 700 }}>{db.fmt(liters)} L</div>
+              </div>
+              <div>
+                <div style={{ color: '#666', fontSize: 11 }}>KM/L</div>
+                <div className="mono" style={{ fontWeight: 700 }}>{kmPerL.toFixed(1)}</div>
+              </div>
+              <div>
+                <div style={{ color: '#666', fontSize: 11 }}>Cost/km</div>
+                <div className="mono" style={{ fontWeight: 700 }}>฿{costPerKm.toFixed(2)}</div>
+              </div>
+            </div>
+
+            {weightLossExceeds && (
+              <div style={{ marginBottom: 14, padding: '8px 12px', border: '1px solid #A32D2D', borderRadius: 4, color: '#A32D2D', fontSize: 12, fontWeight: 600 }}>
+                ⚠ น้ำหนักสูญหายเกิน 5% ({weightLossPct.toFixed(1)}%)
+              </div>
+            )}
+
+            <div style={{ marginTop: 30, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 60 }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 36, fontSize: 12 }}>คนขับ</div>
+                <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 36, fontSize: 12 }}>ผู้ตรวจรับ</div>
+                <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -961,14 +1216,19 @@ function DispatchHistoryTab() {
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export function DispatchModule({ tab, setActive }: DispatchModuleProps) {
-  const currentTab = tab === 'open' ? 'open' : tab === 'close' ? 'close' : tab === 'report' ? 'report' : tab === 'history' ? 'history' : 'open'
+  const valid = ['open', 'close', 'fuel', 'monthly', 'report', 'history']
+  const currentTab = valid.includes(tab) ? tab : 'open'
 
   return (
     <div>
-      <DispatchTabs current={currentTab} onChange={t => setActive('dispatch.' + t)}/>
+      <div className="no-print">
+        <DispatchTabs current={currentTab} onChange={t => setActive('dispatch.' + t)}/>
+      </div>
       <div style={{ marginTop: 20 }}>
         {currentTab === 'open'    && <DispatchOpenForm setActive={setActive}/>}
         {currentTab === 'close'   && <DispatchCloseForm/>}
+        {currentTab === 'fuel'    && <DispatchFuelReport/>}
+        {currentTab === 'monthly' && <DispatchMonthlyReport/>}
         {currentTab === 'report'  && <DispatchReportTab/>}
         {currentTab === 'history' && <DispatchHistoryTab/>}
       </div>

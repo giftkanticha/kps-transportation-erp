@@ -45,6 +45,8 @@ const crumbMap: Record<string, string> = {
   dispatch: 'งานขนส่ง',
   'dispatch.open': 'งานขนส่ง • เปิดงาน',
   'dispatch.close': 'งานขนส่ง • ปิดงาน',
+  'dispatch.fuel': 'งานขนส่ง • รายงานประจำวัน',
+  'dispatch.monthly': 'งานขนส่ง • รายงานประจำเดือน',
   'dispatch.report': 'งานขนส่ง • รายงานสรุป',
   'dispatch.history': 'งานขนส่ง • ประวัติงาน',
   subcontractors: 'รถรับจ้างร่วม',
@@ -135,6 +137,10 @@ export default function App() {
         return <DispatchModule tab="open" setActive={setActive} user={user} />
       case 'dispatch.close':
         return <DispatchModule tab="close" setActive={setActive} user={user} />
+      case 'dispatch.fuel':
+        return <DispatchModule tab="fuel" setActive={setActive} user={user} />
+      case 'dispatch.monthly':
+        return <DispatchModule tab="monthly" setActive={setActive} user={user} />
       case 'dispatch.report':
         return <DispatchModule tab="report" setActive={setActive} user={user} />
       case 'dispatch.history':

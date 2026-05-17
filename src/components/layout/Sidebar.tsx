@@ -56,6 +56,8 @@ const MENU: MenuItem[] = [
     sub: [
       { id: 'dispatch.open', label: 'เปิดงานขนส่ง' },
       { id: 'dispatch.close', label: 'ปิดงานขนส่ง' },
+      { id: 'dispatch.fuel', label: 'รายงานประจำวัน' },
+      { id: 'dispatch.monthly', label: 'รายงานประจำเดือน' },
       { id: 'dispatch.report', label: 'รายงานสรุป' },
       { id: 'dispatch.history', label: 'ประวัติงาน' },
     ],
