@@ -265,9 +265,9 @@ const subDrivers: SubDriver[] = [
 ]
 
 const subJobs: SubJob[] = [
-  { id: 'sj1', code: 'SUB-001', date: '2024-04-15', subId: 'sc1', plate: 'ABC-5678', driverName: 'สมชาย ใจดี',     destination: 'Chiang Mai', origin: 'กรุงเทพ', weight: 18, mode: 'per_ton', price: 2500, total: 45000, status: 'unpaid', bank: 'กรุงไทย' },
-  { id: 'sj2', code: 'SUB-002', date: '2024-04-14', subId: 'sc2', plate: 'DEF-9012', driverName: 'สมศักดิ์ รักงาน', destination: 'Rayong',     origin: 'กรุงเทพ', weight: 10, mode: 'per_ton', price: 2500, total: 25000, status: 'paid',   bank: 'ธนาคารไทยพาณิชย์' },
-  { id: 'sj3', code: 'SUB-003', date: '2024-04-16', subId: 'sc4', plate: 'XYZ-9999', driverName: 'เด่นชัย ขนส่ง',  destination: 'Phuket',     origin: 'กรุงเทพ', weight: 0,  mode: 'lump',   price: 0,    total: 0,     status: 'open',   bank: 'กสิกรไทย' },
+  { id: 'sj1', code: 'SUB-001', date: '2024-04-15', subId: 'sc1', driverId: 'sd1', plate: 'ABC-1234', driverName: 'สมชาย ใจดี',     category: '10ล้อ', destination: 'Chiang Mai', origin: 'กรุงเทพ', weight: 18000, finalWeight: 18000, mode: 'per_ton', price: 2500, total: 45000, status: 'unpaid', bank: 'กรุงไทย' },
+  { id: 'sj2', code: 'SUB-002', date: '2024-04-14', subId: 'sc2', driverId: 'sd2', plate: 'DEF-5678', driverName: 'สมศักดิ์ รักงาน', category: '10ล้อ', destination: 'Rayong',     origin: 'กรุงเทพ', weight: 10000, finalWeight: 10000, mode: 'per_ton', price: 2500, total: 25000, status: 'paid',   bank: 'ธนาคารไทยพาณิชย์' },
+  { id: 'sj3', code: 'SUB-003', date: '2024-04-16', subId: 'sc2', driverId: 'sd2', plate: 'DEF-5678', driverName: 'สมศักดิ์ รักงาน', category: '10ล้อ', destination: 'Phuket',     origin: 'กรุงเทพ', weight: 0,     finalWeight: 0,     mode: 'lump',    price: 0,    total: 0,     status: 'open',   bank: 'กสิกรไทย' },
 ]
 
 const activity: ActivityLog[] = [

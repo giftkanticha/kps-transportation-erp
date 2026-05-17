@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { db } from '../../lib/db'
-import type { User, Vehicle, Employee, Dispatch, Tire, Expense, ActivityLog, StockItem, Customer } from '../../types'
+import type { User, Vehicle, Employee, Dispatch, Tire, Expense, ActivityLog, StockItem, Customer, SubJob } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
 
 interface DashboardProps {
@@ -17,6 +17,9 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const expenses = db.getAll<Expense>('expenses')
   const activity = db.getAll<ActivityLog>('activity')
   const stock = db.getAll<StockItem>('stock')
+  const subJobs = db.getAll<SubJob>('subJobs')
+  const subUnpaid = useMemo(() => subJobs.filter(j => j.status === 'unpaid'), [subJobs])
+  const subUnpaidTotal = useMemo(() => subUnpaid.reduce((s, j) => s + (j.total || 0), 0), [subUnpaid])
 
   const onTrip = useMemo(
     () => dispatch.filter(t => t.status === 'in-progress'),
@@ -223,7 +226,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
         <div className="card">
           <div className="head">
             <h3>การแจ้งเตือน</h3>
-            <span className="badge red mono">{tireAlerts + lowStock + 1}</span>
+            <span className="badge red mono">{tireAlerts + lowStock + 1 + subUnpaid.length}</span>
           </div>
           <div style={{ padding: '8px 18px' }}>
             <div className="feed">
@@ -267,6 +270,22 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                   <div className="when">3 วันที่แล้ว</div>
                 </div>
               </div>
+              {subUnpaid.length > 0 && (
+                <div
+                  className="feed-item"
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setActive('subcontractors.history')}
+                >
+                  <div className="ic amber">
+                    <Icon name="truck" size={16} />
+                  </div>
+                  <div className="body">
+                    <div className="who">รถรับจ้าง รอชำระเงิน {subUnpaid.length} งาน</div>
+                    <div className="txt">ยอดรวม {db.thb(subUnpaidTotal)}</div>
+                    <div className="when">คลิกเพื่อชำระ</div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

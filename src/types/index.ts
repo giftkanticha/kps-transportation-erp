@@ -291,11 +291,14 @@ export interface SubJob {
   code: string
   date: string
   subId: string
+  driverId: string
   plate: string
   driverName: string
+  category: string
   destination: string
   origin: string
   weight: number
+  finalWeight: number
   mode: string
   price: number
   total: number

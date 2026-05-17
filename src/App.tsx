@@ -134,14 +134,14 @@ export default function App() {
         return <DispatchModule tab="history" setActive={setActive} user={user} />
 
       case 'subcontractors':
-        return <SubcontractorModule tab="open" setActive={setActive} />
+        return <SubcontractorModule tab="open" setActive={setActive} user={user} />
       case 'subcontractors.close':
-        return <SubcontractorModule tab="close" setActive={setActive} />
+        return <SubcontractorModule tab="close" setActive={setActive} user={user} />
       case 'subcontractors.history':
       case 'subcontractors.jobs':
-        return <SubcontractorModule tab="history" setActive={setActive} />
+        return <SubcontractorModule tab="history" setActive={setActive} user={user} />
       case 'subcontractors.drivers':
-        return <SubcontractorModule tab="drivers" setActive={setActive} />
+        return <SubcontractorModule tab="drivers" setActive={setActive} user={user} />
 
       case 'expenses':
         return <ExpensesModule tab="record" setActive={setActive} />
