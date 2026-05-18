@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { Icon } from '../../components/ui'
-import type { Vehicle, Dispatch, FuelRecord, Maintenance, Expense, FixedCost, Employee } from '../../types'
+import type { Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance, Expense, Employee } from '../../types'
 
 /* ─────────────────────────────────────────────────── helpers ── */
 
@@ -37,12 +37,12 @@ interface VehicleRow {
   v: Vehicle
   driverName: string
   rev: number
-  fuelIn: number    // น้ำมันในโรงงาน — FuelRecord where station === 'ถังโรงงาน'
-  fuelOut: number   // น้ำมันนอก — FuelRecord where station !== 'ถังโรงงาน'
+  fuelIn: number    // น้ำมันในโรงงาน
+  fuelOut: number   // น้ำมันนอก
   allowance: number
   salary: number
-  expense: number   // ค่าใช้จ่าย = maintenance + misc expenses
-  interest: number  // ดอกเบี้ย — FixedCost where category === 'ดอกเบี้ย'
+  expense: number   // ค่าใช้จ่าย = maintenance + misc expenses (ไม่รวมดอกเบี้ย)
+  interest: number  // ดอกเบี้ย — Expense where category === 'ดอกเบี้ย' (per vehicle per month)
   totalCost: number
   profit: number
 }
@@ -51,9 +51,9 @@ function computeRows(
   vehicles: Vehicle[],
   dispatches: Dispatch[],
   fuel: FuelRecord[],
+  fuelRounds: FuelRound[],
   maint: Maintenance[],
   expenses: Expense[],
-  fixedCosts: FixedCost[],
   employees: Employee[],
   ym: string,
 ): VehicleRow[] {
@@ -70,23 +70,40 @@ function computeRows(
       return s + (fromLegs > 0 ? fromLegs : (d.perDiem ?? 0))
     }, 0)
 
-    // Fuel split — from FuelRecord station field only
-    // Internal = ถังโรงงาน (deducted from factory stock)
-    // External = ปั๊มภายนอก / PTT / Shell / Bangchak / Esso / etc.
+    // ── Fuel split ──────────────────────────────────────────────────────────
+    // Source 1: FuelRecord (บันทึกน้ำมัน) — split by station field
     const myFuelLogs = fuel.filter(f => f.vehicleId === v.id && ymKey(f.date) === ym)
-    const fuelIn = myFuelLogs
-      .filter(f => isFactoryStation(f.station))
-      .reduce((s, f) => s + (f.total ?? 0), 0)
-    const fuelOut = myFuelLogs
-      .filter(f => !isFactoryStation(f.station))
-      .reduce((s, f) => s + (f.total ?? 0), 0)
+    const logIn  = myFuelLogs.filter(f =>  isFactoryStation(f.station)).reduce((s, f) => s + (f.total ?? 0), 0)
+    const logOut = myFuelLogs.filter(f => !isFactoryStation(f.station)).reduce((s, f) => s + (f.total ?? 0), 0)
 
-    // ค่าใช้จ่าย = maintenance + misc expenses
+    // Source 2: FuelRound (เปิด/ปิดรอบน้ำมัน) — split by refill type
+    //   type='start'        → loaded from factory tank    → น้ำมันในโรงงาน
+    //   type='intermediate' → external pump during trip   → น้ำมันนอก
+    //   type='end'          → external fill at end of trip → น้ำมันนอก
+    let roundIn = 0, roundOut = 0
+    for (const round of fuelRounds.filter(r => r.vehicleId === v.id)) {
+      for (const rf of round.refills) {
+        if (ymKey(rf.at) !== ym) continue
+        if (rf.type === 'start') roundIn += rf.cost ?? 0
+        else roundOut += rf.cost ?? 0
+      }
+    }
+
+    const fuelIn  = logIn  + roundIn
+    const fuelOut = logOut + roundOut
+    // ────────────────────────────────────────────────────────────────────────
+
+    // ค่าใช้จ่าย = maintenance + misc expenses (ยกเว้น category 'ดอกเบี้ย')
     const maintTotal = maint
       .filter(m => m.vehicleId === v.id && ymKey(m.startDate) === ym)
       .reduce((s, m) => s + (m.cost ?? 0), 0)
     const expTotal = expenses
-      .filter(x => x.vehicleId === v.id && ymKey(x.date) === ym)
+      .filter(x => x.vehicleId === v.id && ymKey(x.date) === ym && x.category !== 'ดอกเบี้ย')
+      .reduce((s, x) => s + (x.amount ?? 0), 0)
+
+    // ดอกเบี้ย — Expense with category === 'ดอกเบี้ย' (per-vehicle per-month, กรอกในตาราง P&L)
+    const interest = expenses
+      .filter(x => x.vehicleId === v.id && ymKey(x.date) === ym && x.category === 'ดอกเบี้ย')
       .reduce((s, x) => s + (x.amount ?? 0), 0)
 
     // Driver salary — split equally among assigned vehicles
@@ -95,11 +112,6 @@ function computeRows(
     const salary = driver && driverVehicleCount[driver.id]
       ? (driver.salary ?? 0) / driverVehicleCount[driver.id]
       : 0
-
-    // ดอกเบี้ย — only FixedCost with category === 'ดอกเบี้ย' for this vehicle
-    const interest = fixedCosts
-      .filter(f => f.vehicleId === v.id && f.category === 'ดอกเบี้ย')
-      .reduce((s, f) => s + (f.monthly ?? 0), 0)
 
     const totalCost = fuelIn + fuelOut + allowance + salary + maintTotal + expTotal + interest
     return {
@@ -164,8 +176,8 @@ function MetricCard({ label, value, tone, icon, subtitle }: {
 
 /* ──────────────────────────────────────── InterestCell ── */
 
-function InterestCell({ vehicleId, plate, value, onSaved }: {
-  vehicleId: string; plate: string; value: number; onSaved: () => void
+function InterestCell({ vehicleId, plate, ym, value, onSaved }: {
+  vehicleId: string; plate: string; ym: string; value: number; onSaved: () => void
 }) {
   const [editing, setEditing] = useState(false)
   const [input, setInput] = useState('')
@@ -179,18 +191,27 @@ function InterestCell({ vehicleId, plate, value, onSaved }: {
   }, [editing, value])
 
   const save = () => {
-    const monthly = parseFloat(input) || 0
-    const allFixed = db.getAll<FixedCost>('fixedCosts')
-    const existing = allFixed.find(f => f.vehicleId === vehicleId && f.category === 'ดอกเบี้ย')
+    const amount = parseFloat(input) || 0
+    // Stored as Expense with category='ดอกเบี้ย' — per vehicle per month
+    const allExp = db.getAll<Expense>('expenses')
+    const existing = allExp.find(e =>
+      e.vehicleId === vehicleId &&
+      ymKey(e.date) === ym &&
+      e.category === 'ดอกเบี้ย',
+    )
     if (existing) {
-      db.update<FixedCost>('fixedCosts', existing.id, { monthly })
-    } else if (monthly > 0) {
-      db.add<Partial<FixedCost>>('fixedCosts', {
-        name: `ดอกเบี้ย ${plate}`,
-        category: 'ดอกเบี้ย',
-        monthly,
-        paid: false,
+      db.update<Expense>('expenses', existing.id, { amount })
+    } else if (amount > 0) {
+      db.add<Partial<Expense>>('expenses', {
+        code: `INT-${ym}-${vehicleId}`,
         vehicleId,
+        category: 'ดอกเบี้ย',
+        note: `ดอกเบี้ย ${plate}`,
+        amount,
+        paidBy: 'company',
+        date: `${ym}-01`,
+        driverId: null,
+        status: 'paid',
       })
     }
     setEditing(false)
@@ -358,11 +379,11 @@ export function FinancePL() {
       const vehicles = db.getAll<Vehicle>('vehicles')
       const dispatches = db.getAll<Dispatch>('dispatch')
       const fuel = db.getAll<FuelRecord>('fuel')
+      const fuelRounds = db.getAll<FuelRound>('fuelRounds')
       const maint = db.getAll<Maintenance>('maintenance')
       const expenses = db.getAll<Expense>('expenses')
-      const fixedCosts = db.getAll<FixedCost>('fixedCosts')
       const employees = db.getAll<Employee>('employees')
-      const rows = computeRows(vehicles, dispatches, fuel, maint, expenses, fixedCosts, employees, ym)
+      const rows = computeRows(vehicles, dispatches, fuel, fuelRounds, maint, expenses, employees, ym)
       return { allRows: rows }
     } catch (err) {
       console.error('FinancePL aggregation failed', err)
@@ -539,6 +560,7 @@ export function FinancePL() {
                           <InterestCell
                             vehicleId={r.v.id}
                             plate={r.v.plate}
+                            ym={ym}
                             value={r.interest}
                             onSaved={() => setTick(t => t + 1)}
                           />
