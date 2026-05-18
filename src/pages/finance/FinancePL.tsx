@@ -26,7 +26,6 @@ function ymKey(iso: string | null | undefined): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-// Station is internal if it exactly equals 'ถังโรงงาน'
 function isFactoryStation(station: string): boolean {
   return station === 'ถังโรงงาน'
 }
@@ -37,12 +36,12 @@ interface VehicleRow {
   v: Vehicle
   driverName: string
   rev: number
-  fuelIn: number    // น้ำมันในโรงงาน
-  fuelOut: number   // น้ำมันนอก
+  fuelIn: number
+  fuelOut: number
   allowance: number
   salary: number
-  expense: number   // ค่าใช้จ่าย = maintenance + misc expenses (ไม่รวมดอกเบี้ย)
-  interest: number  // ดอกเบี้ย — Expense where category === 'ดอกเบี้ย' (per vehicle per month)
+  expense: number
+  interest: number
   totalCost: number
   profit: number
 }
@@ -70,16 +69,10 @@ function computeRows(
       return s + (fromLegs > 0 ? fromLegs : (d.perDiem ?? 0))
     }, 0)
 
-    // ── Fuel split ──────────────────────────────────────────────────────────
-    // Source 1: FuelRecord (บันทึกน้ำมัน) — split by station field
     const myFuelLogs = fuel.filter(f => f.vehicleId === v.id && ymKey(f.date) === ym)
     const logIn  = myFuelLogs.filter(f =>  isFactoryStation(f.station)).reduce((s, f) => s + (f.total ?? 0), 0)
     const logOut = myFuelLogs.filter(f => !isFactoryStation(f.station)).reduce((s, f) => s + (f.total ?? 0), 0)
 
-    // Source 2: FuelRound (เปิด/ปิดรอบน้ำมัน) — split by refill type
-    //   type='start'        → loaded from factory tank    → น้ำมันในโรงงาน
-    //   type='intermediate' → external pump during trip   → น้ำมันนอก
-    //   type='end'          → external fill at end of trip → น้ำมันนอก
     let roundIn = 0, roundOut = 0
     for (const round of fuelRounds.filter(r => r.vehicleId === v.id)) {
       for (const rf of round.refills) {
@@ -91,9 +84,7 @@ function computeRows(
 
     const fuelIn  = logIn  + roundIn
     const fuelOut = logOut + roundOut
-    // ────────────────────────────────────────────────────────────────────────
 
-    // ค่าใช้จ่าย = maintenance + misc expenses (ยกเว้น category 'ดอกเบี้ย')
     const maintTotal = maint
       .filter(m => m.vehicleId === v.id && ymKey(m.startDate) === ym)
       .reduce((s, m) => s + (m.cost ?? 0), 0)
@@ -101,12 +92,10 @@ function computeRows(
       .filter(x => x.vehicleId === v.id && ymKey(x.date) === ym && x.category !== 'ดอกเบี้ย')
       .reduce((s, x) => s + (x.amount ?? 0), 0)
 
-    // ดอกเบี้ย — Expense with category === 'ดอกเบี้ย' (per-vehicle per-month, กรอกในตาราง P&L)
     const interest = expenses
       .filter(x => x.vehicleId === v.id && ymKey(x.date) === ym && x.category === 'ดอกเบี้ย')
       .reduce((s, x) => s + (x.amount ?? 0), 0)
 
-    // Driver salary — split equally among assigned vehicles
     const driver = v.driverId ? employees.find(e => e.id === v.driverId) : undefined
     const driverName = driver?.name ?? '—'
     const salary = driver && driverVehicleCount[driver.id]
@@ -123,7 +112,7 @@ function computeRows(
   })
 }
 
-/* ─────────────────────────────────── zero-object helper ── */
+/* ─────────────────────────────────────── zero-object helper ── */
 
 const ZERO_TOTALS = {
   rev: 0, fuelIn: 0, fuelOut: 0, allowance: 0,
@@ -192,7 +181,6 @@ function InterestCell({ vehicleId, plate, ym, value, onSaved }: {
 
   const save = () => {
     const amount = parseFloat(input) || 0
-    // Stored as Expense with category='ดอกเบี้ย' — per vehicle per month
     const allExp = db.getAll<Expense>('expenses')
     const existing = allExp.find(e =>
       e.vehicleId === vehicleId &&
@@ -279,7 +267,6 @@ function VehiclePicker({ vehicles, picked, onChange }: {
       className="card pl-sidebar"
       style={{ width: 228, flexShrink: 0, display: 'flex', flexDirection: 'column', height: 'fit-content' }}
     >
-      {/* Header */}
       <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--line)' }}>
         <div className="row" style={{ marginBottom: 8 }}>
           <span style={{ fontWeight: 600, fontSize: 13 }}>เลือกรถ</span>
@@ -304,7 +291,6 @@ function VehiclePicker({ vehicles, picked, onChange }: {
         </div>
       </div>
 
-      {/* Select all row */}
       <label
         className="row"
         style={{ gap: 8, padding: '9px 14px', borderBottom: '1px solid var(--line)', cursor: 'pointer', fontSize: 12.5 }}
@@ -318,7 +304,6 @@ function VehiclePicker({ vehicles, picked, onChange }: {
         <span style={{ fontWeight: 600 }}>เลือกทั้งหมด</span>
       </label>
 
-      {/* Vehicle list */}
       <div style={{ flex: 1, overflowY: 'auto', maxHeight: 400 }}>
         {visible.map(v => (
           <label
@@ -349,7 +334,6 @@ function VehiclePicker({ vehicles, picked, onChange }: {
         )}
       </div>
 
-      {/* Footer actions */}
       <div className="row" style={{ padding: '10px 14px', gap: 8, borderTop: '1px solid var(--line)' }}>
         <button className="btn sm" style={{ flex: 1 }} onClick={selectAll}>ทั้งหมด</button>
         <button className="btn sm" style={{ flex: 1 }} onClick={clearAll}>ล้าง</button>
@@ -358,52 +342,188 @@ function VehiclePicker({ vehicles, picked, onChange }: {
   )
 }
 
+/* ────────────────────────────── P&L table (shared) ── */
+
+function PLTable({
+  rows, totals, ym, viewMode, onInterestSaved,
+}: {
+  rows: VehicleRow[]
+  totals: Totals
+  ym: string
+  viewMode: 'monthly' | 'yearly'
+  onInterestSaved: () => void
+}) {
+  const isProfit = totals.profit >= 0
+  return (
+    <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+      <table className="tbl">
+        <thead>
+          <tr>
+            <th>ทะเบียนรถ</th>
+            <th className="num right" style={{ whiteSpace: 'nowrap' }}>รายรับ</th>
+            <th className="num right" style={{ whiteSpace: 'nowrap', color: '#0369A1' }}>น้ำมันในโรงงาน</th>
+            <th className="num right" style={{ whiteSpace: 'nowrap', color: '#0369A1' }}>น้ำมันนอก</th>
+            <th className="num right" style={{ whiteSpace: 'nowrap' }}>เบี้ยเลี้ยง</th>
+            <th className="num right" style={{ whiteSpace: 'nowrap' }}>เงินเดือนคนขับ</th>
+            <th className="num right" style={{ whiteSpace: 'nowrap' }}>ค่าใช้จ่าย</th>
+            <th className="num right" style={{ whiteSpace: 'nowrap', color: '#B45309' }}>ดอกเบี้ย</th>
+            <th className="num right" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>กำไรสุทธิ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => {
+            const profitColor = r.profit >= 0 ? '#10B981' : '#EF4444'
+            const hasActivity = r.rev > 0 || r.totalCost > 0
+            return (
+              <tr key={r.v.id} style={{ opacity: hasActivity ? 1 : 0.5 }}>
+                <td>
+                  <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 13 }}>
+                    {r.v.plate}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    {r.v.type} · {r.v.brand}
+                  </div>
+                </td>
+                <td className="num right mono" style={{ fontWeight: 600 }}>{fmt2(r.rev)}</td>
+                <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(r.fuelIn)}</td>
+                <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(r.fuelOut)}</td>
+                <td className="num right mono">{fmt2(r.allowance)}</td>
+                <td className="num right mono">{fmt2(r.salary)}</td>
+                <td className="num right mono">{fmt2(r.expense)}</td>
+                <td className="num right mono" style={{ color: '#B45309' }}>
+                  {viewMode === 'monthly' ? (
+                    <InterestCell
+                      vehicleId={r.v.id}
+                      plate={r.v.plate}
+                      ym={ym}
+                      value={r.interest}
+                      onSaved={onInterestSaved}
+                    />
+                  ) : (
+                    <span className="mono">{fmt2(r.interest)}</span>
+                  )}
+                </td>
+                <td className="num right mono" style={{ fontWeight: 700, color: profitColor }}>
+                  {fmt2(r.profit)}
+                </td>
+              </tr>
+            )
+          })}
+          <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
+            <td>รวมทั้งหมด</td>
+            <td className="num right mono">{fmt2(totals.rev)}</td>
+            <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(totals.fuelIn)}</td>
+            <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(totals.fuelOut)}</td>
+            <td className="num right mono">{fmt2(totals.allowance)}</td>
+            <td className="num right mono">{fmt2(totals.salary)}</td>
+            <td className="num right mono">{fmt2(totals.expense)}</td>
+            <td className="num right mono" style={{ color: '#B45309' }}>{fmt2(totals.interest)}</td>
+            <td className="num right mono" style={{ color: isProfit ? '#10B981' : '#EF4444' }}>
+              {fmt2(totals.profit)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 /* ──────────────────────────────────────────── Main page ── */
+
+type ViewMode = 'monthly' | 'yearly'
 
 export function FinancePL() {
   const today = new Date()
-  const [year, setYear] = useState(today.getFullYear())
-  const [month, setMonth] = useState(today.getMonth()) // 0-indexed
-  const [tick, setTick] = useState(0)
+  const [year, setYear]       = useState(today.getFullYear())
+  const [month, setMonth]     = useState(today.getMonth())
+  const [viewMode, setViewMode] = useState<ViewMode>('monthly')
+  const [tick, setTick]       = useState(0)
 
-  // Vehicle picker
   const allVehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
-  const [picked, setPicked] = useState<Set<string>>(() => new Set(db.getAll<Vehicle>('vehicles').map(v => v.id)))
-
-  const ym = `${year}-${String(month + 1).padStart(2, '0')}`
-
-  const yearOptions = useMemo(() => Array.from({ length: 11 }, (_, i) => 2025 + i), [])
-
-  const { allRows } = useMemo(() => {
-    try {
-      const vehicles = db.getAll<Vehicle>('vehicles')
-      const dispatches = db.getAll<Dispatch>('dispatch')
-      const fuel = db.getAll<FuelRecord>('fuel')
-      const fuelRounds = db.getAll<FuelRound>('fuelRounds')
-      const maint = db.getAll<Maintenance>('maintenance')
-      const expenses = db.getAll<Expense>('expenses')
-      const employees = db.getAll<Employee>('employees')
-      const rows = computeRows(vehicles, dispatches, fuel, fuelRounds, maint, expenses, employees, ym)
-      return { allRows: rows }
-    } catch (err) {
-      console.error('FinancePL aggregation failed', err)
-      return { allRows: [] }
-    }
-  }, [ym, tick])
-
-  // Filter by picked vehicles
-  const rows = useMemo(
-    () => allRows.filter(r => picked.has(r.v.id)),
-    [allRows, picked],
+  const [picked, setPicked] = useState<Set<string>>(
+    () => new Set(db.getAll<Vehicle>('vehicles').map(v => v.id)),
   )
 
-  const totals = useMemo(() => sumRows(rows), [rows])
-  const isProfit = totals.profit >= 0
+  const ym = `${year}-${String(month + 1).padStart(2, '0')}`
+  const yearOptions = useMemo(() => Array.from({ length: 11 }, (_, i) => 2025 + i), [])
+
+  /* ── Data computation ── */
+  const { allRows, allYearlyRows, allMonthlyData } = useMemo(() => {
+    try {
+      const vehicles   = db.getAll<Vehicle>('vehicles')
+      const dispatches = db.getAll<Dispatch>('dispatch')
+      const fuel       = db.getAll<FuelRecord>('fuel')
+      const fuelRounds = db.getAll<FuelRound>('fuelRounds')
+      const maint      = db.getAll<Maintenance>('maintenance')
+      const expenses   = db.getAll<Expense>('expenses')
+      const employees  = db.getAll<Employee>('employees')
+
+      const allRows = computeRows(vehicles, dispatches, fuel, fuelRounds, maint, expenses, employees, ym)
+
+      // Compute all 12 months for yearly view
+      const allMonthlyData = Array.from({ length: 12 }, (_, m) => {
+        const mYm = `${year}-${String(m + 1).padStart(2, '0')}`
+        return { m, ym: mYm, rows: computeRows(vehicles, dispatches, fuel, fuelRounds, maint, expenses, employees, mYm) }
+      })
+
+      // Sum per vehicle across 12 months
+      const acc: Record<string, VehicleRow> = {}
+      for (const { rows } of allMonthlyData) {
+        for (const r of rows) {
+          if (!acc[r.v.id]) {
+            acc[r.v.id] = { ...r }
+          } else {
+            const a = acc[r.v.id]
+            a.rev += r.rev; a.fuelIn += r.fuelIn; a.fuelOut += r.fuelOut
+            a.allowance += r.allowance; a.salary += r.salary; a.expense += r.expense
+            a.interest += r.interest; a.totalCost += r.totalCost; a.profit += r.profit
+          }
+        }
+      }
+      const allYearlyRows = vehicles.map(v => acc[v.id] ?? {
+        v, driverName: '—', rev: 0, fuelIn: 0, fuelOut: 0,
+        allowance: 0, salary: 0, expense: 0, interest: 0, totalCost: 0, profit: 0,
+      })
+
+      return { allRows, allYearlyRows, allMonthlyData }
+    } catch (err) {
+      console.error('FinancePL aggregation failed', err)
+      return { allRows: [], allYearlyRows: [], allMonthlyData: [] }
+    }
+  }, [ym, year, tick])
+
+  // Filter by picked vehicles
+  const rows        = useMemo(() => allRows.filter(r => picked.has(r.v.id)), [allRows, picked])
+  const yearlyRows  = useMemo(() => allYearlyRows.filter(r => picked.has(r.v.id)), [allYearlyRows, picked])
+
+  const monthlyBreakdown = useMemo(
+    () => allMonthlyData.map(({ m, ym: mYm, rows: mRows }) => ({
+      month: m, ym: mYm,
+      totals: sumRows(mRows.filter(r => picked.has(r.v.id))),
+    })),
+    [allMonthlyData, picked],
+  )
+
+  const totals       = useMemo(() => sumRows(rows), [rows])
+  const yearlyTotals = useMemo(() => sumRows(yearlyRows), [yearlyRows])
+
+  const activeTotals  = viewMode === 'yearly' ? yearlyTotals : totals
+  const activeRows    = viewMode === 'yearly' ? yearlyRows : rows
+  const isProfit      = activeTotals.profit >= 0
 
   const inputStyle: React.CSSProperties = {
-    borderRadius: 6, border: '1px solid #CBD5E1',
-    padding: '7px 12px', fontSize: 13, background: '#ffffff',
+    borderRadius: 8, border: '1px solid #CBD5E1',
+    padding: '7px 12px', fontSize: 13, background: '#ffffff', height: 38,
   }
+
+  /* ── Mode toggle pill style ── */
+  const tabBtn = (active: boolean): React.CSSProperties => ({
+    padding: '6px 16px', borderRadius: 7, border: 'none', cursor: 'pointer',
+    fontSize: 13, fontWeight: active ? 600 : 500, transition: 'all 0.15s',
+    background: active ? '#ffffff' : 'transparent',
+    color: active ? 'var(--primary)' : 'var(--text-muted)',
+    boxShadow: active ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
+  })
 
   return (
     <div>
@@ -412,57 +532,83 @@ export function FinancePL() {
         <div>
           <h1 className="page-title">P&amp;L รายคัน</h1>
           <div className="page-sub">
-            กำไร-ขาดทุนรายคัน · {thaiMonthLabel(year, month)} ·{' '}
-            <span className="mono">{picked.size}/{allVehicles.length} คัน</span>
+            กำไร-ขาดทุนรายคัน ·{' '}
+            {viewMode === 'monthly' ? thaiMonthLabel(year, month) : `ปี พ.ศ. ${year + 543}`}
+            {' '}· <span className="mono">{picked.size}/{allVehicles.length} คัน</span>
           </div>
         </div>
       </div>
 
-      {/* ── Summary metrics ── */}
+      {/* ── Summary cards ── */}
       <div
         className="no-print"
         style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 18 }}
       >
         <MetricCard
-          label="รายรับรวม"
-          value={fmt2(totals.rev)}
+          label={viewMode === 'yearly' ? `รายรับรวมทั้งปี ${year + 543}` : 'รายรับรวม'}
+          value={fmt2(activeTotals.rev)}
           tone="blue"
           icon="money"
-          subtitle={`${rows.filter(r => r.rev > 0).length} คันที่มีรายการ`}
+          subtitle={`${activeRows.filter(r => r.rev > 0).length} คันที่มีรายการ`}
         />
         <MetricCard
-          label="รายจ่ายรวม"
-          value={fmt2(totals.totalCost)}
+          label={viewMode === 'yearly' ? `รายจ่ายรวมทั้งปี ${year + 543}` : 'รายจ่ายรวม'}
+          value={fmt2(activeTotals.totalCost)}
           tone="red"
           icon="wallet"
           subtitle="น้ำมัน + เบี้ยเลี้ยง + เงินเดือน + ค่าใช้จ่าย + ดอกเบี้ย"
         />
         <MetricCard
-          label={isProfit ? 'กำไรสุทธิรวม' : 'ขาดทุนสุทธิรวม'}
-          value={fmt2(totals.profit)}
+          label={
+            isProfit
+              ? (viewMode === 'yearly' ? `กำไรสุทธิปี ${year + 543}` : 'กำไรสุทธิรวม')
+              : (viewMode === 'yearly' ? `ขาดทุนสุทธิปี ${year + 543}` : 'ขาดทุนสุทธิรวม')
+          }
+          value={fmt2(activeTotals.profit)}
           tone={isProfit ? 'green' : 'red'}
           icon="chart"
-          subtitle={totals.rev > 0 ? `Margin ${((totals.profit / totals.rev) * 100).toFixed(1)}%` : 'ยังไม่มีรายรับ'}
+          subtitle={activeTotals.rev > 0 ? `Margin ${((activeTotals.profit / activeTotals.rev) * 100).toFixed(1)}%` : 'ยังไม่มีรายรับ'}
         />
       </div>
 
       {/* ── Filter bar ── */}
       <div className="card no-print" style={{ padding: '12px 16px', marginBottom: 16, background: '#ffffff' }}>
-        <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div className="row" style={{ gap: 6 }}>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>เดือน</span>
-            <select
-              value={month}
-              onChange={e => setMonth(Number(e.target.value))}
-              style={{ ...inputStyle, minWidth: 140 }}
-            >
-              {THAI_MONTHS_FULL.map((m, i) => (
-                <option key={i} value={i}>{m}</option>
-              ))}
-            </select>
+        <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+
+          {/* Mode toggle */}
+          <div style={{
+            display: 'flex', gap: 0, padding: 3,
+            borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC',
+          }}>
+            <button style={tabBtn(viewMode === 'monthly')} onClick={() => setViewMode('monthly')}>
+              ดูรายเดือน
+            </button>
+            <button style={tabBtn(viewMode === 'yearly')} onClick={() => setViewMode('yearly')}>
+              ภาพรวมรายปี
+            </button>
           </div>
+
+          <div style={{ width: 1, height: 24, background: '#E2E8F0' }} />
+
+          {/* Month picker — monthly mode only */}
+          {viewMode === 'monthly' && (
+            <div className="row" style={{ gap: 6 }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>เดือน</span>
+              <select
+                value={month}
+                onChange={e => setMonth(Number(e.target.value))}
+                style={{ ...inputStyle, minWidth: 140 }}
+              >
+                {THAI_MONTHS_FULL.map((m, i) => (
+                  <option key={i} value={i}>{m}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Year picker */}
           <div className="row" style={{ gap: 6 }}>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>ปี</span>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>ปี พ.ศ.</span>
             <select
               value={year}
               onChange={e => setYear(Number(e.target.value))}
@@ -473,9 +619,24 @@ export function FinancePL() {
               ))}
             </select>
           </div>
+
+          {/* Yearly badge */}
+          {viewMode === 'yearly' && (
+            <div style={{
+              background: '#EFF6FF', color: '#1D4ED8',
+              borderRadius: 8, padding: '5px 12px',
+              fontSize: 12, fontWeight: 600, letterSpacing: '0.01em',
+            }}>
+              รายงานสรุปประจำปี พ.ศ. {year + 543}
+            </div>
+          )}
+
           <div className="row" style={{ gap: 8, marginLeft: 'auto' }}>
             <button className="btn" onClick={() => window.print()}>
-              <Icon name="download" size={14} /> พิมพ์ทั้งหมด ({picked.size} คัน)
+              <Icon name="download" size={14} />
+              {viewMode === 'yearly'
+                ? `พิมพ์รายปี ${year + 543}`
+                : `พิมพ์ทั้งหมด (${picked.size} คัน)`}
             </button>
           </div>
         </div>
@@ -484,128 +645,161 @@ export function FinancePL() {
       {/* ── Print header ── */}
       <div className="print-only" style={{ marginBottom: 12 }}>
         <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>
-          รายงาน P&amp;L รายคัน — {thaiMonthLabel(year, month)}
+          {viewMode === 'yearly'
+            ? `รายงานสรุปประจำปี พ.ศ. ${year + 543}`
+            : `รายงาน P&L รายคัน — ${thaiMonthLabel(year, month)}`}
         </div>
         <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
           KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())} · {picked.size} คัน
         </div>
       </div>
 
-      {/* ── Main content: sidebar + table ── */}
+      {/* ── Main content: sidebar + tables ── */}
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
 
-        {/* Vehicle picker */}
         <VehiclePicker vehicles={allVehicles} picked={picked} onChange={setPicked} />
 
-        {/* P&L table */}
-        <div className="card print-area" style={{ flex: 1, minWidth: 0, background: '#ffffff' }}>
-          <div className="head no-print" style={{ paddingBottom: 0 }}>
-            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Icon name="chart" size={16} />
-              ตาราง P&amp;L รายคัน
-              <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-muted)' }}>
-                ({rows.length} คัน)
-              </span>
-            </h3>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <Icon name="edit" size={11} /> คลิก "ดอกเบี้ย" เพื่อกรอก
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Main P&L table */}
+          <div className="card print-area" style={{ background: '#ffffff' }}>
+            <div className="head no-print" style={{ paddingBottom: 0 }}>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="chart" size={16} />
+                {viewMode === 'yearly'
+                  ? `ตาราง P&L รายปี พ.ศ. ${year + 543}`
+                  : 'ตาราง P&L รายคัน'}
+                <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-muted)' }}>
+                  ({activeRows.length} คัน)
+                </span>
+              </h3>
+              {viewMode === 'monthly' && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Icon name="edit" size={11} /> คลิก "ดอกเบี้ย" เพื่อกรอก
+                </div>
+              )}
             </div>
+
+            {activeRows.length === 0 ? (
+              <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+                {picked.size === 0
+                  ? 'กรุณาเลือกรถจากแผงด้านซ้าย'
+                  : viewMode === 'yearly'
+                    ? `ไม่พบข้อมูลในปี พ.ศ. ${year + 543}`
+                    : `ไม่พบข้อมูลในเดือน ${thaiMonthLabel(year, month)}`}
+              </div>
+            ) : (
+              <PLTable
+                rows={activeRows}
+                totals={activeTotals}
+                ym={ym}
+                viewMode={viewMode}
+                onInterestSaved={() => setTick(t => t + 1)}
+              />
+            )}
           </div>
 
-          {rows.length === 0 ? (
-            <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-              {picked.size === 0 ? 'กรุณาเลือกรถจากแผงด้านซ้าย' : `ไม่พบข้อมูลในเดือน ${thaiMonthLabel(year, month)}`}
-            </div>
-          ) : (
-            <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-              <table className="tbl">
-                <thead>
-                  <tr>
-                    <th>ทะเบียนรถ</th>
-                    <th className="num right" style={{ whiteSpace: 'nowrap' }}>รายรับ</th>
-                    <th className="num right" style={{ whiteSpace: 'nowrap', color: '#0369A1' }}>น้ำมันในโรงงาน</th>
-                    <th className="num right" style={{ whiteSpace: 'nowrap', color: '#0369A1' }}>น้ำมันนอก</th>
-                    <th className="num right" style={{ whiteSpace: 'nowrap' }}>เบี้ยเลี้ยง</th>
-                    <th className="num right" style={{ whiteSpace: 'nowrap' }}>เงินเดือนคนขับ</th>
-                    <th className="num right" style={{ whiteSpace: 'nowrap' }}>ค่าใช้จ่าย</th>
-                    <th className="num right" style={{ whiteSpace: 'nowrap', color: '#B45309' }}>ดอกเบี้ย</th>
-                    <th className="num right" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>กำไรสุทธิ</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map(r => {
-                    const profitColor = r.profit >= 0 ? '#10B981' : '#EF4444'
-                    const hasActivity = r.rev > 0 || r.totalCost > 0
-                    // In single-vehicle print mode, hide other rows
-                    return (
-                      <tr
-                        key={r.v.id}
-                        style={{ opacity: hasActivity ? 1 : 0.5 }}
-                      >
-                        <td>
-                          <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 13 }}>
-                            {r.v.plate}
-                          </div>
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            {r.v.type} · {r.v.brand}
-                          </div>
-                        </td>
-                        <td className="num right mono" style={{ fontWeight: 600 }}>{fmt2(r.rev)}</td>
-                        <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(r.fuelIn)}</td>
-                        <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(r.fuelOut)}</td>
-                        <td className="num right mono">{fmt2(r.allowance)}</td>
-                        <td className="num right mono">{fmt2(r.salary)}</td>
-                        <td className="num right mono">{fmt2(r.expense)}</td>
-                        <td className="num right">
-                          <InterestCell
-                            vehicleId={r.v.id}
-                            plate={r.v.plate}
-                            ym={ym}
-                            value={r.interest}
-                            onSaved={() => setTick(t => t + 1)}
-                          />
-                        </td>
-                        <td className="num right mono" style={{ fontWeight: 700, color: profitColor }}>
-                          {fmt2(r.profit)}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                  {/* Totals row */}
-                  <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
-                    <td>รวมทั้งหมด</td>
-                    <td className="num right mono">{fmt2(totals.rev)}</td>
-                    <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(totals.fuelIn)}</td>
-                    <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(totals.fuelOut)}</td>
-                    <td className="num right mono">{fmt2(totals.allowance)}</td>
-                    <td className="num right mono">{fmt2(totals.salary)}</td>
-                    <td className="num right mono">{fmt2(totals.expense)}</td>
-                    <td className="num right mono" style={{ color: '#B45309' }}>{fmt2(totals.interest)}</td>
-                    <td className="num right mono" style={{ color: isProfit ? '#10B981' : '#EF4444' }}>
-                      {fmt2(totals.profit)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+          {/* Monthly breakdown — yearly mode only */}
+          {viewMode === 'yearly' && (
+            <div className="card print-area" style={{ background: '#ffffff' }}>
+              <div className="head no-print" style={{ paddingBottom: 0 }}>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Icon name="chart" size={16} />
+                  สรุปรายเดือน — ปี พ.ศ. {year + 543}
+                  <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-muted)' }}>
+                    (ยอดรวมทุกคันที่เลือก)
+                  </span>
+                </h3>
+              </div>
+
+              <div className="print-only" style={{ fontSize: 12, fontWeight: 600, padding: '4px 0 8px' }}>
+                สรุปรายเดือน — ปี พ.ศ. {year + 543}
+              </div>
+
+              <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>เดือน</th>
+                      <th className="num right" style={{ whiteSpace: 'nowrap' }}>รายรับ</th>
+                      <th className="num right" style={{ whiteSpace: 'nowrap', color: '#0369A1' }}>น้ำมันในโรงงาน</th>
+                      <th className="num right" style={{ whiteSpace: 'nowrap', color: '#0369A1' }}>น้ำมันนอก</th>
+                      <th className="num right" style={{ whiteSpace: 'nowrap' }}>รายจ่ายรวม</th>
+                      <th className="num right" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>กำไรสุทธิ</th>
+                      <th className="num right" style={{ whiteSpace: 'nowrap' }}>Margin %</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthlyBreakdown.map(({ month: m, ym: mYm, totals: mt }) => {
+                      const pColor = mt.profit >= 0 ? '#10B981' : '#EF4444'
+                      const hasData = mt.rev > 0 || mt.totalCost > 0
+                      return (
+                        <tr key={mYm} style={{ opacity: hasData ? 1 : 0.42 }}>
+                          <td style={{ fontWeight: 500 }}>{THAI_MONTHS_FULL[m]}</td>
+                          <td className="num right mono" style={{ fontWeight: 600 }}>{fmt2(mt.rev)}</td>
+                          <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(mt.fuelIn)}</td>
+                          <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(mt.fuelOut)}</td>
+                          <td className="num right mono" style={{ color: '#EF4444' }}>{fmt2(mt.totalCost)}</td>
+                          <td className="num right mono" style={{ fontWeight: 700, color: pColor }}>{fmt2(mt.profit)}</td>
+                          <td className="num right mono" style={{ fontSize: 12, color: pColor }}>
+                            {mt.rev > 0 ? `${(mt.profit / mt.rev * 100).toFixed(1)}%` : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
+                      <td>รวมทั้งปี {year + 543}</td>
+                      <td className="num right mono">{fmt2(yearlyTotals.rev)}</td>
+                      <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(yearlyTotals.fuelIn)}</td>
+                      <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(yearlyTotals.fuelOut)}</td>
+                      <td className="num right mono" style={{ color: '#EF4444' }}>{fmt2(yearlyTotals.totalCost)}</td>
+                      <td className="num right mono" style={{ color: yearlyTotals.profit >= 0 ? '#10B981' : '#EF4444' }}>
+                        {fmt2(yearlyTotals.profit)}
+                      </td>
+                      <td className="num right mono" style={{ fontSize: 12 }}>
+                        {yearlyTotals.rev > 0
+                          ? `${(yearlyTotals.profit / yearlyTotals.rev * 100).toFixed(1)}%`
+                          : '—'}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
+
         </div>
       </div>
 
-      {/* ── Interest entry hint ── */}
-      <div className="no-print" style={{
-        marginTop: 10, padding: '10px 14px',
-        background: '#FFFBEB', border: '1px solid #FDE68A',
-        borderRadius: 8, fontSize: 12, color: '#92400E',
-        display: 'flex', alignItems: 'center', gap: 8,
-      }}>
-        <Icon name="alert" size={14} />
-        <span>
-          <strong>ดอกเบี้ย</strong>: คลิกที่ตัวเลขในตารางเพื่อกรอก/แก้ไขดอกเบี้ยรายคัน
-          — บันทึกแยกหมวด ไม่กระทบค่าใช้จ่ายหมวดอื่น
-          · ดูรายการทั้งหมดได้ที่ <strong>การเงิน → ค่าใช้จ่ายคงที่</strong>
-        </span>
-      </div>
+      {/* ── Contextual hint ── */}
+      {viewMode === 'monthly' ? (
+        <div className="no-print" style={{
+          marginTop: 10, padding: '10px 14px',
+          background: '#FFFBEB', border: '1px solid #FDE68A',
+          borderRadius: 8, fontSize: 12, color: '#92400E',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <Icon name="alert" size={14} />
+          <span>
+            <strong>ดอกเบี้ย</strong>: คลิกที่ตัวเลขในตารางเพื่อกรอก/แก้ไขดอกเบี้ยรายคัน
+            — บันทึกแยกหมวด ไม่กระทบค่าใช้จ่ายหมวดอื่น
+            · ดูรายการทั้งหมดได้ที่ <strong>การเงิน → ค่าใช้จ่ายคงที่</strong>
+          </span>
+        </div>
+      ) : (
+        <div className="no-print" style={{
+          marginTop: 10, padding: '10px 14px',
+          background: '#EFF6FF', border: '1px solid #BFDBFE',
+          borderRadius: 8, fontSize: 12, color: '#1E40AF',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          <Icon name="chart" size={14} />
+          <span>
+            <strong>ภาพรวมรายปี พ.ศ. {year + 543}</strong>: ตัวเลขสะสมทั้ง 12 เดือน คำนวณ Real-time
+            · ดอกเบี้ยในโหมดนี้เป็นแบบอ่านอย่างเดียว — หากต้องการแก้ไขให้เปลี่ยนเป็นโหมดรายเดือน
+          </span>
+        </div>
+      )}
 
       {/* ── Print footer ── */}
       <div className="print-only" style={{ marginTop: 12, fontSize: 10, color: '#666', textAlign: 'center' }}>
