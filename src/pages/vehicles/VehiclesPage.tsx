@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { can, roleLabel } from '../../lib/permissions'
 import type { Vehicle, Employee, User, EditApprovalRequest, VehicleChangeField } from '../../types'
-import { Icon, StatusBadge } from '../../components/ui'
+import { Icon, StatusBadge, Field } from '../../components/ui'
 
 interface VehiclesPageProps {
   setActive: (id: string) => void
@@ -79,55 +79,89 @@ function docWarn(v: Vehicle): DocWarning | null {
   }
 }
 
+const VEHICLE_TYPES = ['4ล้อ', '6ล้อ', '10ล้อ', '18ล้อ', '22ล้อ', 'ตู้คอนเทนเนอร์', 'พ่วงข้าง']
+
 interface VehicleEditForm {
+  plate: string
+  brand: string
+  year: string
+  type: string
+  customType: string
   status: Vehicle['status']
+  driverId: string
   odometer: string
+  nextServiceKm: string
   fuel: string
+  purchaseDate: string
+  lastService: string
   nextService: string
+  tax: string
+  insurance: string
+  dispatchPermit: string
 }
 
 function buildChangeFields(before: Vehicle, after: VehicleEditForm): VehicleChangeField[] {
   const out: VehicleChangeField[] = []
-  if (after.status !== before.status) {
+  const effectiveType = after.type === 'อื่นๆ' ? (after.customType.trim() || 'อื่นๆ') : after.type
+
+  if (after.plate !== before.plate)
+    out.push({ key: 'plate', label: 'ทะเบียน', before: before.plate, after: after.plate })
+  if (after.brand !== before.brand)
+    out.push({ key: 'brand', label: 'ยี่ห้อ/รุ่น', before: before.brand, after: after.brand })
+  if (after.year !== String(before.year))
+    out.push({ key: 'year', label: 'ปี', before: String(before.year), after: after.year })
+  if (effectiveType !== before.type)
+    out.push({ key: 'type', label: 'ประเภทรถ', before: before.type, after: effectiveType })
+  if (after.status !== before.status)
     out.push({ key: 'status', label: 'สถานะรถ', before: before.status, after: after.status })
-  }
+  if ((after.driverId || '') !== (before.driverId || ''))
+    out.push({ key: 'driverId', label: 'คนขับ', before: before.driverId || '—', after: after.driverId || '—' })
   const od = Number(after.odometer)
-  if (!isNaN(od) && od !== before.odometer) {
-    out.push({
-      key: 'odometer',
-      label: 'เลขไมล์',
-      before: db.fmt(before.odometer),
-      after: db.fmt(od),
-    })
-  }
+  if (!isNaN(od) && od !== before.odometer)
+    out.push({ key: 'odometer', label: 'เลขไมล์', before: db.fmt(before.odometer), after: db.fmt(od) })
+  const nsk = Number(after.nextServiceKm)
+  if (!isNaN(nsk) && nsk !== (before.nextServiceKm || 0))
+    out.push({ key: 'nextServiceKm', label: 'ระยะทางซ่อมถัดไป', before: db.fmt(before.nextServiceKm || 0), after: db.fmt(nsk) })
   const fu = Number(after.fuel)
-  if (!isNaN(fu) && fu !== before.fuel) {
-    out.push({
-      key: 'fuel',
-      label: 'ระดับน้ำมัน (%)',
-      before: String(before.fuel),
-      after: String(fu),
-    })
-  }
-  if (after.nextService && after.nextService !== before.nextService) {
-    out.push({
-      key: 'nextService',
-      label: 'นัดซ่อมครั้งถัดไป',
-      before: before.nextService ? db.thaiDate(before.nextService) : '—',
-      after: db.thaiDate(after.nextService),
-    })
-  }
+  if (!isNaN(fu) && fu !== before.fuel)
+    out.push({ key: 'fuel', label: 'ระดับน้ำมัน (%)', before: String(before.fuel), after: String(fu) })
+  if ((after.purchaseDate || '') !== (before.purchaseDate || ''))
+    out.push({ key: 'purchaseDate', label: 'วันที่ซื้อรถ', before: before.purchaseDate || '—', after: after.purchaseDate || '—' })
+  if ((after.lastService || '') !== (before.lastService || ''))
+    out.push({ key: 'lastService', label: 'ซ่อมล่าสุด', before: before.lastService || '—', after: after.lastService || '—' })
+  if ((after.nextService || '') !== (before.nextService || ''))
+    out.push({ key: 'nextService', label: 'นัดซ่อมครั้งถัดไป', before: before.nextService || '—', after: after.nextService || '—' })
+  if ((after.tax || '') !== (before.tax || ''))
+    out.push({ key: 'tax', label: 'วันหมดอายุภาษี', before: before.tax || '—', after: after.tax || '—' })
+  if ((after.insurance || '') !== (before.insurance || ''))
+    out.push({ key: 'insurance', label: 'วันหมดอายุประกัน', before: before.insurance || '—', after: after.insurance || '—' })
+  if ((after.dispatchPermit || '') !== (before.dispatchPermit || ''))
+    out.push({ key: 'dispatchPermit', label: 'วันหมดอายุใบอนุญาต', before: before.dispatchPermit || '—', after: after.dispatchPermit || '—' })
   return out
 }
 
 function buildPatch(before: Vehicle, after: VehicleEditForm): Partial<Vehicle> {
   const patch: Partial<Vehicle> = {}
+  const effectiveType = after.type === 'อื่นๆ' ? (after.customType.trim() || 'อื่นๆ') : after.type
+  if (after.plate !== before.plate) patch.plate = after.plate
+  if (after.brand !== before.brand) patch.brand = after.brand
+  const yr = Number(after.year)
+  if (!isNaN(yr) && yr !== before.year) patch.year = yr
+  if (effectiveType !== before.type) patch.type = effectiveType
   if (after.status !== before.status) patch.status = after.status
+  if ((after.driverId || null) !== before.driverId) patch.driverId = after.driverId || null
   const od = Number(after.odometer)
   if (!isNaN(od) && od !== before.odometer) patch.odometer = od
+  const nsk = Number(after.nextServiceKm)
+  if (!isNaN(nsk) && nsk !== (before.nextServiceKm || 0)) patch.nextServiceKm = nsk
   const fu = Number(after.fuel)
   if (!isNaN(fu) && fu !== before.fuel) patch.fuel = fu
-  if (after.nextService && after.nextService !== before.nextService) patch.nextService = after.nextService
+  if ((after.purchaseDate || '') !== (before.purchaseDate || '')) patch.purchaseDate = after.purchaseDate
+  if ((after.lastService || '') !== (before.lastService || '')) patch.lastService = after.lastService
+  if ((after.nextService || '') !== (before.nextService || '')) patch.nextService = after.nextService
+  if ((after.tax || '') !== (before.tax || '')) patch.tax = after.tax
+  if ((after.insurance || '') !== (before.insurance || '')) patch.insurance = after.insurance
+  if ((after.dispatchPermit || '') !== (before.dispatchPermit || '')) patch.dispatchPermit = after.dispatchPermit
   return patch
 }
 
@@ -141,11 +175,25 @@ interface EditModalProps {
 }
 
 function VehicleEditModal({ vehicle, user, mode, onClose, onSuccess, onError }: EditModalProps) {
+  const employees = db.getAll<Employee>('employees')
+  const isCustomType = !VEHICLE_TYPES.includes(vehicle.type)
   const [form, setForm] = useState<VehicleEditForm>({
+    plate: vehicle.plate,
+    brand: vehicle.brand,
+    year: String(vehicle.year),
+    type: isCustomType ? 'อื่นๆ' : vehicle.type,
+    customType: isCustomType ? vehicle.type : '',
     status: vehicle.status,
+    driverId: vehicle.driverId ?? '',
     odometer: String(vehicle.odometer),
+    nextServiceKm: String(vehicle.nextServiceKm || ''),
     fuel: String(vehicle.fuel),
-    nextService: vehicle.nextService,
+    purchaseDate: vehicle.purchaseDate || '',
+    lastService: vehicle.lastService || '',
+    nextService: vehicle.nextService || '',
+    tax: vehicle.tax || '',
+    insurance: vehicle.insurance || '',
+    dispatchPermit: vehicle.dispatchPermit || '',
   })
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
@@ -153,8 +201,16 @@ function VehicleEditModal({ vehicle, user, mode, onClose, onSuccess, onError }: 
   const set = <K extends keyof VehicleEditForm>(k: K, v: VehicleEditForm[K]) =>
     setForm(f => ({ ...f, [k]: v }))
 
+  const availableDrivers = employees.filter(
+    e => e.position === 'คนขับ' && (!e.vehicleId || e.vehicleId === vehicle.id),
+  )
+
   const submit = () => {
     if (saving) return
+    if (!form.plate.trim() || !form.brand.trim()) {
+      onError('กรุณากรอกทะเบียนและยี่ห้อ')
+      return
+    }
     setSaving(true)
     try {
       const changeFields = buildChangeFields(vehicle, form)
@@ -168,7 +224,6 @@ function VehicleEditModal({ vehicle, user, mode, onClose, onSuccess, onError }: 
       }
 
       if (!reason.trim()) throw new Error('กรุณาระบุเหตุผลในการขอแก้ไข')
-
       db.add<Partial<EditApprovalRequest>>('editApprovals', {
         requesterId: user.id,
         requesterName: user.name,
@@ -210,83 +265,135 @@ function VehicleEditModal({ vehicle, user, mode, onClose, onSuccess, onError }: 
         style={{
           background: 'var(--card)',
           borderRadius: 12,
-          width: '90%',
-          maxWidth: 520,
-          padding: 24,
+          width: '95%',
+          maxWidth: 700,
+          maxHeight: '90vh',
+          display: 'flex',
+          flexDirection: 'column',
           boxShadow: '0 10px 40px rgba(0,0,0,.2)',
         }}
       >
-        <h2 style={{ margin: '0 0 4px 0', fontSize: 18, fontWeight: 600 }}>
-          {mode === 'edit' ? 'แก้ไขข้อมูลรถ' : 'ขออนุมัติแก้ไขข้อมูลรถ'}
-        </h2>
-        <div style={{ color: 'var(--text-2)', fontSize: 13, marginBottom: 18 }}>
-          <span className="mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{vehicle.plate}</span>
-          {' · '}{vehicle.brand} · {vehicle.type}
+        {/* Header */}
+        <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+          <h2 style={{ margin: '0 0 4px 0', fontSize: 18, fontWeight: 600 }}>
+            {mode === 'edit' ? 'แก้ไขข้อมูลรถ' : 'ขออนุมัติแก้ไขข้อมูลรถ'}
+          </h2>
+          <div style={{ color: 'var(--text-2)', fontSize: 13 }}>
+            <span className="mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{vehicle.plate}</span>
+            {' · '}{vehicle.brand} · {vehicle.type}
+          </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 18 }}>
+        {/* Scrollable body */}
+        <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Section 1: ข้อมูลทั่วไป */}
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
-              สถานะรถ
-            </label>
-            <select
-              value={form.status}
-              onChange={e => set('status', e.target.value as Vehicle['status'])}
-              style={{ width: '100%' }}
-            >
-              <option value="available">พร้อมใช้งาน</option>
-              <option value="on-trip">ออกงาน</option>
-              <option value="maintenance">ซ่อมบำรุง</option>
-              <option value="warning">เฝ้าระวัง</option>
-            </select>
+            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <span style={{ color: 'var(--primary)' }}><Icon name="truck" size={16} /></span>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>ข้อมูลทั่วไป</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+              <Field label="ทะเบียนรถ *">
+                <input value={form.plate} onChange={e => set('plate', e.target.value)} placeholder="เช่น ABC-1234" />
+              </Field>
+              <Field label="ยี่ห้อ *">
+                <input value={form.brand} onChange={e => set('brand', e.target.value)} placeholder="เช่น Isuzu, Hino" />
+              </Field>
+              <Field label="รุ่น / ปี">
+                <input value={form.year} onChange={e => set('year', e.target.value)} placeholder="เช่น FVR 2018" />
+              </Field>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: form.type === 'อื่นๆ' ? '1fr 1fr 1fr 1fr' : '1fr 1fr 1fr', gap: 12 }}>
+              <Field label="ประเภทรถ *">
+                <select value={form.type} onChange={e => set('type', e.target.value)}>
+                  {VEHICLE_TYPES.map(t => <option key={t}>{t}</option>)}
+                  <option value="อื่นๆ">อื่นๆ (กำหนดเอง)</option>
+                </select>
+              </Field>
+              {form.type === 'อื่นๆ' && (
+                <Field label="ระบุประเภทรถ *">
+                  <input value={form.customType} onChange={e => set('customType', e.target.value)} placeholder="เช่น รถพ่วง 18ล้อ" />
+                </Field>
+              )}
+              <Field label="สถานะรถ">
+                <select value={form.status} onChange={e => set('status', e.target.value as Vehicle['status'])}>
+                  <option value="available">พร้อมใช้งาน</option>
+                  <option value="on-trip">ออกงาน</option>
+                  <option value="maintenance">ซ่อมบำรุง</option>
+                  <option value="warning">เฝ้าระวัง</option>
+                </select>
+              </Field>
+              <Field label="คนขับประจำรถ">
+                <select value={form.driverId} onChange={e => set('driverId', e.target.value)}>
+                  <option value="">-- ยังไม่ระบุ --</option>
+                  {availableDrivers.map(e => (
+                    <option key={e.id} value={e.id}>{e.name} ({e.code})</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
           </div>
+
+          {/* Section 2: ข้อมูลระยะทาง */}
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
-              เลขไมล์ (กม.)
-            </label>
-            <input
-              type="number"
-              value={form.odometer}
-              onChange={e => set('odometer', e.target.value)}
-              style={{ width: '100%' }}
-            />
+            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <span style={{ color: 'var(--primary)' }}><Icon name="gauge" size={16} /></span>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>ข้อมูลระยะทาง</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <Field label="เลขไมล์ปัจจุบัน (km)">
+                <input type="number" value={form.odometer} onChange={e => set('odometer', e.target.value)} />
+              </Field>
+              <Field label="ระยะทางซ่อมครั้งถัดไป (km)">
+                <input type="number" value={form.nextServiceKm} onChange={e => set('nextServiceKm', e.target.value)} placeholder="เช่น 10000" />
+              </Field>
+              <Field label="ระดับน้ำมัน (%)">
+                <input type="number" min="0" max="100" value={form.fuel} onChange={e => set('fuel', e.target.value)} />
+              </Field>
+            </div>
           </div>
+
+          {/* Section 3: เอกสาร & วันหมดอายุ */}
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
-              ระดับน้ำมัน (%)
-            </label>
-            <input
-              type="number"
-              min="0"
-              max="100"
-              value={form.fuel}
-              onChange={e => set('fuel', e.target.value)}
-              style={{ width: '100%' }}
-            />
+            <div className="row" style={{ gap: 8, marginBottom: 12 }}>
+              <span style={{ color: 'var(--primary)' }}><Icon name="calendar" size={16} /></span>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>เอกสาร &amp; วันหมดอายุ</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+              <Field label="วันที่ซื้อรถ">
+                <input type="date" value={form.purchaseDate} onChange={e => set('purchaseDate', e.target.value)} />
+              </Field>
+              <Field label="ซ่อมบำรุงล่าสุด">
+                <input type="date" value={form.lastService} onChange={e => set('lastService', e.target.value)} />
+              </Field>
+              <Field label="นัดซ่อมครั้งถัดไป">
+                <input type="date" value={form.nextService} onChange={e => set('nextService', e.target.value)} />
+              </Field>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <Field label="วันหมดอายุภาษี">
+                <input type="date" value={form.tax} onChange={e => set('tax', e.target.value)} />
+              </Field>
+              <Field label="วันหมดอายุประกันภัย">
+                <input type="date" value={form.insurance} onChange={e => set('insurance', e.target.value)} />
+              </Field>
+              <Field label="วันหมดอายุใบอนุญาต">
+                <input type="date" value={form.dispatchPermit} onChange={e => set('dispatchPermit', e.target.value)} />
+              </Field>
+            </div>
           </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
-              นัดซ่อมครั้งถัดไป
-            </label>
-            <input
-              type="date"
-              value={form.nextService}
-              onChange={e => set('nextService', e.target.value)}
-              style={{ width: '100%' }}
-            />
-          </div>
+
           {mode === 'request' && (
             <div>
-              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
-                เหตุผลที่ขอแก้ไข *
-              </label>
-              <textarea
-                value={reason}
-                onChange={e => setReason(e.target.value)}
-                rows={2}
-                placeholder="เช่น อัปเดตเลขไมล์หลังจบทริป"
-                style={{ width: '100%', resize: 'vertical', minHeight: 48 }}
-              />
+              <Field label="เหตุผลที่ขอแก้ไข *">
+                <textarea
+                  value={reason}
+                  onChange={e => setReason(e.target.value)}
+                  rows={2}
+                  placeholder="เช่น อัปเดตเลขไมล์หลังจบทริป"
+                  style={{ resize: 'vertical', minHeight: 48 }}
+                />
+              </Field>
               <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
                 คำขอจะถูกส่งให้ผู้จัดการพิจารณาก่อนการเปลี่ยนแปลงจะมีผล
               </div>
@@ -294,13 +401,16 @@ function VehicleEditModal({ vehicle, user, mode, onClose, onSuccess, onError }: 
           )}
         </div>
 
-        <div className="row btn-row" style={{ justifyContent: 'flex-end' }}>
-          <button className="btn" onClick={onClose} disabled={saving}>
-            <Icon name="close" size={15} /> ยกเลิก
-          </button>
-          <button className="btn primary" onClick={submit} disabled={saving}>
-            <Icon name="check" size={15} /> {saving ? 'กำลังบันทึก…' : (mode === 'edit' ? 'บันทึก' : 'ส่งคำขอ')}
-          </button>
+        {/* Footer */}
+        <div style={{ padding: '16px 24px', borderTop: '1px solid var(--line)', flexShrink: 0 }}>
+          <div className="row btn-row" style={{ justifyContent: 'flex-end' }}>
+            <button className="btn" onClick={onClose} disabled={saving}>
+              <Icon name="close" size={15} /> ยกเลิก
+            </button>
+            <button className="btn primary" onClick={submit} disabled={saving}>
+              <Icon name="check" size={15} /> {saving ? 'กำลังบันทึก…' : (mode === 'edit' ? 'บันทึก' : 'ส่งคำขอ')}
+            </button>
+          </div>
         </div>
       </div>
     </div>

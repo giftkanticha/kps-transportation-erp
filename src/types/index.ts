@@ -331,7 +331,7 @@ export interface ActivityLog {
 }
 
 export interface VehicleChangeField {
-  key: 'status' | 'odometer' | 'fuel' | 'nextService'
+  key: string
   label: string
   before: string
   after: string
