@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
-import type { Employee } from '../../types'
+import type { Employee, Vehicle } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface EmployeeAddProps {
@@ -38,27 +38,39 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
     joined: '',
     licenseStatus: 'ok',
   })
+  const [vehicleIds, setVehicleIds] = useState<string[]>([])
+  const allVehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
 
   const set = (k: keyof EmployeeForm, v: string) =>
     setForm(f => ({ ...f, [k]: v }))
+  const toggleVehicle = (id: string) =>
+    setVehicleIds(ids => (ids.includes(id) ? ids.filter(v => v !== id) : [...ids, id]))
+
+  const isDriver = form.position === 'คนขับ'
 
   const save = () => {
     if (!form.name || !form.phone) {
       alert('กรุณากรอกชื่อและเบอร์โทร')
       return
     }
-    db.add<Partial<Employee>>('employees', {
+    const newEmp = db.add<Partial<Employee>>('employees', {
       ...form,
       position: form.position === 'อื่นๆ' ? (form.customPosition.trim() || 'อื่นๆ') : form.position,
       licenseStatus: form.licenseStatus as Employee['licenseStatus'],
       license: '',
       licenseExpire: '',
       salary: 17000,
-      vehicleId: null,
+      vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
       idCard: '',
       accountBank: '',
       accountNo: '',
-    })
+    }) as Employee
+    // Sync Vehicle.driverId for the selected set
+    if (isDriver) {
+      for (const vId of vehicleIds) {
+        db.update<Vehicle>('vehicles', vId, { driverId: newEmp.id })
+      }
+    }
     setActive('employees')
   }
 
@@ -167,6 +179,75 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
             </Field>
           </div>
         </div>
+
+        {/* Vehicles assigned (only for drivers) */}
+        {isDriver && (
+          <div className="card pad">
+            <div className="row" style={{ marginBottom: 16, justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="row">
+                <span style={{ color: 'var(--primary)' }}>
+                  <Icon name="truck" size={20} />
+                </span>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>ทะเบียนรถที่รับผิดชอบ</h3>
+              </div>
+              <span className="muted" style={{ fontSize: 12 }}>
+                เลือกแล้ว: <strong>{vehicleIds.length}</strong> คัน
+              </span>
+            </div>
+            {allVehicles.length === 0 ? (
+              <div
+                style={{
+                  padding: 14, border: '1px dashed var(--line)', borderRadius: 8,
+                  fontSize: 13, color: 'var(--text-muted)', textAlign: 'center',
+                }}
+              >ยังไม่มีรถในระบบ — เพิ่มรถที่เมนู "รายการรถทั้งหมด"</div>
+            ) : (
+              <div
+                style={{
+                  display: 'flex', flexWrap: 'wrap', gap: 8,
+                  padding: 10, border: '1px solid var(--line)', borderRadius: 8,
+                  maxHeight: 220, overflowY: 'auto',
+                }}
+              >
+                {allVehicles.map(v => {
+                  const checked = vehicleIds.includes(v.id)
+                  const otherDriver = !checked && v.driverId
+                    ? db.nameOf('employees', v.driverId)
+                    : null
+                  return (
+                    <label
+                      key={v.id}
+                      className="row"
+                      style={{
+                        gap: 6, cursor: 'pointer', fontSize: 13,
+                        padding: '6px 10px', borderRadius: 6,
+                        border: '1px solid ' + (checked ? 'var(--primary)' : 'var(--line)'),
+                        background: checked ? 'var(--primary-50, #EFF6FF)' : 'var(--card)',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleVehicle(v.id)}
+                        style={{ accentColor: 'var(--primary)' }}
+                      />
+                      <span className="mono" style={{ fontWeight: 600 }}>{v.plate}</span>
+                      <span className="muted" style={{ fontSize: 11 }}>{v.type}</span>
+                      {otherDriver && (
+                        <span style={{ fontSize: 10.5, color: 'var(--amber)' }}>
+                          (ปัจจุบัน: {otherDriver})
+                        </span>
+                      )}
+                    </label>
+                  )
+                })}
+              </div>
+            )}
+            <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+              เลือกได้หลายคัน · เชื่อมกับ "รายการรถทั้งหมด" · ระบบจะ auto-fill คนขับเมื่อเลือกรถดังกล่าวในเปิดงาน
+            </div>
+          </div>
+        )}
 
         {/* Documents and start date */}
         <div className="card pad">

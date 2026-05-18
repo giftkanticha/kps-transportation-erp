@@ -1,7 +1,15 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
-import type { Employee } from '../../types'
+import type { Employee, Vehicle } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
+
+function vehiclesOfDriver(employeeId: string): Vehicle[] {
+  return db.getAll<Vehicle>('vehicles').filter(v => v.driverId === employeeId)
+}
+
+function isDriverPosition(pos: string): boolean {
+  return pos === 'คนขับ'
+}
 
 interface EmployeesPageProps {
   setActive: (id: string) => void
@@ -213,6 +221,12 @@ interface EmployeeEditModalProps {
 }
 
 function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProps) {
+  const allVehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
+  const initialVehicleIds = useMemo(
+    () => allVehicles.filter(v => v.driverId === employee.id).map(v => v.id),
+    [allVehicles, employee.id],
+  )
+
   const [form, setForm] = useState({
     name: employee.name,
     position: employee.position,
@@ -221,8 +235,13 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
     joined: employee.joined,
     address: employee.address ?? '',
   })
+  const [vehicleIds, setVehicleIds] = useState<string[]>(initialVehicleIds)
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const toggleVehicle = (id: string) =>
+    setVehicleIds(ids => (ids.includes(id) ? ids.filter(v => v !== id) : [...ids, id]))
+
+  const isDriver = isDriverPosition(form.position)
 
   const save = () => {
     if (!form.name.trim() || !form.phone.trim()) {
@@ -236,7 +255,30 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
       lineId: form.lineId,
       joined: form.joined,
       address: form.address,
+      vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
     })
+
+    // Sync Vehicle.driverId for the selected set:
+    //   - vehicles newly selected → set driverId to this employee
+    //   - vehicles previously assigned to this employee but now deselected → clear driverId
+    if (isDriver) {
+      const finalSet = new Set(vehicleIds)
+      const prevSet = new Set(initialVehicleIds)
+      for (const v of allVehicles) {
+        const wasAssigned = prevSet.has(v.id)
+        const nowAssigned = finalSet.has(v.id)
+        if (nowAssigned && v.driverId !== employee.id) {
+          db.update<Vehicle>('vehicles', v.id, { driverId: employee.id })
+        } else if (!nowAssigned && wasAssigned) {
+          db.update<Vehicle>('vehicles', v.id, { driverId: null })
+        }
+      }
+    } else {
+      // Position changed away from คนขับ → clear all previously assigned vehicles
+      for (const vId of initialVehicleIds) {
+        db.update<Vehicle>('vehicles', vId, { driverId: null })
+      }
+    }
     onClose()
     onSaved()
   }
@@ -286,6 +328,72 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
               style={{ width: '100%', resize: 'vertical' }}
             />
           </div>
+
+          {isDriver && (
+            <div>
+              <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
+                ทะเบียนรถที่รับผิดชอบ
+                <span className="muted" style={{ fontWeight: 400, marginLeft: 6, fontSize: 11 }}>
+                  (เลือกได้หลายคัน · เชื่อมกับเมนูรายการรถ)
+                </span>
+              </label>
+              {allVehicles.length === 0 ? (
+                <div
+                  style={{
+                    padding: 12, border: '1px dashed var(--line)', borderRadius: 8,
+                    fontSize: 12.5, color: 'var(--text-muted)', textAlign: 'center',
+                  }}
+                >ยังไม่มีรถในระบบ</div>
+              ) : (
+                <div
+                  style={{
+                    display: 'flex', flexWrap: 'wrap', gap: 8,
+                    padding: 10, border: '1px solid var(--line)', borderRadius: 8,
+                    maxHeight: 180, overflowY: 'auto',
+                  }}
+                >
+                  {allVehicles.map(v => {
+                    const checked = vehicleIds.includes(v.id)
+                    const otherDriver = !checked && v.driverId && v.driverId !== employee.id
+                      ? db.nameOf('employees', v.driverId)
+                      : null
+                    return (
+                      <label
+                        key={v.id}
+                        className="row"
+                        style={{
+                          gap: 6, cursor: 'pointer', fontSize: 13,
+                          padding: '6px 10px', borderRadius: 6,
+                          border: '1px solid ' + (checked ? 'var(--primary)' : 'var(--line)'),
+                          background: checked ? 'var(--primary-50, #EFF6FF)' : 'var(--card)',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleVehicle(v.id)}
+                          style={{ accentColor: 'var(--primary)' }}
+                        />
+                        <span className="mono" style={{ fontWeight: 600 }}>{v.plate}</span>
+                        <span className="muted" style={{ fontSize: 11 }}>{v.type}</span>
+                        {otherDriver && (
+                          <span style={{ fontSize: 10.5, color: 'var(--amber)' }}>
+                            (ปัจจุบัน: {otherDriver})
+                          </span>
+                        )}
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+                เลือกแล้ว: {vehicleIds.length} คัน
+                {vehicleIds.length > 0 && (
+                  <> — เมื่อเปิดงาน ระบบจะ auto-fill คนขับนี้เมื่อเลือกรถดังกล่าว</>
+                )}
+              </div>
+            </div>
+          )}
         </div>
         <div className="row btn-row" style={{ justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>
@@ -481,7 +589,29 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
                     <span className="mono" style={{ fontWeight: 600 }}>{e.code}</span>
                   </td>
                   <td style={{ fontWeight: 500 }}>{e.name}</td>
-                  <td>{e.position}</td>
+                  <td>
+                    <div>{e.position}</div>
+                    {isDriverPosition(e.position) && (() => {
+                      const vs = vehiclesOfDriver(e.id)
+                      if (vs.length === 0) return (
+                        <div className="muted" style={{ fontSize: 10.5, marginTop: 2 }}>ยังไม่ได้กำหนดรถ</div>
+                      )
+                      return (
+                        <div className="row" style={{ gap: 4, flexWrap: 'wrap', marginTop: 2 }}>
+                          {vs.map(v => (
+                            <span
+                              key={v.id}
+                              className="mono"
+                              style={{
+                                fontSize: 10.5, padding: '1px 6px', borderRadius: 4,
+                                background: 'var(--primary-50, #EFF6FF)', color: 'var(--primary)',
+                              }}
+                            >{v.plate}</span>
+                          ))}
+                        </div>
+                      )
+                    })()}
+                  </td>
                   <td className="mono">{e.phone}</td>
                   <td>
                     <a style={{ color: 'var(--primary)' }}>{e.lineId}</a>

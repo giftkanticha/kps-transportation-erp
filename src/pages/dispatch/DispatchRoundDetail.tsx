@@ -61,6 +61,22 @@ function calcLegAmount(priceMode: LegFormState['priceMode'], weightTon: number, 
   return weightTon * price // per_ton
 }
 
+// Convert weight from form-input (user's chosen unit) to canonical ตัน for storage.
+function inputWeightToTon(weightInput: string, mode: LegFormState['priceMode']): number {
+  const n = Number(weightInput) || 0
+  return mode === 'per_kg' ? n / 1000 : n
+}
+
+// Convert canonical ตัน → user's display unit (for editing existing legs).
+function tonToDisplayWeight(weightTon: number, mode: LegFormState['priceMode']): string {
+  if (!weightTon) return ''
+  return mode === 'per_kg' ? String(weightTon * 1000) : String(weightTon)
+}
+
+function weightUnitLabel(mode: LegFormState['priceMode']): string {
+  return mode === 'per_kg' ? 'กิโลกรัม' : 'ตัน'
+}
+
 function priceUnitLabel(mode: LegFormState['priceMode']): string {
   if (mode === 'lump') return 'บาท (เหมาทั้งเที่ยว)'
   if (mode === 'per_kg') return 'บาท/กิโลกรัม'
@@ -83,9 +99,25 @@ function LegModal({
   const isReturn = f.legType === 'return'
   const isLump = f.priceMode === 'lump'
 
-  const wTon = Number(f.weight) || 0
+  // Switching priceMode auto-converts the weight value so the displayed number
+  // represents the same load in the new unit.
+  const onPriceModeChange = (newMode: LegFormState['priceMode']) => {
+    const oldMode = f.priceMode
+    if (oldMode === newMode) return
+    let nextWeight = f.weight
+    if (oldMode === 'per_ton' && newMode === 'per_kg') {
+      nextWeight = f.weight ? String(Number(f.weight) * 1000) : ''
+    } else if (oldMode === 'per_kg' && newMode === 'per_ton') {
+      nextWeight = f.weight ? String(Number(f.weight) / 1000) : ''
+    }
+    setF(s => ({ ...s, priceMode: newMode, weight: nextWeight }))
+  }
+
+  // f.weight is in user-unit (matches priceMode). For per_kg → input is กก., calc直接 input × price.
+  const wInput = Number(f.weight) || 0
   const p = Number(f.price) || 0
-  const previewAmount = isReturn ? 0 : calcLegAmount(f.priceMode, wTon, p)
+  // amount = weight × price when units match (per_ton: ตัน×฿/ตัน, per_kg: กก.×฿/กก.). Lump: just price.
+  const previewAmount = isReturn ? 0 : isLump ? p : wInput * p
 
   const submit = () => {
     if (!f.origin.trim()) return alert('กรุณากรอกต้นทาง')
@@ -159,7 +191,7 @@ function LegModal({
                         type="radio"
                         name="leg-price-mode"
                         checked={f.priceMode === opt.v}
-                        onChange={() => set('priceMode', opt.v)}
+                        onChange={() => onPriceModeChange(opt.v)}
                         style={{ accentColor: 'var(--primary)' }}
                       />
                       <span>{opt.l} <span className="muted" style={{ fontSize: 11 }}>({opt.h})</span></span>
@@ -170,14 +202,19 @@ function LegModal({
 
               <div className="grid-2" style={{ gap: 12 }}>
                 {!isLump && (
-                  <Field label="น้ำหนักโหลด (ตัน) *">
+                  <Field label={`น้ำหนักโหลด (${weightUnitLabel(f.priceMode)}) *`}>
                     <input
-                      type="number" step="0.01" value={f.weight}
+                      type="number"
+                      step={f.priceMode === 'per_kg' ? '1' : '0.01'}
+                      value={f.weight}
                       onChange={e => set('weight', e.target.value)}
-                      placeholder="0.00"
+                      placeholder={f.priceMode === 'per_kg' ? '0' : '0.00'}
                     />
                     <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                      กรอกเป็น <strong>ตัน</strong> เสมอ ({wTon > 0 ? `= ${(wTon * 1000).toLocaleString()} กก.` : 'เช่น 25 = 25,000 กก.'})
+                      {f.priceMode === 'per_kg'
+                        ? <>หน่วย <strong>กิโลกรัม</strong> ({wInput > 0 ? `= ${(wInput / 1000).toFixed(3)} ตัน` : 'เช่น 25,000 = 25 ตัน'})</>
+                        : <>หน่วย <strong>ตัน</strong> ({wInput > 0 ? `= ${(wInput * 1000).toLocaleString()} กก.` : 'เช่น 25 = 25,000 กก.'})</>
+                      }
                     </div>
                   </Field>
                 )}
@@ -202,9 +239,7 @@ function LegModal({
                 <span className="muted">
                   {f.priceMode === 'lump'
                     ? <>เหมา: <strong>{p > 0 ? db.fmt(p) : '—'} บาท</strong></>
-                    : f.priceMode === 'per_kg'
-                      ? <>คำนวณ: {wTon || 0} ตัน × 1,000 × {p || 0} ฿/กก.</>
-                      : <>คำนวณ: {wTon || 0} ตัน × {p || 0} ฿/ตัน</>
+                    : <>คำนวณ: {wInput.toLocaleString()} {weightUnitLabel(f.priceMode)} × {p || 0} ฿/{weightUnitLabel(f.priceMode) === 'ตัน' ? 'ตัน' : 'กก.'}</>
                   }
                 </span>
                 <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 15 }}>
@@ -484,9 +519,10 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const saveLeg = (form: LegFormState) => {
     if (!editingLeg) return
     const isReturn = form.legType === 'return'
-    const weight = Number(form.weight) || 0
+    // form.weight is in user's chosen unit (กก. or ตัน) → convert to canonical ตัน for storage
+    const weightTon = inputWeightToTon(form.weight, form.priceMode)
     const price = Number(form.price) || 0
-    const amount = isReturn ? 0 : calcLegAmount(form.priceMode, weight, price)
+    const amount = isReturn ? 0 : calcLegAmount(form.priceMode, weightTon, price)
     const newLeg: DispatchLeg = {
       id: editingLeg.index >= 0 && legs[editingLeg.index]?.id
         ? legs[editingLeg.index].id
@@ -497,7 +533,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       cargo: form.cargo.trim(),
       cargoType: form.cargoType.trim(),
       priceMode: form.priceMode,
-      weight,
+      weight: weightTon,
       price,
       amount,
       legType: form.legType,
@@ -667,21 +703,24 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                           <button
                             className="btn ghost icon sm"
                             title="แก้ไข"
-                            onClick={() => setEditingLeg({
-                              index: i,
-                              data: {
-                                origin: l.origin,
-                                destination: l.destination,
-                                customerId: l.customerId || '',
-                                cargo: l.cargo || '',
-                                cargoType: l.cargoType || '',
-                                priceMode: l.priceMode || 'per_ton',
-                                weight: String(l.weight || ''),
-                                price: String(l.price || ''),
-                                legType: l.legType ?? 'outbound',
-                                notes: l.notes || '',
-                              },
-                            })}
+                            onClick={() => {
+                              const mode = l.priceMode || 'per_ton'
+                              setEditingLeg({
+                                index: i,
+                                data: {
+                                  origin: l.origin,
+                                  destination: l.destination,
+                                  customerId: l.customerId || '',
+                                  cargo: l.cargo || '',
+                                  cargoType: l.cargoType || '',
+                                  priceMode: mode,
+                                  weight: tonToDisplayWeight(l.weight || 0, mode),
+                                  price: String(l.price || ''),
+                                  legType: l.legType ?? 'outbound',
+                                  notes: l.notes || '',
+                                },
+                              })
+                            }}
                           >
                             <Icon name="edit" size={14} />
                           </button>

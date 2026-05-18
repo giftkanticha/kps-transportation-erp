@@ -68,6 +68,25 @@ function adjustedAmount(leg: DispatchLeg, deliveredWeightTon: number | null): nu
   return calcLegAmount(leg.priceMode, w, leg.price || 0)
 }
 
+// User-input unit for the deliveredWeight field follows the leg's priceMode.
+function weightUnitForLeg(mode: DispatchLeg['priceMode'] | undefined): 'กก.' | 'ตัน' {
+  return mode === 'per_kg' ? 'กก.' : 'ตัน'
+}
+
+// Convert deliveredWeight user-input (in matching unit) → canonical ตัน for storage/calc.
+function dwInputToTon(input: string, mode: DispatchLeg['priceMode'] | undefined): number | null {
+  if (input === '' || input == null) return null
+  const n = Number(input)
+  if (isNaN(n)) return null
+  return mode === 'per_kg' ? n / 1000 : n
+}
+
+// Convert canonical ตัน → user-input unit for display when re-opening a leg.
+function tonToDwInput(weightTon: number | null | undefined, mode: DispatchLeg['priceMode'] | undefined): string {
+  if (weightTon == null) return ''
+  return mode === 'per_kg' ? String(weightTon * 1000) : String(weightTon)
+}
+
 function DraftRoundsList({
   setSubject,
 }: { setSubject: (s: unknown) => void }) {
@@ -169,7 +188,9 @@ function CloseForm({
     setLegStates(
       (round.legs ?? []).map(l => ({
         id: l.id || uid('lg'),
-        deliveredWeight: l.deliveredWeight != null ? String(l.deliveredWeight) : '',
+        // legState.deliveredWeight is the USER-input value in the leg's display unit
+        // (กก. for per_kg, ตัน otherwise). Convert from canonical ตัน at load.
+        deliveredWeight: tonToDwInput(l.deliveredWeight ?? null, l.priceMode),
         perDiem: l.perDiem != null ? String(l.perDiem) : '',
         notes: l.notes || '',
       })),
@@ -202,11 +223,12 @@ function CloseForm({
   const updateExpense = (id: string, patch: Partial<OtherExpense>) =>
     setOtherExp(es => es.map(e => (e.id === id ? { ...e, ...patch } : e)))
 
-  // Live calc: revenue uses ADJUSTED amount based on deliveredWeight + priceMode
+  // Live calc: revenue uses ADJUSTED amount based on deliveredWeight + priceMode.
+  // legState.deliveredWeight is in user-unit (กก. for per_kg, ตัน otherwise) → convert to ตัน.
   const adjustedLegAmounts = legs.map((l, i) => {
     const ls = legStates[i]
-    const dw = ls?.deliveredWeight ? Number(ls.deliveredWeight) : null
-    return adjustedAmount(l, dw)
+    const dwTon = ls?.deliveredWeight ? dwInputToTon(ls.deliveredWeight, l.priceMode) : null
+    return adjustedAmount(l, dwTon)
   })
   const revenue = adjustedLegAmounts.reduce((s, a) => s + a, 0)
   const perDiemTotal = legStates.reduce((s, ls) => s + (Number(ls.perDiem) || 0), 0)
@@ -222,15 +244,15 @@ function CloseForm({
   const buildLegsPatch = (markClosed: boolean): DispatchLeg[] =>
     legs.map((l, i) => {
       const ls = legStates[i]
-      const dw = ls?.deliveredWeight ? Number(ls.deliveredWeight) : null
+      const dwTon = ls?.deliveredWeight ? dwInputToTon(ls.deliveredWeight, l.priceMode) : null
       const pd = ls?.perDiem ? Number(ls.perDiem) : 0
       return {
         ...l,
-        deliveredWeight: dw,
-        amount: adjustedAmount(l, dw),
+        deliveredWeight: dwTon,
+        amount: adjustedAmount(l, dwTon),
         perDiem: pd,
         notes: ls?.notes || l.notes,
-        closed: markClosed && (l.legType === 'return' || dw != null),
+        closed: markClosed && (l.legType === 'return' || dwTon != null),
       }
     })
 
@@ -349,15 +371,20 @@ function CloseForm({
         {legs.map((l, i) => {
           const ls = legStates[i]
           if (!ls) return null
-          const dw = Number(ls.deliveredWeight) || 0
+          const wUnit = weightUnitForLeg(l.priceMode)  // 'กก.' | 'ตัน'
+          const isPerKg = l.priceMode === 'per_kg'
+          // dw in canonical ตัน (for compare against l.weight which is ตัน)
+          const dwTon = ls.deliveredWeight ? (dwInputToTon(ls.deliveredWeight, l.priceMode) ?? 0) : 0
           const filled = ls.deliveredWeight !== ''
           const isReturn = l.legType === 'return'
           const isLump = l.priceMode === 'lump'
-          const lossKg = filled ? Math.max(0, (l.weight || 0) - dw) * 1000 : 0
+          const lossKg = filled ? Math.max(0, (l.weight || 0) - dwTon) * 1000 : 0
           const exceeds = lossKg > MAX_WEIGHT_LOSS_KG
-          const overweight = filled && dw > (l.weight || 0)
+          const overweight = filled && dwTon > (l.weight || 0)
           const newAmount = adjustedLegAmounts[i]
           const diffAmount = newAmount - (l.amount || 0)
+          // Loaded weight displayed in matching user unit
+          const loadedWeightDisplay = isPerKg ? (l.weight || 0) * 1000 : (l.weight || 0)
           return (
             <div
               key={l.id || i}
@@ -389,17 +416,22 @@ function CloseForm({
               </div>
 
               <div className="grid-3" style={{ gap: 12 }}>
-                <Field label="น้ำหนักต้นทาง (ตัน)">
-                  <input type="number" value={l.weight || 0} disabled style={{ background: 'var(--bg)' }} />
+                <Field label={`น้ำหนักต้นทาง (${wUnit})`}>
+                  <input
+                    type="number"
+                    value={loadedWeightDisplay}
+                    disabled
+                    style={{ background: 'var(--bg)' }}
+                  />
                 </Field>
                 {!isReturn && (
-                  <Field label={isLump ? 'น้ำหนักปลายทาง (ตัน)' : 'น้ำหนักปลายทาง (ตัน) *'}>
+                  <Field label={`น้ำหนักปลายทาง (${wUnit})${isLump ? '' : ' *'}`}>
                     <input
                       type="number"
-                      step="0.001"
+                      step={isPerKg ? '1' : '0.001'}
                       value={ls.deliveredWeight}
                       onChange={e => updateLegState(i, { deliveredWeight: e.target.value })}
-                      placeholder="0.00"
+                      placeholder={isPerKg ? '0' : '0.00'}
                       disabled={isClosed}
                     />
                   </Field>
@@ -421,9 +453,9 @@ function CloseForm({
                   <div className="row" style={{ justifyContent: 'space-between', fontSize: 12.5, marginBottom: 6 }}>
                     <span className="muted">
                       {overweight
-                        ? <span style={{ color: 'var(--red)' }}>❌ น้ำหนักปลายเกินต้น ({(dw - (l.weight || 0)).toFixed(3)} ตัน)</span>
+                        ? <span style={{ color: 'var(--red)' }}>❌ น้ำหนักปลายเกินต้น ({((dwTon - (l.weight || 0)) * 1000).toFixed(0)} กก.)</span>
                         : lossKg === 0
-                          ? <span style={{ color: 'var(--green)' }}>✓ ส่งครบ {(l.weight || 0).toFixed(2)} ตัน</span>
+                          ? <span style={{ color: 'var(--green)' }}>✓ ส่งครบ {loadedWeightDisplay.toLocaleString()} {wUnit}</span>
                           : exceeds
                             ? <span style={{ color: 'var(--red)', fontWeight: 600 }}>
                                 ⚠️ น้ำหนักหาย {lossKg.toFixed(0)} กก. (เกินกำหนด {MAX_WEIGHT_LOSS_KG} กก.)

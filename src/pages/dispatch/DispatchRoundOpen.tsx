@@ -75,9 +75,11 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
     }
   }, [vehicleId])
 
-  // Auto-set driver when vehicle has a default driver
+  // Auto-sync driver from vehicle.driverId whenever vehicle changes (overwrites).
+  // Vehicle has a "คนขับประจำ" relationship that's the source of truth.
   useEffect(() => {
-    if (vehicle?.driverId && !driverId) setDriverId(vehicle.driverId)
+    if (!vehicleId) return
+    if (vehicle?.driverId) setDriverId(vehicle.driverId)
   }, [vehicleId])
 
   const validate = (): string | null => {
