@@ -37,21 +37,34 @@ interface LegFormState {
   customerId: string
   cargo: string
   cargoType: string
+  priceMode: 'per_ton' | 'per_kg' | 'lump'
   weight: string
-  freight: string
+  price: string
   legType: 'outbound' | 'backhaul' | 'return'
   notes: string
 }
 
 const EMPTY_LEG: LegFormState = {
   origin: '', destination: '', customerId: '', cargo: '', cargoType: '',
-  weight: '', freight: '', legType: 'outbound', notes: '',
+  priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '',
 }
 
 function legTypeLabel(t?: string): string {
   if (t === 'backhaul') return 'Backhaul'
   if (t === 'return') return 'Return (เปล่า)'
   return 'Outbound'
+}
+
+function calcLegAmount(priceMode: LegFormState['priceMode'], weightTon: number, price: number): number {
+  if (priceMode === 'lump') return price
+  if (priceMode === 'per_kg') return weightTon * 1000 * price
+  return weightTon * price // per_ton
+}
+
+function priceUnitLabel(mode: LegFormState['priceMode']): string {
+  if (mode === 'lump') return 'บาท (เหมาทั้งเที่ยว)'
+  if (mode === 'per_kg') return 'บาท/กิโลกรัม'
+  return 'บาท/ตัน'
 }
 
 function LegModal({
@@ -68,14 +81,19 @@ function LegModal({
   const [f, setF] = useState(initial)
   const set = <K extends keyof LegFormState>(k: K, v: LegFormState[K]) => setF(s => ({ ...s, [k]: v }))
   const isReturn = f.legType === 'return'
+  const isLump = f.priceMode === 'lump'
+
+  const wTon = Number(f.weight) || 0
+  const p = Number(f.price) || 0
+  const previewAmount = isReturn ? 0 : calcLegAmount(f.priceMode, wTon, p)
 
   const submit = () => {
     if (!f.origin.trim()) return alert('กรุณากรอกต้นทาง')
     if (!f.destination.trim()) return alert('กรุณากรอกปลายทาง')
     if (!isReturn) {
       if (!f.customerId) return alert('กรุณาเลือกลูกค้า')
-      if (!Number(f.weight)) return alert('กรุณากรอกน้ำหนักโหลด')
-      if (!Number(f.freight)) return alert('กรุณากรอกค่าขนส่ง')
+      if (!isLump && !Number(f.weight)) return alert('กรุณากรอกน้ำหนักโหลด')
+      if (!Number(f.price)) return alert(`กรุณากรอกราคา (${priceUnitLabel(f.priceMode)})`)
     }
     onSave(f)
   }
@@ -128,13 +146,70 @@ function LegModal({
                   <input value={f.cargo} onChange={e => set('cargo', e.target.value)} placeholder="Optional" />
                 </Field>
               </div>
+
+              <Field label="รูปแบบราคา *">
+                <div className="row" style={{ gap: 16, paddingTop: 4 }}>
+                  {([
+                    { v: 'per_ton', l: 'ต่อตัน', h: '฿/ตัน' },
+                    { v: 'per_kg',  l: 'ต่อกิโลกรัม', h: '฿/กก.' },
+                    { v: 'lump',    l: 'เหมา', h: '฿ ทั้งเที่ยว' },
+                  ] as const).map(opt => (
+                    <label key={opt.v} className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13 }}>
+                      <input
+                        type="radio"
+                        name="leg-price-mode"
+                        checked={f.priceMode === opt.v}
+                        onChange={() => set('priceMode', opt.v)}
+                        style={{ accentColor: 'var(--primary)' }}
+                      />
+                      <span>{opt.l} <span className="muted" style={{ fontSize: 11 }}>({opt.h})</span></span>
+                    </label>
+                  ))}
+                </div>
+              </Field>
+
               <div className="grid-2" style={{ gap: 12 }}>
-                <Field label="น้ำหนักโหลด (ตัน) *">
-                  <input type="number" step="0.01" value={f.weight} onChange={e => set('weight', e.target.value)} placeholder="0.00" />
+                {!isLump && (
+                  <Field label="น้ำหนักโหลด (ตัน) *">
+                    <input
+                      type="number" step="0.01" value={f.weight}
+                      onChange={e => set('weight', e.target.value)}
+                      placeholder="0.00"
+                    />
+                    <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                      กรอกเป็น <strong>ตัน</strong> เสมอ ({wTon > 0 ? `= ${(wTon * 1000).toLocaleString()} กก.` : 'เช่น 25 = 25,000 กก.'})
+                    </div>
+                  </Field>
+                )}
+                <Field label={`ราคา (${priceUnitLabel(f.priceMode)}) *`}>
+                  <input
+                    type="number" step="0.01" value={f.price}
+                    onChange={e => set('price', e.target.value)}
+                    placeholder="0"
+                  />
                 </Field>
-                <Field label="ค่าขนส่ง (฿) *">
-                  <input type="number" value={f.freight} onChange={e => set('freight', e.target.value)} placeholder="0" />
-                </Field>
+              </div>
+
+              {/* Live calc preview */}
+              <div
+                style={{
+                  padding: '10px 14px', borderRadius: 8,
+                  background: previewAmount > 0 ? '#EFF6FF' : 'var(--bg)',
+                  border: previewAmount > 0 ? '1px solid #BFDBFE' : '1px dashed var(--line)',
+                  fontSize: 12.5, display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}
+              >
+                <span className="muted">
+                  {f.priceMode === 'lump'
+                    ? <>เหมา: <strong>{p > 0 ? db.fmt(p) : '—'} บาท</strong></>
+                    : f.priceMode === 'per_kg'
+                      ? <>คำนวณ: {wTon || 0} ตัน × 1,000 × {p || 0} ฿/กก.</>
+                      : <>คำนวณ: {wTon || 0} ตัน × {p || 0} ฿/ตัน</>
+                  }
+                </span>
+                <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 15 }}>
+                  = {db.fmt(previewAmount)} บาท
+                </span>
               </div>
             </>
           )}
@@ -408,8 +483,10 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
 
   const saveLeg = (form: LegFormState) => {
     if (!editingLeg) return
-    const freight = Number(form.freight) || 0
+    const isReturn = form.legType === 'return'
     const weight = Number(form.weight) || 0
+    const price = Number(form.price) || 0
+    const amount = isReturn ? 0 : calcLegAmount(form.priceMode, weight, price)
     const newLeg: DispatchLeg = {
       id: editingLeg.index >= 0 && legs[editingLeg.index]?.id
         ? legs[editingLeg.index].id
@@ -419,10 +496,10 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       customerId: form.customerId || undefined,
       cargo: form.cargo.trim(),
       cargoType: form.cargoType.trim(),
-      priceMode: 'lump',
+      priceMode: form.priceMode,
       weight,
-      price: freight,
-      amount: freight,
+      price,
+      amount,
       legType: form.legType,
       notes: form.notes.trim() || undefined,
       deliveredWeight: legs[editingLeg.index]?.deliveredWeight ?? null,
@@ -598,8 +675,9 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                                 customerId: l.customerId || '',
                                 cargo: l.cargo || '',
                                 cargoType: l.cargoType || '',
+                                priceMode: l.priceMode || 'per_ton',
                                 weight: String(l.weight || ''),
-                                freight: String(l.amount || ''),
+                                price: String(l.price || ''),
                                 legType: l.legType ?? 'outbound',
                                 notes: l.notes || '',
                               },

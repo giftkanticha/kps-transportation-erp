@@ -156,7 +156,7 @@ export default function App() {
 
       case 'dispatch':
       case 'dispatch.open':
-        return <DispatchRoundOpen setActive={setActive} setSubject={setSubject} subject={subject} user={user} />
+        return <DispatchRoundOpen setActive={setActive} setSubject={setSubject} user={user} />
       case 'dispatch.round':
         return <DispatchRoundDetail setActive={setActive} setSubject={setSubject} subject={subject} />
       case 'dispatch.close':
