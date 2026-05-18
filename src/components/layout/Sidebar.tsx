@@ -49,6 +49,7 @@ const MENU: MenuItem[] = [
       { id: 'fuel', label: 'ภาพรวมคลังน้ำมัน' },
       { id: 'fuel.logs', label: 'บันทึกน้ำมัน' },
       { id: 'fuel.report', label: 'รายงานน้ำมันรายเดือน' },
+      { id: 'fuel.summary', label: 'สรุปคลังน้ำมันรวม' },
     ],
   },
   {

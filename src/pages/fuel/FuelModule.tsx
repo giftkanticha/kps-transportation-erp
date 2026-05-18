@@ -3,6 +3,7 @@ import { db, uid } from '../../lib/db'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import type { FuelRecord, FuelStock, Vehicle, Employee } from '../../types'
+import { FuelInventorySummary } from './FuelInventorySummary'
 
 // ── Tab 1: ภาพรวม ─── (Stock In editable + Stock Out history)
 
@@ -777,11 +778,15 @@ function FuelReportV2() {
 
 // ── Module Router ─────────────────────────────────────────────────
 export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: string) => void }) {
-  const current = tab === 'logs' ? 'record' : tab === 'report' ? 'report' : 'overview'
+  const current =
+    tab === 'logs' ? 'record' :
+    tab === 'report' ? 'report' :
+    tab === 'summary' ? 'summary' :
+    'overview'
 
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head no-print">
         <div>
           <h1 className="page-title">ระบบน้ำมัน</h1>
         </div>
@@ -795,12 +800,13 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
         </div>
       </div>
 
-      <div className="tabs" style={{ marginBottom: 22 }}>
+      <div className="tabs no-print" style={{ marginBottom: 22 }}>
         {(
           [
             ['overview', 'fuel', 'ภาพรวม', 'fuel'],
             ['record', 'logs', 'บันทึก', 'edit'],
             ['report', 'report', 'รายงาน', 'chart'],
+            ['summary', 'summary', 'สรุปคลังน้ำมัน', 'download'],
           ] as [string, string, string, string][]
         ).map(([id, route, label, ic]) => (
           <button
@@ -817,6 +823,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       {current === 'overview' && <FuelOverview />}
       {current === 'record' && <FuelRecord />}
       {current === 'report' && <FuelReportV2 />}
+      {current === 'summary' && <FuelInventorySummary />}
     </div>
   )
 }
