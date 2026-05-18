@@ -340,6 +340,8 @@ export interface SubDriver {
   subId: string
   address?: string
   vehicleTypes?: string[]
+  truckDump?: 'dump' | 'no-dump'
+  cpAccess?: 'yes' | 'no'
 }
 
 export interface SubJob {

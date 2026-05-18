@@ -17,7 +17,6 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   paid: { label: 'ชำระแล้ว', cls: 'green' },
 }
 
-const VEHICLE_TYPE_OPTIONS = ['4ล้อ', '6ล้อ', '10ล้อ', '18ล้อ', '22ล้อ', 'ตู้คอนเทนเนอร์', 'พ่วงข้าง']
 
 // ─── Confirm Dialog (shared) ─────────────────────────────────────────────────
 
@@ -93,25 +92,19 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
     status: driver?.status ?? 'active',
     subId: driver?.subId ?? (subs[0]?.id ?? ''),
     address: driver?.address ?? '',
+    truckDump: driver?.truckDump ?? 'no-dump' as 'dump' | 'no-dump',
+    cpAccess: driver?.cpAccess ?? 'no' as 'yes' | 'no',
   })
-  const [vehicleTypes, setVehicleTypes] = useState<string[]>(driver?.vehicleTypes ?? [])
 
-  const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }))
-
-  const toggleType = (t: string) => {
-    setVehicleTypes(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
-  }
+  const set = <K extends keyof typeof form>(k: K, v: typeof form[K]) =>
+    setForm(f => ({ ...f, [k]: v }))
 
   const save = () => {
     if (!form.name.trim() || !form.plate.trim() || !form.phone.trim()) {
       alert('กรุณากรอก ชื่อ, ทะเบียนรถ และเบอร์โทร')
       return
     }
-    if (vehicleTypes.length === 0) {
-      alert('กรุณาเลือกประเภทรถที่สามารถขับได้อย่างน้อย 1 ประเภท')
-      return
-    }
-    const payload = { ...form, vehicleTypes }
+    const payload = { ...form, vehicleTypes: driver?.vehicleTypes ?? [] }
     if (isNew) {
       db.add<SubDriver>('subDrivers', { ...payload, id: uid('sd') })
     } else {
@@ -121,9 +114,15 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
     onClose()
   }
 
+  const radioRow: React.CSSProperties = {
+    height: 38, display: 'flex', alignItems: 'center', gap: 22,
+    padding: '0 12px', border: '1px solid var(--line)',
+    borderRadius: 'var(--r-md)', background: '#fff',
+  }
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-      <div className="card" style={{ width: 640, maxWidth: '95vw', maxHeight: '90vh', overflowY: 'auto' }}>
+      <div className="card" style={{ width: 640, maxWidth: '95vw', maxHeight: '92vh', overflowY: 'auto' }}>
         <div className="row" style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
           <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>
             {isNew ? 'เพิ่มคนขับรถร่วม' : 'แก้ไขข้อมูลคนขับ'}
@@ -131,7 +130,7 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
           <button className="btn ghost icon sm" onClick={onClose}><Icon name="close" size={16} /></button>
         </div>
         <div style={{ padding: 22 }}>
-          <div className="grid-2" style={{ gap: 14 }}>
+          <div className="grid-2" style={{ gap: 16, alignItems: 'start' }}>
             <Field label="รหัสคนขับ">
               <input value={form.code} readOnly style={{ background: 'var(--bg-2)', color: 'var(--text-muted)' }} />
             </Field>
@@ -186,6 +185,38 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
                 <option value="inactive">ระงับ</option>
               </select>
             </Field>
+            <Field label="รถบรรทุกพ่วง">
+              <div style={radioRow}>
+                {([['dump', 'ดั้ม'], ['no-dump', 'ไม่ดั้ม']] as const).map(([val, label]) => (
+                  <label key={val} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 13.5 }}>
+                    <input
+                      type="radio"
+                      name="dv-dump"
+                      checked={form.truckDump === val}
+                      onChange={() => set('truckDump', val)}
+                      style={{ accentColor: 'var(--primary)' }}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+            </Field>
+            <Field label="เข้า CP">
+              <div style={radioRow}>
+                {([['yes', 'ได้'], ['no', 'ไม่ได้']] as const).map(([val, label]) => (
+                  <label key={val} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 13.5 }}>
+                    <input
+                      type="radio"
+                      name="dv-cp"
+                      checked={form.cpAccess === val}
+                      onChange={() => set('cpAccess', val)}
+                      style={{ accentColor: 'var(--primary)' }}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+            </Field>
           </div>
 
           <div style={{ marginTop: 16 }}>
@@ -198,45 +229,6 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
                 style={{ width: '100%', resize: 'vertical' }}
               />
             </Field>
-          </div>
-
-          <div style={{ marginTop: 14 }}>
-            <label style={{ display: 'block', fontSize: 12.5, fontWeight: 500, color: 'var(--text-2)', marginBottom: 8 }}>
-              ประเภทรถที่สามารถขับได้ * <span className="muted" style={{ fontWeight: 400 }}>(เลือกได้หลายประเภท)</span>
-            </label>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              {VEHICLE_TYPE_OPTIONS.map(t => {
-                const checked = vehicleTypes.includes(t)
-                return (
-                  <label
-                    key={t}
-                    style={{
-                      display: 'inline-flex', alignItems: 'center', gap: 6,
-                      padding: '8px 14px', borderRadius: 999, cursor: 'pointer',
-                      border: `1px solid ${checked ? 'var(--primary)' : 'var(--line)'}`,
-                      background: checked ? 'var(--primary-50)' : 'var(--bg-elev)',
-                      color: checked ? 'var(--primary)' : 'var(--text-2)',
-                      fontSize: 13, fontWeight: checked ? 600 : 500,
-                      transition: 'all .12s',
-                      userSelect: 'none',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleType(t)}
-                      style={{ accentColor: 'var(--primary)' }}
-                    />
-                    {t}
-                  </label>
-                )
-              })}
-            </div>
-            {vehicleTypes.length === 0 && (
-              <div className="faint" style={{ fontSize: 11, marginTop: 6, color: 'var(--amber)' }}>
-                * กรุณาเลือกอย่างน้อย 1 ประเภท
-              </div>
-            )}
           </div>
         </div>
         <div className="row btn-row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end' }}>
@@ -679,6 +671,106 @@ function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () =>
   )
 }
 
+// ─── Job Detail Drawer ───────────────────────────────────────────────────────
+
+function JobDetailDrawer({ job, onClose }: { job: SubJob; onClose: () => void }) {
+  const driver = db.getAll<SubDriver>('subDrivers').find(d => d.id === job.driverId)
+  const modeLabel = job.mode === 'per_ton' ? 'ต่อตัน' : job.mode === 'per_kg' ? 'ต่อกิโลกรัม' : 'เหมา'
+  const s = STATUS_LABEL[job.status]
+  const fmt2 = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}
+      onClick={onClose}
+    >
+      <div
+        className="card"
+        style={{ width: 700, maxWidth: '96vw', background: '#ffffff', borderRadius: 16, maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 20px 60px rgba(0,0,0,.25)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="row" style={{ padding: '18px 24px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>รายละเอียดงานขนส่ง</h3>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
+              <span className="mono" style={{ fontWeight: 600 }}>{job.code}</span>
+              {' '}· {db.thaiDate(job.date)}
+            </div>
+          </div>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span className={`badge ${s?.cls ?? 'gray'}`}>{s?.label ?? job.status}</span>
+            <button className="btn ghost icon sm" onClick={onClose}><Icon name="close" size={16} /></button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ overflowY: 'auto', flex: 1, padding: '20px 24px' }}>
+          {/* Section 1: งานขนส่ง */}
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: 1, marginBottom: 12, textTransform: 'uppercase' }}>
+            ข้อมูลงานขนส่ง
+          </div>
+          <div className="grid-2" style={{ gap: 14, marginBottom: 22 }}>
+            <Info label="Job No" value={<span className="mono" style={{ fontWeight: 700 }}>{job.code}</span>} />
+            <Info label="วันที่" value={db.thaiDate(job.date)} />
+            <Info label="ทะเบียนรถ" value={<span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{job.plate}</span>} />
+            <Info label="คนขับ" value={job.driverName} />
+            <Info label="ต้นทาง" value={job.origin || 'กรุงเทพ'} />
+            <Info label="ปลายทาง" value={job.destination} />
+            <Info label="ประเภทรถ" value={job.category || '—'} />
+            <Info label="สถานะ" value={<span className={`badge ${s?.cls ?? 'gray'}`}>{s?.label}</span>} />
+          </div>
+
+          {/* Section 2: น้ำหนักและราคา */}
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: 1, marginBottom: 12, textTransform: 'uppercase' }}>
+            น้ำหนักและค่าขนส่ง
+          </div>
+          <div className="grid-2" style={{ gap: 14, marginBottom: 18 }}>
+            <Info label="น้ำหนักต้นทาง" value={job.weight ? `${db.fmt(job.weight)} กก.` : '—'} />
+            <Info label="น้ำหนักปลายทาง" value={job.finalWeight ? `${db.fmt(job.finalWeight)} กก.` : '—'} />
+            <Info label="ประเภทการคำนวณ" value={modeLabel} />
+            <Info label="ราคาค่าบรรทุก" value={
+              <span className="mono">
+                {fmt2(job.price)} ฿{job.mode === 'per_ton' ? '/ตัน' : job.mode === 'per_kg' ? '/กก.' : ' (เหมา)'}
+              </span>
+            } />
+          </div>
+          <div style={{
+            padding: '16px 20px', background: 'var(--primary-50)',
+            borderRadius: 10, marginBottom: 22,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <span style={{ fontWeight: 500, fontSize: 14 }}>ค่าขนส่งรวม</span>
+            <span className="mono" style={{ fontSize: 26, fontWeight: 800, color: 'var(--primary)' }}>
+              {fmt2(job.total)} <span style={{ fontSize: 14, fontWeight: 500 }}>฿</span>
+            </span>
+          </div>
+
+          {/* Section 3: ธนาคาร */}
+          {driver && (
+            <>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: 1, marginBottom: 12, textTransform: 'uppercase' }}>
+                ข้อมูลธนาคาร (สำหรับโอนเงิน)
+              </div>
+              <div className="grid-2" style={{ gap: 14 }}>
+                <Info label="ธนาคาร" value={driver.accountBank || '—'} />
+                <Info label="เลขที่บัญชี" value={<span className="mono" style={{ fontWeight: 700 }}>{driver.accountNo || '—'}</span>} />
+                <Info label="ชื่อบัญชี" value={driver.name || '—'} />
+                <Info label="เบอร์โทร" value={driver.phone || '—'} />
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="row" style={{ padding: '14px 24px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', flexShrink: 0 }}>
+          <button className="btn" onClick={onClose}><Icon name="close" size={14} /> ปิด</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Tab 3: ประวัติการจ้าง ────────────────────────────────────────────────────
 
 function SubHistoryTab() {
@@ -688,6 +780,7 @@ function SubHistoryTab() {
   const [monthF, setMonthF] = useState('')
   const [statusF, setStatusF] = useState('all')
   const [payJob, setPayJob] = useState<SubJob | null>(null)
+  const [viewJob, setViewJob] = useState<SubJob | null>(null)
 
   const filtered = all.filter(j => {
     if (plateF !== 'all' && j.plate !== plateF) return false
@@ -748,38 +841,57 @@ function SubHistoryTab() {
               <th>ทะเบียน</th>
               <th>ปลายทาง</th>
               <th className="right">น้ำหนัก (กก.)</th>
-              <th className="right">ค่าขนส่ง</th>
+              <th className="right">ราคาค่าบรรทุก</th>
+              <th className="right">ค่าขนส่งรวม</th>
               <th>สถานะ</th>
               <th>ดำเนินการ</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(j => (
-              <tr key={j.id}>
-                <td className="mono" style={{ fontWeight: 600 }}>{j.code}</td>
-                <td className="num muted">{db.thaiDate(j.date)}</td>
-                <td><span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{j.plate}</span></td>
-                <td>{j.destination}</td>
-                <td className="num right">
-                  {j.finalWeight ? db.fmt(j.finalWeight) : (j.weight ? db.fmt(j.weight) : '—')}
-                </td>
-                <td className="num right" style={{ fontWeight: 600 }}>{j.total ? db.thb(j.total) : '—'}</td>
-                <td>{statusBadge(j.status)}</td>
-                <td>
-                  {j.status === 'unpaid' && (
-                    <button className="btn sm primary" onClick={() => setPayJob(j)}>
-                      <Icon name="money" size={13} /> ชำระเงิน
-                    </button>
-                  )}
-                  {j.status !== 'unpaid' && (
-                    <button className="btn ghost icon sm" title="ดู"><Icon name="dashboard" size={13} /></button>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {filtered.map(j => {
+              const modeShort = j.mode === 'per_ton' ? '/ตัน' : j.mode === 'per_kg' ? '/กก.' : ' เหมา'
+              return (
+                <tr key={j.id}>
+                  <td className="mono" style={{ fontWeight: 600 }}>{j.code}</td>
+                  <td className="num muted">{db.thaiDate(j.date)}</td>
+                  <td><span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{j.plate}</span></td>
+                  <td>{j.destination}</td>
+                  <td className="num right">
+                    {j.finalWeight ? db.fmt(j.finalWeight) : (j.weight ? db.fmt(j.weight) : '—')}
+                  </td>
+                  <td className="num right mono" style={{ fontSize: 12.5 }}>
+                    {j.price
+                      ? <>{j.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>{modeShort}</span></>
+                      : '—'}
+                  </td>
+                  <td className="num right mono" style={{ fontWeight: 600 }}>
+                    {j.total
+                      ? j.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                      : '—'}
+                  </td>
+                  <td>{statusBadge(j.status)}</td>
+                  <td>
+                    <div className="row" style={{ gap: 4 }}>
+                      <button
+                        className="btn ghost icon sm"
+                        title="ดูรายละเอียด"
+                        onClick={() => setViewJob(j)}
+                      >
+                        <Icon name="dashboard" size={13} />
+                      </button>
+                      {j.status === 'unpaid' && (
+                        <button className="btn sm primary" onClick={() => setPayJob(j)}>
+                          <Icon name="money" size={13} /> ชำระเงิน
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={9}>
                   <div className="empty">ไม่พบข้อมูลการจ้าง</div>
                 </td>
               </tr>
@@ -788,6 +900,9 @@ function SubHistoryTab() {
         </table>
       </div>
 
+      {viewJob && (
+        <JobDetailDrawer job={viewJob} onClose={() => setViewJob(null)} />
+      )}
       {payJob && (
         <PayConfirmModal
           job={payJob}
@@ -939,8 +1054,9 @@ function SubDriversList({ user }: { user?: User }) {
             <tr>
               <th>รหัส/ชื่อ-นามสกุล</th>
               <th>เบอร์โทร</th>
-              <th>ประเภทรถ</th>
               <th>ทะเบียนรถ</th>
+              <th>ดั้ม</th>
+              <th>CP</th>
               <th>ใบขับขี่</th>
               <th>ธนาคาร</th>
               <th>สถานะ</th>
@@ -953,7 +1069,6 @@ function SubDriversList({ user }: { user?: User }) {
               const days = Math.round((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
               const isExpired = d.licenseStatus === 'expired'
               const isNearExpiry = !isExpired && days <= 30
-              const types = d.vehicleTypes ?? []
 
               return (
                 <tr key={d.id}>
@@ -963,30 +1078,17 @@ function SubDriversList({ user }: { user?: User }) {
                   </td>
                   <td className="mono">{d.phone}</td>
                   <td>
-                    {types.length > 0 ? (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {types.map(t => (
-                          <span
-                            key={t}
-                            className="badge"
-                            style={{
-                              background: 'var(--primary-50)',
-                              color: 'var(--primary)',
-                              fontSize: 11,
-                              fontWeight: 600,
-                              padding: '2px 8px',
-                            }}
-                          >
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="muted" style={{ fontSize: 12 }}>—</span>
-                    )}
+                    <span style={{ color: 'var(--primary)', fontWeight: 600 }} className="mono">{d.plate}</span>
                   </td>
                   <td>
-                    <span style={{ color: 'var(--primary)', fontWeight: 600 }} className="mono">{d.plate}</span>
+                    {d.truckDump === 'dump'
+                      ? <span className="badge blue">ดั้ม</span>
+                      : <span className="badge gray">ไม่ดั้ม</span>}
+                  </td>
+                  <td>
+                    {d.cpAccess === 'yes'
+                      ? <span className="badge green">ได้</span>
+                      : <span className="badge amber">ไม่ได้</span>}
                   </td>
                   <td>
                     <div style={{ fontSize: 12 }}>{d.license || '—'}</div>
@@ -1023,7 +1125,7 @@ function SubDriversList({ user }: { user?: User }) {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8}>
+                <td colSpan={9}>
                   <div className="empty">ไม่พบข้อมูลคนขับ</div>
                 </td>
               </tr>
