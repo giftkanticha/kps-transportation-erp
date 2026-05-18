@@ -21,6 +21,7 @@ import { DispatchRoundOpen } from './pages/dispatch/DispatchRoundOpen'
 import { DispatchRoundDetail } from './pages/dispatch/DispatchRoundDetail'
 import { DispatchRoundClose } from './pages/dispatch/DispatchRoundClose'
 import { DispatchSummaryReport } from './pages/dispatch/DispatchSummaryReport'
+import { DispatchHistory } from './pages/dispatch/DispatchHistory'
 import { SubcontractorModule } from './pages/subcontractors/SubcontractorModule'
 import { ExpensesModule } from './pages/expenses/ExpensesModule'
 import { ExpensePivotPage } from './pages/expenses/ExpensePivotPage'
@@ -155,7 +156,7 @@ export default function App() {
 
       case 'dispatch':
       case 'dispatch.open':
-        return <DispatchRoundOpen setActive={setActive} setSubject={setSubject} user={user} />
+        return <DispatchRoundOpen setActive={setActive} setSubject={setSubject} subject={subject} user={user} />
       case 'dispatch.round':
         return <DispatchRoundDetail setActive={setActive} setSubject={setSubject} subject={subject} />
       case 'dispatch.close':
@@ -167,7 +168,7 @@ export default function App() {
       case 'dispatch.report':
         return <DispatchSummaryReport setActive={setActive} setSubject={setSubject} />
       case 'dispatch.history':
-        return <DispatchModule tab="history" setActive={setActive} user={user} />
+        return <DispatchHistory setActive={setActive} setSubject={setSubject} />
 
       case 'subcontractors':
         return <SubcontractorModule tab="open" setActive={setActive} user={user} />

@@ -50,7 +50,7 @@ const MENU: MenuItem[] = [
       { id: 'fuel.logs', label: 'บันทึกน้ำมัน' },
       { id: 'fuel.report', label: 'รายงานน้ำมันรายเดือน' },
       { id: 'fuel.summary', label: 'สรุปคลังน้ำมันรวม' },
-      { id: 'fuel.round.open', label: 'เปิดรอบน้ำมัน' },
+      { id: 'fuel.round.open', label: 'เปิดรอบน้ำมัน (ละเอียด)' },
       { id: 'fuel.round.refill', label: 'เติมปั้มนอก' },
       { id: 'fuel.round.close', label: 'ปิดรอบน้ำมัน' },
     ],
@@ -60,10 +60,8 @@ const MENU: MenuItem[] = [
     sub: [
       { id: 'dispatch.open', label: 'เปิดงานขนส่ง' },
       { id: 'dispatch.close', label: 'ปิดงานขนส่ง' },
-      { id: 'dispatch.fuel', label: 'รายงานประจำวัน' },
-      { id: 'dispatch.monthly', label: 'รายงานประจำเดือน' },
       { id: 'dispatch.report', label: 'รายงานสรุป' },
-      { id: 'dispatch.history', label: 'ประวัติงาน' },
+      { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน' },
     ],
   },
   {
