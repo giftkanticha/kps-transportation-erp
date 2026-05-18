@@ -33,6 +33,7 @@ export interface Employee {
   salary: number
   vehicleId: string | null
   status: string
+  address?: string
 }
 
 export interface Vehicle {

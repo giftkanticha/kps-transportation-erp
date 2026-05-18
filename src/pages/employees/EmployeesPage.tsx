@@ -26,6 +26,77 @@ interface FilterCheckGroupProps {
   onChange: (s: Record<string, boolean>) => void
 }
 
+interface ToastState {
+  kind: 'success' | 'error'
+  msg: string
+}
+
+function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, toast.kind === 'success' ? 2800 : 4000)
+    return () => clearTimeout(t)
+  }, [toast, onClose])
+
+  const ok = toast.kind === 'success'
+  return (
+    <div
+      role="status"
+      style={{
+        position: 'fixed', bottom: 24, right: 24, zIndex: 1200,
+        background: ok ? '#16a34a' : '#A32D2D',
+        color: '#fff', padding: '12px 18px', borderRadius: 10,
+        boxShadow: '0 8px 24px rgba(0,0,0,.25)', fontSize: 14, fontWeight: 500,
+        display: 'flex', alignItems: 'center', gap: 10,
+        minWidth: 280, maxWidth: 420,
+        animation: 'kpsToastIn .25s ease-out',
+      }}
+    >
+      <span style={{ fontSize: 18 }}>{ok ? '✅' : '⚠️'}</span>
+      <span style={{ flex: 1 }}>{toast.msg}</span>
+      <button
+        onClick={onClose}
+        style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 16, padding: 0, opacity: .85, lineHeight: 1 }}
+      >×</button>
+    </div>
+  )
+}
+
+function ConfirmDialog({
+  title, message, confirmLabel, destructive, onConfirm, onCancel,
+}: {
+  title: string
+  message: string
+  confirmLabel: string
+  destructive?: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div
+      onClick={onCancel}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--card)', borderRadius: 12, width: '90%', maxWidth: 420, padding: 24, boxShadow: '0 10px 40px rgba(0,0,0,.25)' }}
+      >
+        <h2 style={{ margin: '0 0 10px 0', fontSize: 17, fontWeight: 700 }}>{title}</h2>
+        <p style={{ margin: '0 0 20px 0', color: 'var(--text-2)', fontSize: 14 }}>{message}</p>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button
+            onClick={onCancel}
+            style={{ background: 'var(--bg-sunk)', border: '1px solid var(--line)', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}
+          >ยกเลิก</button>
+          <button
+            onClick={onConfirm}
+            style={{ background: destructive ? '#A32D2D' : 'var(--primary)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+          >{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function FilterCheckGroup({ label, options, state, onChange }: FilterCheckGroupProps) {
   return (
     <div className="row" style={{ gap: 14, alignItems: 'center' }}>
@@ -64,7 +135,6 @@ function LicenseLabel({ status, expire }: { status: string; expire: string }) {
       </span>
     )
   }
-  // warning — show countdown
   const d = new Date(expire)
   const days = Math.round((d.getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
   return (
@@ -76,13 +146,13 @@ function LicenseLabel({ status, expire }: { status: string; expire: string }) {
 }
 
 interface ActionMenuProps {
-  employee: Employee
   onClose: () => void
   onEdit: () => void
   onChangeStatus: () => void
+  onDelete: () => void
 }
 
-function ActionMenu({ employee, onClose, onEdit, onChangeStatus }: ActionMenuProps) {
+function ActionMenu({ onClose, onEdit, onChangeStatus, onDelete }: ActionMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -105,42 +175,31 @@ function ActionMenu({ employee, onClose, onEdit, onChangeStatus }: ActionMenuPro
         border: '1px solid var(--line)',
         borderRadius: 8,
         boxShadow: '0 4px 16px rgba(0,0,0,.15)',
-        minWidth: 160,
+        minWidth: 168,
         padding: '4px 0',
       }}
     >
       <button
         className="btn ghost"
         style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13 }}
-        onClick={() => {
-          onClose()
-          onEdit()
-        }}
+        onClick={() => { onClose(); onEdit() }}
       >
         <Icon name="edit" size={14} /> แก้ไขข้อมูล
       </button>
       <button
         className="btn ghost"
         style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: 'var(--amber)' }}
-        onClick={() => {
-          onClose()
-          onChangeStatus()
-        }}
+        onClick={() => { onClose(); onChangeStatus() }}
       >
         <Icon name="refresh" size={14} /> เปลี่ยนสถานะ
       </button>
+      <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0' }} />
       <button
         className="btn ghost"
-        style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: 'var(--red)' }}
-        onClick={() => {
-          onClose()
-          const confirmed = confirm(`ยืนยันการลาออกของ ${employee.name}?`)
-          if (confirmed) {
-            db.update<Employee>('employees', employee.id, { status: 'leave' })
-          }
-        }}
+        style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: '#A32D2D' }}
+        onClick={() => { onClose(); onDelete() }}
       >
-        <Icon name="close" size={14} /> ลาออก
+        <Icon name="close" size={14} /> ลบพนักงาน
       </button>
     </div>
   )
@@ -149,124 +208,87 @@ function ActionMenu({ employee, onClose, onEdit, onChangeStatus }: ActionMenuPro
 interface EmployeeEditModalProps {
   employee: Employee
   onClose: () => void
-  onChanged: () => void
+  onSaved: () => void
 }
 
-function EmployeeEditModal({ employee, onClose, onChanged }: EmployeeEditModalProps) {
+function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProps) {
   const [form, setForm] = useState({
     name: employee.name,
     position: employee.position,
     phone: employee.phone,
     lineId: employee.lineId,
     joined: employee.joined,
+    address: employee.address ?? '',
   })
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const save = () => {
-    if (!form.name || !form.phone) {
+    if (!form.name.trim() || !form.phone.trim()) {
       alert('กรุณากรอกชื่อและเบอร์โทร')
       return
     }
     db.update<Employee>('employees', employee.id, {
-      name: form.name,
+      name: form.name.trim(),
       position: form.position,
-      phone: form.phone,
+      phone: form.phone.trim(),
       lineId: form.lineId,
       joined: form.joined,
+      address: form.address,
     })
     onClose()
-    onChanged()
+    onSaved()
   }
 
   return (
-    <div style={{
-      position: 'fixed',
-      inset: 0,
-      background: 'rgba(0,0,0,.4)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-    }}>
-      <div style={{
-        background: 'var(--card)',
-        borderRadius: 12,
-        width: '90%',
-        maxWidth: 500,
-        padding: 24,
-        boxShadow: '0 10px 40px rgba(0,0,0,.2)',
-      }}>
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--card)', borderRadius: 12, width: '90%', maxWidth: 500, padding: 24, boxShadow: '0 10px 40px rgba(0,0,0,.2)', maxHeight: '90vh', overflowY: 'auto' }}
+      >
         <h2 style={{ margin: '0 0 18px 0', fontSize: 18, fontWeight: 600 }}>แก้ไขข้อมูลพนักงาน</h2>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 18 }}>
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
-              เลขที่ ID
-            </label>
-            <input
-              value={employee.code}
-              readOnly
-              style={{ width: '100%', background: 'var(--bg-2)', color: 'var(--text-muted)', cursor: 'default' }}
-            />
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>เลขที่ ID</label>
+            <input value={employee.code} readOnly style={{ width: '100%', background: 'var(--bg-2)', color: 'var(--text-muted)', cursor: 'default' }} />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
-              ชื่อ-สกุล *
-            </label>
-            <input
-              value={form.name}
-              onChange={e => set('name', e.target.value)}
-              placeholder="เช่น สมชาย ใจดี"
-            />
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>ชื่อ-สกุล *</label>
+            <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="เช่น สมชาย ใจดี" />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
-              ตำแหน่ง
-            </label>
-            <input
-              value={form.position}
-              onChange={e => set('position', e.target.value)}
-              placeholder="เช่น คนขับ"
-            />
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>ตำแหน่ง</label>
+            <input value={form.position} onChange={e => set('position', e.target.value)} placeholder="เช่น คนขับ" />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
-              เบอร์โทรศัพท์ *
-            </label>
-            <input
-              value={form.phone}
-              onChange={e => set('phone', e.target.value)}
-              placeholder="เช่น 0812345678"
-            />
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>เบอร์โทรศัพท์ *</label>
+            <input value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="เช่น 0812345678" />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
-              Line ID
-            </label>
-            <input
-              value={form.lineId}
-              onChange={e => set('lineId', e.target.value)}
-              placeholder="เช่น @somchai"
-            />
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>Line ID</label>
+            <input value={form.lineId} onChange={e => set('lineId', e.target.value)} placeholder="เช่น @somchai" />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>
-              วันเริ่มงาน
-            </label>
-            <input
-              type="date"
-              value={form.joined}
-              onChange={e => set('joined', e.target.value)}
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>วันเริ่มงาน</label>
+            <input type="date" value={form.joined} onChange={e => set('joined', e.target.value)} />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>ที่อยู่</label>
+            <textarea
+              value={form.address}
+              onChange={e => set('address', e.target.value)}
+              placeholder="เช่น 123/4 ถ.สุขุมวิท แขวงคลองเตย กรุงเทพฯ 10110"
+              rows={3}
+              style={{ width: '100%', resize: 'vertical' }}
             />
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn" onClick={onClose}>
-            ยกเลิก
-          </button>
-          <button className="btn primary" onClick={save}>
-            บันทึกการแก้ไข
-          </button>
+          <button className="btn" onClick={onClose}>ยกเลิก</button>
+          <button className="btn primary" onClick={save}>บันทึกการแก้ไข</button>
         </div>
       </div>
     </div>
@@ -287,27 +309,10 @@ function StatusChangeDialog({ employee, onClose, onChanged }: StatusChangeDialog
   }
 
   return (
-    <div style={{
-      position: 'fixed',
-      inset: 0,
-      background: 'rgba(0,0,0,.4)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1000,
-    }}>
-      <div style={{
-        background: 'var(--card)',
-        borderRadius: 12,
-        width: '90%',
-        maxWidth: 400,
-        padding: 24,
-        boxShadow: '0 10px 40px rgba(0,0,0,.2)',
-      }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+      <div style={{ background: 'var(--card)', borderRadius: 12, width: '90%', maxWidth: 400, padding: 24, boxShadow: '0 10px 40px rgba(0,0,0,.2)' }}>
         <h2 style={{ margin: '0 0 18px 0', fontSize: 18, fontWeight: 600 }}>เปลี่ยนสถานะพนักงาน</h2>
-        <p style={{ margin: '0 0 20px 0', color: 'var(--text-2)', fontSize: 14 }}>
-          {employee.name}
-        </p>
+        <p style={{ margin: '0 0 20px 0', color: 'var(--text-2)', fontSize: 14 }}>{employee.name}</p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
           <button
             className={`btn ${employee.status === 'active' ? 'primary' : ''}`}
@@ -332,9 +337,7 @@ function StatusChangeDialog({ employee, onClose, onChanged }: StatusChangeDialog
           </button>
         </div>
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn" onClick={onClose}>
-            ปิด
-          </button>
+          <button className="btn" onClick={onClose}>ปิด</button>
         </div>
       </div>
     </div>
@@ -345,17 +348,22 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [statusChangingId, setStatusChangingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [toast, setToast] = useState<ToastState | null>(null)
   const [tick, setTick] = useState(0)
   const [q, setQ] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>({ active: true, leave: false })
+
+  const refresh = () => setTick(t => t + 1)
 
   const inBucket = (e: Employee): boolean =>
     (filterStatus.active && (e.status === 'active' || e.status === 'training')) ||
     (filterStatus.leave && e.status === 'leave')
 
+  const allEmployees = useMemo(() => db.getAll<Employee>('employees'), [tick])
+
   const filtered = useMemo(() => {
-    const employees = db.getAll<Employee>('employees')
-    return employees.filter(e => {
+    return allEmployees.filter(e => {
       if (
         q &&
         !e.name.toLowerCase().includes(q.toLowerCase()) &&
@@ -366,7 +374,17 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
       if (!inBucket(e)) return false
       return true
     })
-  }, [tick, q, filterStatus])
+  }, [allEmployees, q, filterStatus])
+
+  const deletingEmployee = deletingId ? allEmployees.find(e => e.id === deletingId) : null
+
+  const handleDelete = () => {
+    if (!deletingId) return
+    db.remove('employees', deletingId)
+    setDeletingId(null)
+    refresh()
+    setToast({ kind: 'success', msg: 'ลบพนักงานเรียบร้อยแล้ว' })
+  }
 
   return (
     <div>
@@ -455,9 +473,7 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
                   }}
                 >
                   <td>
-                    <span className="mono" style={{ fontWeight: 600 }}>
-                      {e.code}
-                    </span>
+                    <span className="mono" style={{ fontWeight: 600 }}>{e.code}</span>
                   </td>
                   <td style={{ fontWeight: 500 }}>{e.name}</td>
                   <td>{e.position}</td>
@@ -492,42 +508,71 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
                       </button>
                       {openMenuId === e.id && (
                         <ActionMenu
-                          employee={e}
                           onClose={() => setOpenMenuId(null)}
                           onEdit={() => setEditingId(e.id)}
                           onChangeStatus={() => setStatusChangingId(e.id)}
+                          onDelete={() => setDeletingId(e.id)}
                         />
                       )}
                     </div>
                   </td>
                 </tr>
               ))}
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                    ไม่พบรายการพนักงาน
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {editingId && (
-        <EmployeeEditModal
-          employee={filtered.find(e => e.id === editingId)!}
-          onClose={() => setEditingId(null)}
-          onChanged={() => {
-            setEditingId(null)
-            setTick(t => t + 1)
-          }}
+      {editingId && (() => {
+        const emp = allEmployees.find(e => e.id === editingId)
+        if (!emp) return null
+        return (
+          <EmployeeEditModal
+            employee={emp}
+            onClose={() => setEditingId(null)}
+            onSaved={() => {
+              setEditingId(null)
+              refresh()
+              setToast({ kind: 'success', msg: '✅ บันทึกข้อมูลเรียบร้อย' })
+            }}
+          />
+        )
+      })()}
+
+      {statusChangingId && (() => {
+        const emp = allEmployees.find(e => e.id === statusChangingId)
+        if (!emp) return null
+        return (
+          <StatusChangeDialog
+            employee={emp}
+            onClose={() => setStatusChangingId(null)}
+            onChanged={() => {
+              setStatusChangingId(null)
+              refresh()
+            }}
+          />
+        )
+      })()}
+
+      {deletingId && deletingEmployee && (
+        <ConfirmDialog
+          title="⚠️ แน่ใจหรือ?"
+          message={`ต้องการลบพนักงาน "${deletingEmployee.name}" ออกจากระบบ? การกระทำนี้ไม่สามารถยกเลิกได้`}
+          confirmLabel="ลบพนักงาน"
+          destructive
+          onConfirm={handleDelete}
+          onCancel={() => setDeletingId(null)}
         />
       )}
 
-      {statusChangingId && (
-        <StatusChangeDialog
-          employee={filtered.find(e => e.id === statusChangingId)!}
-          onClose={() => setStatusChangingId(null)}
-          onChanged={() => {
-            setStatusChangingId(null)
-            setTick(t => t + 1)
-          }}
-        />
-      )}
+      {toast && <Toast toast={toast} onClose={() => setToast(null)} />}
     </div>
   )
 }
