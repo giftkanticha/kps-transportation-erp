@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import type { SubDriver, SubJob, User, Subcontractor } from '../../types'
+import type { SubDriver, SubJob, User, Subcontractor, Vehicle } from '../../types'
 import { db, uid } from '../../lib/db'
 import { Icon, Field, Info } from '../../components/ui'
 
@@ -152,23 +152,50 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
 function SubOpenForm() {
   const today = new Date().toISOString().slice(0, 10)
   const subDrivers = db.getAll<SubDriver>('subDrivers').filter(d => d.status === 'active')
+  const vehicles = db.getAll<Vehicle>('vehicles')
 
-  const [form, setForm] = useState({
+  const blank = {
     date: today,
     driverId: '',
-    category: '10ล้อ',
+    category: '',
     destination: '',
     weight: '',
-    mode: 'per_ton' as 'per_ton' | 'lump',
+    mode: 'per_ton' as 'per_ton' | 'lump' | 'per_kg',
     price: '',
-  })
+  }
+
+  const [form, setForm] = useState(blank)
+  const [categoryAutoFilled, setCategoryAutoFilled] = useState(false)
+
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }))
 
+  const handleDriverChange = (driverId: string) => {
+    const driver = subDrivers.find(d => d.id === driverId)
+    if (driver) {
+      const vehicle = vehicles.find(v => v.plate.toLowerCase() === driver.plate.toLowerCase())
+      if (vehicle?.type) {
+        setForm(f => ({ ...f, driverId, category: vehicle.type }))
+        setCategoryAutoFilled(true)
+        return
+      }
+    }
+    setCategoryAutoFilled(false)
+    setForm(f => ({ ...f, driverId, category: f.category }))
+  }
+
   const picked = subDrivers.find(d => d.id === form.driverId)
-  const weightTons = (parseFloat(form.weight) || 0) / 1000
-  const total = form.mode === 'lump'
-    ? (parseFloat(form.price) || 0)
-    : weightTons * (parseFloat(form.price) || 0)
+  const weightNum = parseFloat(form.weight) || 0
+  const weightTons = weightNum / 1000
+  const priceNum = parseFloat(form.price) || 0
+  const total =
+    form.mode === 'lump' ? priceNum :
+    form.mode === 'per_kg' ? weightNum * priceNum :
+    weightTons * priceNum
+
+  const priceLabel =
+    form.mode === 'per_ton' ? 'บาท / ตัน' :
+    form.mode === 'per_kg' ? 'บาท / กก.' :
+    'บาทเหมา'
 
   const save = () => {
     if (!form.driverId) { alert('กรุณาเลือกทะเบียนรถรับจ้าง'); return }
@@ -186,20 +213,22 @@ function SubOpenForm() {
       category: form.category,
       destination: form.destination.trim(),
       origin: 'กรุงเทพ',
-      weight: parseFloat(form.weight) || 0,
+      weight: weightNum,
       finalWeight: 0,
       mode: form.mode,
-      price: parseFloat(form.price) || 0,
+      price: priceNum,
       total,
       status: 'open',
       bank: `${picked.accountBank} ${picked.accountNo}`,
     })
     alert('เปิดงานเรียบร้อย')
-    setForm({ date: today, driverId: '', category: '10ล้อ', destination: '', weight: '', mode: 'per_ton', price: '' })
+    setForm(blank)
+    setCategoryAutoFilled(false)
   }
 
   const cancel = () => {
-    setForm({ date: today, driverId: '', category: '10ล้อ', destination: '', weight: '', mode: 'per_ton', price: '' })
+    setForm(blank)
+    setCategoryAutoFilled(false)
   }
 
   return (
@@ -213,7 +242,7 @@ function SubOpenForm() {
             <input type="date" value={form.date} onChange={e => set('date', e.target.value)} />
           </Field>
           <Field label="ทะเบียนรถรับจ้าง *">
-            <select value={form.driverId} onChange={e => set('driverId', e.target.value)}>
+            <select value={form.driverId} onChange={e => handleDriverChange(e.target.value)}>
               <option value="">-- เลือกทะเบียนรถ (จากคนขับรถร่วม) --</option>
               {subDrivers.map(d => (
                 <option key={d.id} value={d.id}>{d.plate} — {d.name}</option>
@@ -231,16 +260,27 @@ function SubOpenForm() {
               </div>
             )}
           </Field>
-          <Field label="หมวดรถ">
-            <select value={form.category} onChange={e => set('category', e.target.value)}>
-              <option>4ล้อ</option>
-              <option>6ล้อ</option>
-              <option>10ล้อ</option>
-              <option>18ล้อ</option>
-              <option>22ล้อ</option>
-              <option>ตู้คอนเทนเนอร์</option>
-              <option>พ่วงข้าง</option>
-            </select>
+          <Field label="ประเภทรถ">
+            <div style={{ position: 'relative' }}>
+              <select
+                value={form.category}
+                onChange={e => { set('category', e.target.value); setCategoryAutoFilled(false) }}
+              >
+                <option value="">-- เลือกประเภทรถ --</option>
+                <option>4ล้อ</option>
+                <option>6ล้อ</option>
+                <option>10ล้อ</option>
+                <option>18ล้อ</option>
+                <option>22ล้อ</option>
+                <option>ตู้คอนเทนเนอร์</option>
+                <option>พ่วงข้าง</option>
+              </select>
+            </div>
+            {categoryAutoFilled && form.category && (
+              <div style={{ fontSize: 11, marginTop: 4, color: 'var(--green)', display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Icon name="check" size={11} /> Auto-fill จาก Master Data: <strong>{form.category}</strong>
+              </div>
+            )}
           </Field>
           <Field label="สถานที่ปลายทาง *">
             <input value={form.destination} onChange={e => set('destination', e.target.value)} placeholder="เช่น Chiang Mai, Rayong" />
@@ -252,12 +292,13 @@ function SubOpenForm() {
           <Field label="น้ำหนักต้นทาง (กก.)">
             <input type="number" value={form.weight} onChange={e => set('weight', e.target.value)} placeholder="เช่น 15000" />
           </Field>
-          <Field label={`ค่าบรรทุก (${form.mode === 'per_ton' ? 'บาท / ตัน' : 'บาทเหมา'}) *`}>
-            <input type="number" value={form.price} onChange={e => set('price', e.target.value)} placeholder="เช่น 2500" />
-          </Field>
           <Field label="ประเภทการคำนวณ *">
             <div className="row" style={{ gap: 18, paddingTop: 4 }}>
-              {([['per_ton', 'ต่อตัน'], ['lump', 'เหมา']] as const).map(([k, l]) => (
+              {([
+                ['per_ton', 'ต่อตัน'],
+                ['lump', 'เหมา'],
+                ['per_kg', 'ต่อกิโลกรัม'],
+              ] as const).map(([k, l]) => (
                 <label key={k} className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13.5 }}>
                   <input
                     type="radio"
@@ -271,6 +312,9 @@ function SubOpenForm() {
               ))}
             </div>
           </Field>
+          <Field label={`ค่าบรรทุก (${priceLabel}) *`}>
+            <input type="number" value={form.price} onChange={e => set('price', e.target.value)} placeholder="เช่น 2500" />
+          </Field>
 
           <div style={{ padding: '14px 16px', background: 'var(--primary-50)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
             <Icon name="chart" size={16} style={{ color: 'var(--primary)' }} />
@@ -283,6 +327,11 @@ function SubOpenForm() {
           {form.mode === 'per_ton' && form.weight && form.price && (
             <div className="faint" style={{ fontSize: 11 }}>
               คำนวณจาก: {weightTons.toFixed(2)} ตัน × {form.price} บาท/ตัน
+            </div>
+          )}
+          {form.mode === 'per_kg' && form.weight && form.price && (
+            <div className="faint" style={{ fontSize: 11 }}>
+              คำนวณจาก: {weightNum.toLocaleString()} กก. × {form.price} บาท/กก.
             </div>
           )}
           {form.mode === 'lump' && (
@@ -318,12 +367,14 @@ function SubCloseForm() {
   const fw = parseFloat(finalWeight) || 0
   const finalTons = fw / 1000
   const finalTotal = picked
-    ? (picked.mode === 'lump' ? picked.total : finalTons * picked.price)
+    ? picked.mode === 'lump' ? picked.total
+    : picked.mode === 'per_kg' ? fw * picked.price
+    : finalTons * picked.price
     : 0
 
   const closeJob = () => {
     if (!picked) return
-    if (picked.mode === 'per_ton' && !finalWeight) {
+    if ((picked.mode === 'per_ton' || picked.mode === 'per_kg') && !finalWeight) {
       alert('กรุณากรอกน้ำหนักปลายทาง')
       return
     }
@@ -372,16 +423,16 @@ function SubCloseForm() {
               <Info label="วันที่" value={db.thaiDate(picked.date)} />
               <Info label="ทะเบียน" value={<span className="mono">{picked.plate}</span>} />
               <Info label="คนขับ" value={picked.driverName} />
-              <Info label="หมวดรถ" value={picked.category || '—'} />
+              <Info label="ประเภทรถ" value={picked.category || '—'} />
               <Info label="ปลายทาง" value={picked.destination} />
               <Info label="น้ำหนักต้นทาง" value={picked.weight ? `${db.fmt(picked.weight)} กก.` : '—'} />
-              <Info label="ประเภทคำนวณ" value={picked.mode === 'per_ton' ? 'ต่อตัน' : 'เหมา'} />
-              <Info label="ค่าบรรทุก" value={picked.mode === 'per_ton' ? `${db.fmt(picked.price)} บาท/ตัน` : db.thb(picked.price)} />
+              <Info label="ประเภทคำนวณ" value={picked.mode === 'per_ton' ? 'ต่อตัน' : picked.mode === 'per_kg' ? 'ต่อกิโลกรัม' : 'เหมา'} />
+              <Info label="ค่าบรรทุก" value={picked.mode === 'per_ton' ? `${db.fmt(picked.price)} บาท/ตัน` : picked.mode === 'per_kg' ? `${db.fmt(picked.price)} บาท/กก.` : db.thb(picked.price)} />
             </div>
           </div>
 
           {/* Final weight input + computed total */}
-          {picked.mode === 'per_ton' ? (
+          {(picked.mode === 'per_ton' || picked.mode === 'per_kg') ? (
             <div className="card" style={{ padding: 18, marginBottom: 16, border: '2px solid var(--primary)' }}>
               <h3 className="section-title" style={{ color: 'var(--primary)' }}>คำนวณค่าขนส่ง</h3>
               <div className="grid-2" style={{ gap: 14 }}>
@@ -401,7 +452,9 @@ function SubCloseForm() {
                     </span>
                   </div>
                   <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>
-                    {finalTons.toFixed(2)} ตัน × {db.fmt(picked.price)} บาท/ตัน
+                    {picked.mode === 'per_kg'
+                      ? `${fw.toLocaleString()} กก. × ${db.fmt(picked.price)} บาท/กก.`
+                      : `${finalTons.toFixed(2)} ตัน × ${db.fmt(picked.price)} บาท/ตัน`}
                   </div>
                 </div>
               </div>
@@ -445,7 +498,7 @@ function SubCloseForm() {
                 label="ยอดที่ต้องชำระ"
                 value={
                   <span className="mono" style={{ fontWeight: 800, fontSize: 16, color: 'var(--red)' }}>
-                    {db.thb(picked.mode === 'per_ton' ? finalTotal : picked.total)}
+                    {db.thb(picked.mode === 'lump' ? picked.total : finalTotal)}
                   </span>
                 }
               />
