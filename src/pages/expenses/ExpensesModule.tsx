@@ -1334,22 +1334,41 @@ function ExpStock() {
 
 // ─── PivotTab ─────────────────────────────────────────────────────────────────
 
-function PivotTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
-  const headers = useMemo(() => {
-    const all = db.getAll<ExpenseHeader>('expenseHeaders')
-    return all.filter(h => {
-      if (dateFrom && h.date < dateFrom) return false
-      if (dateTo && h.date > dateTo) return false
-      return true
-    })
-  }, [dateFrom, dateTo])
+const PIVOT_MONTHS = [
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
+]
+
+function PivotTab() {
+  const today = new Date()
+  const [pivotYear,  setPivotYear]  = useState(today.getFullYear())
+  const [pivotMonth, setPivotMonth] = useState<number>(today.getMonth() + 1) // 1-12, 0 = ทุกเดือน
+
+  const yearOptions = useMemo(() => Array.from({ length: 11 }, (_, i) => 2025 + i), [])
+
+  // Compute CE date range from BE display values
+  const dateFrom = pivotMonth > 0
+    ? `${pivotYear}-${String(pivotMonth).padStart(2, '0')}-01`
+    : `${pivotYear}-01-01`
+  const dateTo = pivotMonth > 0
+    ? `${pivotYear}-${String(pivotMonth).padStart(2, '0')}-${new Date(pivotYear, pivotMonth, 0).getDate()}`
+    : `${pivotYear}-12-31`
+
+  const periodLabel = pivotMonth > 0
+    ? `${PIVOT_MONTHS[pivotMonth - 1]} พ.ศ. ${pivotYear + 543}`
+    : `ทั้งปี พ.ศ. ${pivotYear + 543}`
+
+  const headers = useMemo(
+    () => db.getAll<ExpenseHeader>('expenseHeaders').filter(h => h.date >= dateFrom && h.date <= dateTo),
+    [dateFrom, dateTo],
+  )
 
   const activeVendorIds = useMemo(() => Array.from(new Set(headers.map(h => h.partnerId))), [headers])
-  const activeVendors = useMemo(() =>
-    activeVendorIds.map(id => db.get<Partner>('partners', id)).filter(Boolean) as Partner[],
+  const activeVendors   = useMemo(
+    () => activeVendorIds.map(id => db.get<Partner>('partners', id)).filter(Boolean) as Partner[],
     [activeVendorIds],
   )
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
 
   const matrix = useMemo(() => {
     const m: Record<string, Record<string, number>> = {}
@@ -1360,66 +1379,152 @@ function PivotTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
     return m
   }, [headers])
 
-  const rowTotal = (vid: string) => Object.values(matrix[vid] ?? {}).reduce((s, v) => s + v, 0)
-  const colTotal = (pid: string) => Object.values(matrix).reduce((s, row) => s + (row[pid] ?? 0), 0)
+  const rowTotal  = (vid: string) => Object.values(matrix[vid] ?? {}).reduce((s, v) => s + v, 0)
+  const colTotal  = (pid: string) => Object.values(matrix).reduce((s, row) => s + (row[pid] ?? 0), 0)
   const grandTotal = activeVendorIds.reduce((s, pid) => s + colTotal(pid), 0)
-  const fmtV = (n: number) => n > 0 ? new Intl.NumberFormat('en-US').format(n) : '—'
+  const fmtMoney  = (n: number) => n > 0
+    ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : '—'
 
-  if (activeVendors.length === 0) {
-    return (
-      <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
-        <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
-        <div>ไม่มีข้อมูลค่าใช้จ่ายในช่วงเวลาที่เลือก</div>
-      </div>
-    )
+  const activeVehicles = vehicles.filter(v => matrix[v.id])
+
+  const selStyle: React.CSSProperties = {
+    height: 38, padding: '0 12px', borderRadius: 8,
+    border: '1px solid #CBD5E1', background: '#ffffff', fontSize: 13,
+    outline: 'none', cursor: 'pointer',
   }
 
   return (
     <div>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--line)', display: 'flex', gap: 24, fontSize: 13 }}>
-        <span style={{ color: 'var(--text-muted)' }}>รถที่มีรายจ่าย <strong style={{ color: 'var(--text)' }}>{vehicles.filter(v => matrix[v.id]).length} คัน</strong></span>
-        <span style={{ color: 'var(--text-muted)' }}>คู่ค้า <strong style={{ color: 'var(--text)' }}>{activeVendors.length} ราย</strong></span>
-        <span style={{ color: 'var(--text-muted)' }}>ยอดรวม <strong style={{ color: 'var(--primary)' }}>฿{new Intl.NumberFormat('en-US').format(grandTotal)}</strong></span>
+      {/* ── Filter bar ── */}
+      <div
+        className="no-print"
+        style={{
+          padding: '14px 20px', borderBottom: '1px solid var(--line)',
+          display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
+          background: '#FAFAFA',
+        }}
+      >
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>เดือน</span>
+          <select value={pivotMonth} onChange={e => setPivotMonth(Number(e.target.value))} style={{ ...selStyle, minWidth: 140 }}>
+            <option value={0}>ทุกเดือน</option>
+            {PIVOT_MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>ปี พ.ศ.</span>
+          <select value={pivotYear} onChange={e => setPivotYear(Number(e.target.value))} style={{ ...selStyle, minWidth: 110 }}>
+            {yearOptions.map(y => <option key={y} value={y}>{y + 543}</option>)}
+          </select>
+        </div>
+
+        <div style={{
+          background: '#EFF6FF', color: '#1D4ED8', borderRadius: 8,
+          padding: '5px 12px', fontSize: 12, fontWeight: 600,
+        }}>
+          {periodLabel}
+        </div>
+
+        <div style={{ display: 'flex', gap: 20, marginLeft: 8, fontSize: 13 }}>
+          <span style={{ color: 'var(--text-muted)' }}>
+            รถที่มีรายจ่าย <strong style={{ color: 'var(--text)' }}>{activeVehicles.length} คัน</strong>
+          </span>
+          <span style={{ color: 'var(--text-muted)' }}>
+            คู่ค้า <strong style={{ color: 'var(--text)' }}>{activeVendors.length} ราย</strong>
+          </span>
+          <span style={{ color: 'var(--text-muted)' }}>
+            ยอดรวม <strong style={{ color: 'var(--primary)' }}>
+              ฿{grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </strong>
+          </span>
+        </div>
+
+        <button
+          className="btn"
+          style={{ marginLeft: 'auto' }}
+          onClick={() => window.print()}
+        >
+          <Icon name="download" size={14} /> พิมพ์รายงาน
+        </button>
       </div>
-      <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th style={{ minWidth: 110, position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)', zIndex: 2 }}>ทะเบียนรถ</th>
-              {activeVendors.map(p => (
-                <th key={p.id} className="num right" style={{ minWidth: 110, whiteSpace: 'nowrap' }}>{p.name}</th>
-              ))}
-              <th className="num right" style={{ minWidth: 110, fontWeight: 700, color: 'var(--primary)' }}>รวมต่อคัน</th>
-            </tr>
-          </thead>
-          <tbody>
-            {vehicles.filter(v => matrix[v.id]).map(v => (
-              <tr key={v.id}>
-                <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>
-                  <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{v.plate}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.type}</div>
-                </td>
-                {activeVendors.map(p => (
-                  <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>
-                    {fmtV(matrix[v.id]?.[p.id] ?? 0)}
-                  </td>
-                ))}
-                <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 12 }}>
-                  {fmtV(rowTotal(v.id))}
-                </td>
-              </tr>
-            ))}
-            <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
-              <td style={{ position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)' }}>รวมต่อคู่ค้า</td>
-              {activeVendors.map(p => (
-                <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>{fmtV(colTotal(p.id))}</td>
-              ))}
-              <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
-                {fmtV(grandTotal)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+
+      {/* ── Print header ── */}
+      <div className="print-only" style={{ padding: '0 0 14px', textAlign: 'center' }}>
+        <div style={{ fontSize: 17, fontWeight: 700 }}>รายงานสรุปค่าใช้จ่ายรายคัน × คู่ค้า</div>
+        <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>
+          {periodLabel} · KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())}
+        </div>
+      </div>
+
+      {activeVendors.length === 0 ? (
+        <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
+          <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
+          <div>ไม่มีข้อมูลค่าใช้จ่ายใน{periodLabel}</div>
+        </div>
+      ) : (
+        <div style={{ margin: 16 }}>
+          <div style={{
+            borderRadius: 12, border: '1px solid #E2E8F0',
+            overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+            background: '#ffffff',
+          }}>
+            <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th style={{ minWidth: 110, position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)', zIndex: 2 }}>
+                      ทะเบียนรถ
+                    </th>
+                    {activeVendors.map(p => (
+                      <th key={p.id} className="num right" style={{ minWidth: 120, whiteSpace: 'nowrap' }}>
+                        {p.name}
+                      </th>
+                    ))}
+                    <th className="num right" style={{ minWidth: 120, fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap' }}>
+                      รวมต่อคัน
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeVehicles.map(v => (
+                    <tr key={v.id}>
+                      <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>
+                        <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{v.plate}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.type}</div>
+                      </td>
+                      {activeVendors.map(p => (
+                        <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>
+                          {fmtMoney(matrix[v.id]?.[p.id] ?? 0)}
+                        </td>
+                      ))}
+                      <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 12 }}>
+                        {fmtMoney(rowTotal(v.id))}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
+                    <td style={{ position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)' }}>รวมต่อคู่ค้า</td>
+                    {activeVendors.map(p => (
+                      <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>
+                        {fmtMoney(colTotal(p.id))}
+                      </td>
+                    ))}
+                    <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
+                      {grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Print footer ── */}
+      <div className="print-only" style={{ marginTop: 16, fontSize: 10, color: '#777', textAlign: 'center' }}>
+        * รายงานนี้สร้างจากข้อมูล Real-time · ระบบ KPS Transportation ERP
       </div>
     </div>
   )
@@ -1613,7 +1718,7 @@ function ExpReport() {
           <div>รายละเอียดรายการ — อยู่ในระหว่างเตรียมข้อมูล</div>
         </div>
       )}
-      {innerTab === 'pivot' && <PivotTab dateFrom={dateFrom} dateTo={dateTo} />}
+      {innerTab === 'pivot' && <PivotTab />}
     </div>
   )
 }
