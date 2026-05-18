@@ -27,6 +27,9 @@ function isoDate(year: number, month1to12: number, day: number): string {
   return `${year}-${m}-${d}`
 }
 
+const isFactoryStation = (station: string) =>
+  !['PTT', 'Shell', 'Bangchak', 'Esso'].some(s => station?.includes(s))
+
 export function FuelInventorySummary() {
   const today = new Date()
   const [month, setMonth] = useState(today.getMonth() + 1)
@@ -34,6 +37,11 @@ export function FuelInventorySummary() {
 
   const allStocks = useMemo(() => db.getAll<FuelStock>('fuelStock'), [])
   const allFuelings = useMemo(() => db.getAll<FuelRecord>('fuel'), [])
+  // Only factory-tank fueling counts as stock out; external pumps don't reduce factory inventory
+  const factoryFuelings = useMemo(
+    () => allFuelings.filter(f => isFactoryStation(f.station)),
+    [allFuelings],
+  )
 
   const days = daysInMonth(year, month)
   const monthStartISO = isoDate(year, month, 1)
@@ -42,7 +50,7 @@ export function FuelInventorySummary() {
     const carryIn = allStocks
       .filter(s => s.date < monthStartISO)
       .reduce((sum, s) => sum + (s.liters || 0), 0)
-    const carryOut = allFuelings
+    const carryOut = factoryFuelings
       .filter(f => f.date < monthStartISO)
       .reduce((sum, f) => sum + (f.liters || 0), 0)
     let balance = carryIn - carryOut
@@ -53,7 +61,7 @@ export function FuelInventorySummary() {
       const dayIn = allStocks
         .filter(s => s.date === iso)
         .reduce((sum, s) => sum + (s.liters || 0), 0)
-      const dayOut = allFuelings
+      const dayOut = factoryFuelings
         .filter(f => f.date === iso)
         .reduce((sum, f) => sum + (f.liters || 0), 0)
       const brought = balance
@@ -68,7 +76,7 @@ export function FuelInventorySummary() {
       })
     }
     return rows
-  }, [allStocks, allFuelings, year, month, days, monthStartISO])
+  }, [allStocks, factoryFuelings, year, month, days, monthStartISO])
 
   const monthTotals = useMemo(() => {
     const totalIn = dailyRows.reduce((s, r) => s + r.in, 0)

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
@@ -33,6 +33,8 @@ const tabBtn = (active: boolean): CSSProperties => ({
 
 const isFactoryFuel = (f: FuelRecord) =>
   !['PTT', 'Shell', 'Bangchak', 'Esso'].some(s => f.station?.includes(s))
+
+type FuelVal = { liters: number; amount: number }
 
 // ── Tab 1: ภาพรวม ─── (Stock In editable + Stock Out history)
 
@@ -560,13 +562,14 @@ function FuelRecord() {
   )
 }
 
-// ─── Tab 3: รายงาน ─── (Per-vehicle fuel report with source & time toggles)
+// ─── Tab 3: รายงาน ─── (Per-vehicle fuel report with source, time & metric toggles)
 function FuelReportV2() {
   const today = new Date()
   const [month, setMonth] = useState(today.getMonth() + 1)
   const [year, setYear] = useState(today.getFullYear())
   const [source, setSource] = useState<'tank' | 'external'>('tank')
   const [viewMode, setViewMode] = useState<'monthly' | 'yearly'>('monthly')
+  const [metric, setMetric] = useState<'liters' | 'amount'>('liters')
 
   const allFuelings = useMemo(() => db.getAll<FuelRecord>('fuel'), [])
   const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
@@ -578,26 +581,30 @@ function FuelReportV2() {
 
   const days = daysInMonth(year, month)
 
-  const monthlyMatrix = useMemo<Record<number, Record<string, number>>>(() => {
-    const data: Record<number, Record<string, number>> = {}
+  const monthlyMatrix = useMemo<Record<number, Record<string, FuelVal>>>(() => {
+    const data: Record<number, Record<string, FuelVal>> = {}
     for (let d = 1; d <= days; d++) data[d] = {}
     filteredFuel.forEach(f => {
       const dt = new Date(f.date)
       if (dt.getFullYear() !== year || dt.getMonth() + 1 !== month) return
       const d = dt.getDate()
-      data[d][f.vehicleId] = (data[d][f.vehicleId] || 0) + (f.liters || 0)
+      if (!data[d][f.vehicleId]) data[d][f.vehicleId] = { liters: 0, amount: 0 }
+      data[d][f.vehicleId].liters += f.liters || 0
+      data[d][f.vehicleId].amount += f.total || 0
     })
     return data
   }, [filteredFuel, year, month, days])
 
-  const yearlyMatrix = useMemo<Record<string, Record<number, number>>>(() => {
-    const data: Record<string, Record<number, number>> = {}
+  const yearlyMatrix = useMemo<Record<string, Record<number, FuelVal>>>(() => {
+    const data: Record<string, Record<number, FuelVal>> = {}
     filteredFuel.forEach(f => {
       const dt = new Date(f.date)
       if (dt.getFullYear() !== year) return
       const m = dt.getMonth() + 1
       if (!data[f.vehicleId]) data[f.vehicleId] = {}
-      data[f.vehicleId][m] = (data[f.vehicleId][m] || 0) + (f.liters || 0)
+      if (!data[f.vehicleId][m]) data[f.vehicleId][m] = { liters: 0, amount: 0 }
+      data[f.vehicleId][m].liters += f.liters || 0
+      data[f.vehicleId][m].amount += f.total || 0
     })
     return data
   }, [filteredFuel, year])
@@ -615,19 +622,30 @@ function FuelReportV2() {
   }, [vehicles, monthlyMatrix, yearlyMatrix, viewMode, days])
 
   const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const getVal = (v: FuelVal | undefined) => metric === 'liters' ? (v?.liters || 0) : (v?.amount || 0)
+  const unitLabel = metric === 'liters' ? 'ลิตร' : 'บาท'
+  const unitBadge = (
+    <span style={{
+      fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
+      background: metric === 'liters' ? '#EFF6FF' : '#FFF7ED',
+      color: metric === 'liters' ? '#1D4ED8' : '#C2410C',
+    }}>
+      {unitLabel}
+    </span>
+  )
 
-  const dailyTotal = (d: number) => activeVehicles.reduce((sum, v) => sum + (monthlyMatrix[d]?.[v.id] || 0), 0)
+  const dailyTotal = (d: number) => activeVehicles.reduce((sum, v) => sum + getVal(monthlyMatrix[d]?.[v.id]), 0)
   const vehicleMonthlyTotal = (vid: string) => {
     let t = 0
-    for (let d = 1; d <= days; d++) t += monthlyMatrix[d]?.[vid] || 0
+    for (let d = 1; d <= days; d++) t += getVal(monthlyMatrix[d]?.[vid])
     return t
   }
   const vehicleYearlyTotal = (vid: string) => {
     let t = 0
-    for (let m = 1; m <= 12; m++) t += yearlyMatrix[vid]?.[m] || 0
+    for (let m = 1; m <= 12; m++) t += getVal(yearlyMatrix[vid]?.[m])
     return t
   }
-  const monthColTotal = (m: number) => activeVehicles.reduce((sum, v) => sum + (yearlyMatrix[v.id]?.[m] || 0), 0)
+  const monthColTotal = (m: number) => activeVehicles.reduce((sum, v) => sum + getVal(yearlyMatrix[v.id]?.[m]), 0)
   const grandTotalMonthly = activeVehicles.reduce((sum, v) => sum + vehicleMonthlyTotal(v.id), 0)
   const grandTotalYearly = activeVehicles.reduce((sum, v) => sum + vehicleYearlyTotal(v.id), 0)
 
@@ -636,14 +654,28 @@ function FuelReportV2() {
     ? `${THAI_MONTHS_FULL[month - 1]} พ.ศ. ${year + 543}`
     : `ปี พ.ศ. ${year + 543}`
 
+  const pillGroup = (label: string, children: React.ReactNode) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500, paddingLeft: 2 }}>{label}</div>
+      <div style={{ display: 'flex', gap: 0, padding: 3, borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC' }}>
+        {children}
+      </div>
+    </div>
+  )
+
+  const tblWrap: CSSProperties = {
+    borderRadius: 12, border: '1px solid #E2E8F0', overflow: 'hidden',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.06)', background: '#fff', marginBottom: 18,
+  }
+
   return (
     <div>
       {/* Controls */}
       <div className="card pad no-print" style={{ marginBottom: 18 }}>
-        <div className="row" style={{ gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           {viewMode === 'monthly' && (
             <Field label="เดือน">
-              <select value={month} onChange={e => setMonth(Number(e.target.value))} style={{ width: 160 }}>
+              <select value={month} onChange={e => setMonth(Number(e.target.value))} style={{ width: 150 }}>
                 {THAI_MONTHS_FULL.map((m, i) => (
                   <option key={i} value={i + 1}>{m}</option>
                 ))}
@@ -657,18 +689,26 @@ function FuelReportV2() {
               ))}
             </select>
           </Field>
-          <div className="spacer" />
-          {/* Source toggle */}
-          <div style={{ display: 'flex', gap: 0, padding: 3, borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC' }}>
-            <button style={tabBtn(source === 'tank')} onClick={() => setSource('tank')}>ถังโรงงาน</button>
-            <button style={tabBtn(source === 'external')} onClick={() => setSource('external')}>ปั๊มนอก</button>
-          </div>
-          {/* Time toggle */}
-          <div style={{ display: 'flex', gap: 0, padding: 3, borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC' }}>
-            <button style={tabBtn(viewMode === 'monthly')} onClick={() => setViewMode('monthly')}>ดูรายงานรายเดือน</button>
-            <button style={tabBtn(viewMode === 'yearly')} onClick={() => setViewMode('yearly')}>ดูรายงานภาพรวมรายปี</button>
-          </div>
-          <button className="btn primary" onClick={() => window.print()}>
+          <div style={{ flex: 1 }} />
+          {pillGroup('แสดงผลเป็น',
+            <>
+              <button style={tabBtn(metric === 'liters')} onClick={() => setMetric('liters')}>จำนวนลิตร</button>
+              <button style={tabBtn(metric === 'amount')} onClick={() => setMetric('amount')}>จำนวนเงิน</button>
+            </>,
+          )}
+          {pillGroup('แหล่งน้ำมัน',
+            <>
+              <button style={tabBtn(source === 'tank')} onClick={() => setSource('tank')}>ถังโรงงาน</button>
+              <button style={tabBtn(source === 'external')} onClick={() => setSource('external')}>ปั๊มนอก</button>
+            </>,
+          )}
+          {pillGroup('ช่วงเวลา',
+            <>
+              <button style={tabBtn(viewMode === 'monthly')} onClick={() => setViewMode('monthly')}>รายเดือน</button>
+              <button style={tabBtn(viewMode === 'yearly')} onClick={() => setViewMode('yearly')}>ภาพรวมรายปี</button>
+            </>,
+          )}
+          <button className="btn primary" onClick={() => window.print()} style={{ height: 36 }}>
             <Icon name="download" size={15} /> พิมพ์
           </button>
         </div>
@@ -681,7 +721,7 @@ function FuelReportV2() {
       >
         <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>KPS Transportations</h1>
         <div style={{ fontSize: 14, fontWeight: 600, marginTop: 6 }}>
-          รายงานการใช้น้ำมัน{viewMode === 'yearly' ? 'ภาพรวมรายปี' : 'รายเดือน'} — {sourceLabel}
+          รายงานการใช้น้ำมัน{viewMode === 'yearly' ? 'ภาพรวมรายปี' : 'รายเดือน'} — {sourceLabel} ({metric === 'liters' ? 'จำนวนลิตร' : 'จำนวนเงิน'})
         </div>
         <div style={{ fontSize: 13, marginTop: 4 }}>{periodLabel}</div>
         <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</div>
@@ -689,12 +729,17 @@ function FuelReportV2() {
 
       {/* Monthly: per-vehicle daily matrix */}
       {viewMode === 'monthly' && (
-        <div className="card">
-          <div className="head">
-            <h3>การใช้น้ำมันรายวันต่อคัน — {THAI_MONTHS_FULL[month - 1]} {year + 543} ({sourceLabel})</h3>
-            <div className="right muted" style={{ fontSize: 12 }}>{activeVehicles.length} คัน · {days} วัน</div>
+        <div style={tblWrap}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid #E2E8F0', gap: 10 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>
+                การใช้น้ำมันรายวันต่อคัน — {THAI_MONTHS_FULL[month - 1]} {year + 543} ({sourceLabel})
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{activeVehicles.length} คัน · {days} วัน</div>
+            </div>
+            <div style={{ marginLeft: 'auto' }}>{unitBadge}</div>
           </div>
-          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0, overflowX: 'auto' }}>
+          <div style={{ overflowX: 'auto' }}>
             {activeVehicles.length === 0 ? (
               <div className="empty" style={{ padding: 40 }}>ไม่มีข้อมูลการใช้น้ำมัน</div>
             ) : (
@@ -705,7 +750,9 @@ function FuelReportV2() {
                     {activeVehicles.map(v => (
                       <th key={v.id} className="right mono" style={{ whiteSpace: 'nowrap' }}>{v.plate}</th>
                     ))}
-                    <th className="right" style={{ background: '#FFF8E1', color: '#7A5A00', whiteSpace: 'nowrap' }}>รวมรายวัน</th>
+                    <th className="right" style={{ background: '#FFF8E1', color: '#7A5A00', whiteSpace: 'nowrap' }}>
+                      รวมรายวัน ({unitLabel})
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -717,7 +764,7 @@ function FuelReportV2() {
                           {d} {THAI_MONTHS_SHORT[month - 1]}
                         </td>
                         {activeVehicles.map(v => {
-                          const val = monthlyMatrix[d]?.[v.id] || 0
+                          const val = getVal(monthlyMatrix[d]?.[v.id])
                           return (
                             <td key={v.id} className="num right mono" style={{ color: val > 0 ? 'var(--text-1)' : 'var(--text-faint)' }}>
                               {val > 0 ? fmt(val) : '—'}
@@ -732,7 +779,7 @@ function FuelReportV2() {
                   })}
                   <tr style={{ background: 'var(--primary-50)', fontWeight: 700 }}>
                     <td style={{ position: 'sticky', left: 0, zIndex: 1, background: 'var(--primary-50)', color: 'var(--primary)' }}>
-                      รวมต่อคัน
+                      รวมต่อคัน ({unitLabel})
                     </td>
                     {activeVehicles.map(v => (
                       <td key={v.id} className="num right mono" style={{ color: 'var(--primary)' }}>
@@ -752,11 +799,14 @@ function FuelReportV2() {
 
       {/* Yearly: per-vehicle 12-month summary */}
       {viewMode === 'yearly' && (
-        <div className="card">
-          <div className="head">
-            <h3>ภาพรวมการใช้น้ำมันรายปี พ.ศ. {year + 543} ({sourceLabel})</h3>
+        <div style={tblWrap}>
+          <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid #E2E8F0', gap: 10 }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>
+              ภาพรวมการใช้น้ำมันรายปี พ.ศ. {year + 543} ({sourceLabel})
+            </div>
+            <div style={{ marginLeft: 'auto' }}>{unitBadge}</div>
           </div>
-          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0, overflowX: 'auto' }}>
+          <div style={{ overflowX: 'auto' }}>
             {activeVehicles.length === 0 ? (
               <div className="empty" style={{ padding: 40 }}>ไม่มีข้อมูลการใช้น้ำมัน</div>
             ) : (
@@ -767,7 +817,9 @@ function FuelReportV2() {
                     {THAI_MONTHS_SHORT.map((m, i) => (
                       <th key={i} className="right" style={{ whiteSpace: 'nowrap' }}>{m}</th>
                     ))}
-                    <th className="right" style={{ background: '#FFF8E1', color: '#7A5A00', whiteSpace: 'nowrap' }}>รวมทั้งปี</th>
+                    <th className="right" style={{ background: '#FFF8E1', color: '#7A5A00', whiteSpace: 'nowrap' }}>
+                      รวมทั้งปี ({unitLabel})
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -777,7 +829,7 @@ function FuelReportV2() {
                         {v.plate}
                       </td>
                       {Array.from({ length: 12 }, (_, i) => i + 1).map(m => {
-                        const val = yearlyMatrix[v.id]?.[m] || 0
+                        const val = getVal(yearlyMatrix[v.id]?.[m])
                         return (
                           <td key={m} className="num right mono" style={{ color: val > 0 ? 'var(--text-1)' : 'var(--text-faint)' }}>
                             {val > 0 ? fmt(val) : '—'}
@@ -791,7 +843,7 @@ function FuelReportV2() {
                   ))}
                   <tr style={{ background: 'var(--primary-50)', fontWeight: 700 }}>
                     <td style={{ position: 'sticky', left: 0, zIndex: 1, background: 'var(--primary-50)', color: 'var(--primary)' }}>
-                      รวมทุกคัน
+                      รวมทุกคัน ({unitLabel})
                     </td>
                     {Array.from({ length: 12 }, (_, i) => i + 1).map(m => {
                       const tot = monthColTotal(m)
