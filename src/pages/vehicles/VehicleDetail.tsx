@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { db } from '../../lib/db'
-import { can } from '../../lib/permissions'
 import type { Vehicle, Employee, Tire, FuelRecord, Maintenance, Dispatch, User } from '../../types'
 import { Icon, StatusBadge, Info } from '../../components/ui'
 
@@ -62,7 +61,7 @@ function TireSummary({ tires }: { tires: Tire[] }) {
   )
 }
 
-export function VehicleDetail({ setActive, subject, user }: VehicleDetailProps) {
+export function VehicleDetail({ setActive, subject }: VehicleDetailProps) {
   const subjectObj = subject as { type?: string; id?: string } | null
   const v = db.get<Vehicle>('vehicles', subjectObj?.id ?? '')
   const [tab, setTab] = useState<TabKey>('overview')
@@ -143,17 +142,6 @@ export function VehicleDetail({ setActive, subject, user }: VehicleDetailProps) 
               </div>
             </div>
           </div>
-        </div>
-        <div className="actions">
-          {can.editVehicle(user.role) ? (
-            <button className="btn" onClick={() => setActive('vehicles')}>
-              <Icon name="edit" size={15} /> แก้ไข
-            </button>
-          ) : (
-            <button className="btn" onClick={() => setActive('vehicles')}>
-              <Icon name="bell" size={15} /> ขออนุมัติแก้ไข
-            </button>
-          )}
         </div>
       </div>
 
