@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db, uid } from '../../lib/db'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, Customer } from '../../types'
+import type { Vehicle, Employee, Dispatch, DispatchLeg, Customer, FuelRound } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -189,6 +189,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const legs = round.legs ?? []
   const totalRevenue = db.roundRevenue(round)
   const totalWeight = legs.reduce((s, l) => s + (l.weight || 0), 0)
+  const fuelRound = db.fuelRoundOfDispatch(round.id) as FuelRound | null
 
   const saveLeg = (form: LegFormState) => {
     if (!editingLeg) return
@@ -306,6 +307,61 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             <span className="muted" style={{ fontSize: 11 }}>หมายเหตุรอบ: </span>{round.notes}
           </div>
         )}
+      </div>
+
+      {/* Fuel round status */}
+      <div className="card pad" style={{ marginBottom: 16 }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="row" style={{ gap: 10 }}>
+            <span style={{ color: 'var(--primary)' }}><Icon name="fuel" size={18} /></span>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>รอบน้ำมัน (Fuel Round)</div>
+              {fuelRound ? (
+                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                  <span className="mono" style={{ color: 'var(--primary)' }}>{fuelRound.code}</span>
+                  {' · '}
+                  {fuelRound.status === 'open'
+                    ? <span style={{ color: 'var(--amber)' }}>OPEN · เติมแล้ว {db.fmt(db.fuelRoundIntermediateTotal(fuelRound))} L</span>
+                    : <span style={{ color: 'var(--green)' }}>✓ CLOSED · ใช้จริง {db.fuelRoundConsumed(fuelRound).toFixed(1)} L</span>}
+                </div>
+              ) : (
+                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>ยังไม่ได้เปิดรอบน้ำมัน</div>
+              )}
+            </div>
+          </div>
+          <div className="row btn-row">
+            {fuelRound && fuelRound.status === 'open' && (
+              <>
+                <button
+                  className="btn sm"
+                  onClick={() => {
+                    setSubject({ type: 'fuelRound', id: fuelRound.id })
+                    setActive('fuel.round.refill')
+                  }}
+                >
+                  <Icon name="plus" size={13} /> เติมระหว่างทาง
+                </button>
+                <button
+                  className="btn primary sm"
+                  onClick={() => {
+                    setSubject({ type: 'fuelRound', id: fuelRound.id })
+                    setActive('fuel.round.close')
+                  }}
+                >
+                  <Icon name="check" size={13} /> ปิดรอบน้ำมัน
+                </button>
+              </>
+            )}
+            {!fuelRound && !isClosed && (
+              <button
+                className="btn primary sm"
+                onClick={() => setActive('fuel.round.open')}
+              >
+                <Icon name="plus" size={13} /> เปิดรอบน้ำมัน
+              </button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Legs */}

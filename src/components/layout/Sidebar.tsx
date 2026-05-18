@@ -50,6 +50,9 @@ const MENU: MenuItem[] = [
       { id: 'fuel.logs', label: 'บันทึกน้ำมัน' },
       { id: 'fuel.report', label: 'รายงานน้ำมันรายเดือน' },
       { id: 'fuel.summary', label: 'สรุปคลังน้ำมันรวม' },
+      { id: 'fuel.round.open', label: 'เปิดรอบน้ำมัน' },
+      { id: 'fuel.round.refill', label: 'เติมปั้มนอก' },
+      { id: 'fuel.round.close', label: 'ปิดรอบน้ำมัน' },
     ],
   },
   {

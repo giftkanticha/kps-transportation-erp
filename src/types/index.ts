@@ -201,6 +201,29 @@ export interface FuelRecord {
   type: string
 }
 
+export interface FuelRefill {
+  id: string
+  type: 'start' | 'intermediate' | 'end'
+  mileage: number
+  liters: number
+  pricePerL: number
+  cost: number
+  location: string
+  at: string
+  notes?: string
+}
+
+export interface FuelRound {
+  id: string
+  code: string
+  vehicleId: string
+  dispatchRoundId?: string | null
+  tankCapacity: number
+  status: 'open' | 'closed'
+  refills: FuelRefill[]
+  notes?: string
+}
+
 export interface FuelStock {
   id: string
   date: string
@@ -399,6 +422,7 @@ export interface AppState {
   tire_scrap_sales: TireScrapSale[]
   fuel: FuelRecord[]
   fuelStock: FuelStock[]
+  fuelRounds: FuelRound[]
   expenses: Expense[]
   expenseHeaders: ExpenseHeader[]
   expenseLines: ExpenseLine[]

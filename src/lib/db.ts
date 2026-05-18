@@ -3,6 +3,7 @@ import type {
   User,
   Dispatch,
   DispatchLeg,
+  FuelRound,
 } from '../types'
 import { SEED } from '../data/seed'
 
@@ -12,6 +13,8 @@ const KEY = 'kps_erp_v5'
 const SESSION_KEY = KEY + '_session'
 
 export const DSP_KMPL_THRESHOLD = 2.5
+export const DEFAULT_TANK_CAPACITY = 500
+export const HOME_BASE = 'โรงงาน KPS'
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -206,6 +209,88 @@ export const db = {
   roundDistance(d: Dispatch): number {
     if (d.startOdometer == null || d.endOdometer == null) return 0
     return Math.max(0, d.endOdometer - d.startOdometer)
+  },
+
+  // ── Fuel round helpers ────────────────────────────────────────────────────
+
+  nextFuelRoundCode(): string {
+    const today = new Date()
+    const ymd =
+      today.getFullYear().toString() +
+      String(today.getMonth() + 1).padStart(2, '0') +
+      String(today.getDate()).padStart(2, '0')
+    const prefix = `RUND-${ymd}-`
+    const todays = db.getAll<FuelRound>('fuelRounds').filter(r => r.code?.startsWith(prefix))
+    const seq = String(todays.length + 1).padStart(3, '0')
+    return prefix + seq
+  },
+
+  activeFuelRoundForVehicle(vehicleId: string): FuelRound | null {
+    if (!vehicleId) return null
+    return db.getAll<FuelRound>('fuelRounds')
+      .find(r => r.vehicleId === vehicleId && r.status === 'open') ?? null
+  },
+
+  fuelRoundOfDispatch(dispatchRoundId: string): FuelRound | null {
+    if (!dispatchRoundId) return null
+    return db.getAll<FuelRound>('fuelRounds')
+      .find(r => r.dispatchRoundId === dispatchRoundId) ?? null
+  },
+
+  fuelRoundStartLiters(r: FuelRound): number {
+    return r.refills.find(x => x.type === 'start')?.liters ?? 0
+  },
+
+  fuelRoundIntermediateTotal(r: FuelRound): number {
+    return r.refills.filter(x => x.type === 'intermediate').reduce((s, x) => s + x.liters, 0)
+  },
+
+  fuelRoundEndLiters(r: FuelRound): number {
+    return r.refills.find(x => x.type === 'end')?.liters ?? 0
+  },
+
+  // Current tank level (only meaningful for open rounds, before close)
+  fuelRoundCurrentLevel(r: FuelRound): number {
+    // We assume tank is full at start. Each refill brings tank back toward full.
+    // For UI estimation, we don't know real-time consumption, so we estimate
+    // by assuming the truck always uses fuel that's currently in the tank.
+    // Simplest approximation: level after intermediates = capacity (since
+    // intermediates are usually only done when tank is low enough to need fuel).
+    // But we want to show a useful level for the refill UI's "available capacity".
+    // We'll show capacity - intermediate liters added (assuming each intermediate
+    // brings level partway back). This is an estimate.
+    const cap = r.tankCapacity || DEFAULT_TANK_CAPACITY
+    // Estimate consumption between refills: assume each refill brought tank to full,
+    // so level right before each refill = cap - refill.liters. After refill = cap.
+    // After most recent refill, level = cap. This is the simplest model.
+    if (!r.refills.length) return cap
+    return cap // assume always brought to full
+  },
+
+  fuelRoundConsumed(r: FuelRound): number {
+    // Consumed = intermediates + end-fill (when tank starts and ends at full)
+    if (r.status !== 'closed') return 0
+    return db.fuelRoundIntermediateTotal(r) + db.fuelRoundEndLiters(r)
+  },
+
+  fuelRoundCost(r: FuelRound): number {
+    // Cost of fuel purchased during this round = all refills EXCEPT start
+    return r.refills
+      .filter(x => x.type !== 'start')
+      .reduce((s, x) => s + (x.cost || 0), 0)
+  },
+
+  fuelRoundDistance(r: FuelRound): number {
+    const start = r.refills.find(x => x.type === 'start')?.mileage ?? 0
+    const end = r.refills.find(x => x.type === 'end')?.mileage ?? 0
+    return Math.max(0, end - start)
+  },
+
+  fuelRoundEfficiency(r: FuelRound): number | null {
+    const consumed = db.fuelRoundConsumed(r)
+    const dist = db.fuelRoundDistance(r)
+    if (!consumed || !dist) return null
+    return dist / consumed
   },
 
   // ── Reset ─────────────────────────────────────────────────────────────────

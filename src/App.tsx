@@ -13,6 +13,9 @@ import { EmployeesPage } from './pages/employees/EmployeesPage'
 import { EmployeeAdd } from './pages/employees/EmployeeAdd'
 import { TiresModule } from './pages/tires/TiresModule'
 import { FuelModule } from './pages/fuel/FuelModule'
+import { FuelRoundOpen } from './pages/fuel/FuelRoundOpen'
+import { FuelRoundRefill } from './pages/fuel/FuelRoundRefill'
+import { FuelRoundClose } from './pages/fuel/FuelRoundClose'
 import { DispatchModule } from './pages/dispatch/DispatchModule'
 import { DispatchRoundOpen } from './pages/dispatch/DispatchRoundOpen'
 import { DispatchRoundDetail } from './pages/dispatch/DispatchRoundDetail'
@@ -46,6 +49,9 @@ const crumbMap: Record<string, string> = {
   'fuel.logs': 'ระบบน้ำมัน • บันทึก',
   'fuel.report': 'ระบบน้ำมัน • รายงาน',
   'fuel.summary': 'ระบบน้ำมัน • สรุปคลังน้ำมันรวม',
+  'fuel.round.open': 'ระบบน้ำมัน • เปิดรอบน้ำมัน',
+  'fuel.round.refill': 'ระบบน้ำมัน • เติมปั้มนอก',
+  'fuel.round.close': 'ระบบน้ำมัน • ปิดรอบน้ำมัน',
   dispatch: 'งานขนส่ง',
   'dispatch.open': 'งานขนส่ง • เปิดงาน',
   'dispatch.round': 'งานขนส่ง • รายละเอียดรอบ',
@@ -138,6 +144,13 @@ export default function App() {
         return <FuelModule tab="report" setActive={setActive} />
       case 'fuel.summary':
         return <FuelModule tab="summary" setActive={setActive} />
+
+      case 'fuel.round.open':
+        return <FuelRoundOpen setActive={setActive} setSubject={setSubject} />
+      case 'fuel.round.refill':
+        return <FuelRoundRefill setActive={setActive} setSubject={setSubject} subject={subject} />
+      case 'fuel.round.close':
+        return <FuelRoundClose setActive={setActive} setSubject={setSubject} subject={subject} />
 
       case 'dispatch':
       case 'dispatch.open':
