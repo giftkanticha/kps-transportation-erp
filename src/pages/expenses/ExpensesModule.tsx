@@ -184,7 +184,7 @@ function ExpenseFormBody({
   const totals = lines.map((l) => (l.qty || 0) * (l.unitPrice || 0))
   const netTotal = totals.reduce((s, t) => s + t, 0)
 
-  // Auto-fill from selected stock item
+  // Auto-fill from selected stock item — use sellPrice if set, otherwise fall back to unitCost
   const pickStock = (i: number, stockId: string) => {
     const s = stocks.find((x) => x.id === stockId)
     setLines(
@@ -194,7 +194,7 @@ function ExpenseFormBody({
               ...l,
               stockItemId: stockId,
               item: s?.name ?? '',
-              unitPrice: s?.unitCost ?? 0,
+              unitPrice: s?.sellPrice ?? s?.unitCost ?? 0,
               category: s?.category ?? l.category,
             }
           : l,
@@ -210,7 +210,7 @@ function ExpenseFormBody({
           <h3>ข้อมูลทั่วไป</h3>
         </div>
         <div style={{ padding: 22 }}>
-          <div className="grid-2" style={{ gap: 14, marginBottom: 14 }}>
+          <div className="grid-2" style={{ gap: 16, marginBottom: 16, alignItems: 'start' }}>
             <Field label="เลือกรถ *">
               <select value={hdr.vehicleId} onChange={(e) => setH('vehicleId', e.target.value)}>
                 <option value="">-- เลือกรถ --</option>
@@ -222,8 +222,11 @@ function ExpenseFormBody({
               </select>
             </Field>
             <Field label="สถานะการชำระเงิน">
-              <div className="row" style={{ gap: 18, paddingTop: 4 }}>
-                <label className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13.5 }}>
+              <div style={{
+                height: 38, display: 'flex', alignItems: 'center', gap: 20,
+                padding: '0 12px', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', background: '#fff',
+              }}>
+                <label className="row" style={{ gap: 7, cursor: 'pointer', fontSize: 13.5 }}>
                   <input
                     type="radio"
                     name="ex-paid"
@@ -233,7 +236,7 @@ function ExpenseFormBody({
                   />
                   <span>ยังไม่ชำระ</span>
                 </label>
-                <label className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13.5 }}>
+                <label className="row" style={{ gap: 7, cursor: 'pointer', fontSize: 13.5 }}>
                   <input
                     type="radio"
                     name="ex-paid"
@@ -365,7 +368,12 @@ function ExpenseFormBody({
                           </select>
                           {stk && (
                             <div className="faint" style={{ fontSize: 10.5, marginTop: 2 }}>
-                              ราคาดึงจากสต๊อก {db.fmt(stk.unitCost)} ฿/{stk.unit}
+                              ทุน {db.fmt(stk.unitCost)} ฿
+                              {stk.sellPrice != null && (
+                                <span style={{ color: '#0369A1', marginLeft: 6 }}>
+                                  · ขาย {db.fmt(stk.sellPrice)} ฿/{stk.unit}
+                                </span>
+                              )}
                               {l.qty > stk.qty && (
                                 <span style={{ color: 'var(--red)', marginLeft: 6 }}>
                                   ⚠ ไม่พอ (มี {stk.qty})
@@ -980,6 +988,50 @@ function ExpFinance() {
 
 // ─── Tab 3: สต๊อคคลัง KPS ────────────────────────────────────────────────────
 
+function SellPriceCell({ item, onSaved }: { item: StockItem; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState('')
+
+  const start = () => {
+    setVal(item.sellPrice != null ? String(item.sellPrice) : '')
+    setEditing(true)
+  }
+  const save = () => {
+    const p = parseFloat(val)
+    db.update<StockItem>('stock', item.id, { sellPrice: isNaN(p) ? undefined : p })
+    setEditing(false)
+    onSaved()
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+        style={{ width: 90, textAlign: 'right', padding: '3px 8px', borderRadius: 6, border: '1px solid var(--primary)', fontSize: 12, fontFamily: 'var(--mono)' }}
+        placeholder="0.00"
+      />
+    )
+  }
+
+  return (
+    <div
+      onClick={start}
+      title="คลิกเพื่อตั้งราคาขาย"
+      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}
+    >
+      {item.sellPrice != null
+        ? <span className="mono">{item.sellPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>— ตั้งราคา</span>}
+      <span style={{ color: 'var(--text-muted)', opacity: 0.5 }}><Icon name="edit" size={11} /></span>
+    </div>
+  )
+}
+
 function ExpStock() {
   const [tick, setTick] = useState(0)
   const refresh = () => setTick((n) => n + 1)
@@ -989,6 +1041,25 @@ function ExpStock() {
 
   const total = stock.reduce((s, r) => s + r.qty * r.unitCost, 0)
   const low = stock.filter((s) => s.qty <= s.reorderAt)
+
+  // Net profit this month: sum over KPS expense lines of qty * (sellPrice - unitCost)
+  const thisMonthProfit = useMemo(() => {
+    void tick
+    const now = new Date()
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    const headers = db.getAll<ExpenseHeader>('expenseHeaders').filter(h => {
+      if (!isKPSPartner(h.partnerId)) return false
+      return h.date?.slice(0, 7) === ym
+    })
+    const headerIds = new Set(headers.map(h => h.id))
+    return db.getAll<ExpenseLine>('expenseLines')
+      .filter(l => headerIds.has(l.headerId) && l.stockItemId)
+      .reduce((sum, l) => {
+        const s = stock.find(x => x.id === l.stockItemId)
+        if (!s || s.sellPrice == null) return sum
+        return sum + l.qty * (s.sellPrice - s.unitCost)
+      }, 0)
+  }, [tick, stock])
 
   // Receive form state
   const today = new Date().toISOString().slice(0, 10)
@@ -1048,16 +1119,16 @@ function ExpStock() {
 
   return (
     <div>
-      <div className="grid-3" style={{ marginBottom: 18 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 18 }}>
         <div className="card kpi">
           <div className="label">รายการสินค้า</div>
-          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 8 }}>
+          <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8 }}>
             {stock.length} <span style={{ fontSize: 14, fontWeight: 500 }}>รายการ</span>
           </div>
         </div>
         <div className="card kpi">
           <div className="label">มูลค่าสต๊อคทั้งหมด</div>
-          <div className="mono" style={{ fontSize: 28, fontWeight: 700, marginTop: 8, color: 'var(--primary)' }}>
+          <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8, color: 'var(--primary)' }}>
             {db.fmt(total)} ฿
           </div>
         </div>
@@ -1065,9 +1136,22 @@ function ExpStock() {
           <div className="label">สินค้าหมด / ต่ำ</div>
           <div
             className="mono"
-            style={{ fontSize: 28, fontWeight: 700, marginTop: 8, color: low.length > 0 ? 'var(--red)' : 'var(--green)' }}
+            style={{ fontSize: 26, fontWeight: 700, marginTop: 8, color: low.length > 0 ? 'var(--red)' : 'var(--green)' }}
           >
             {low.length} <span style={{ fontSize: 14, fontWeight: 500 }}>รายการ</span>
+          </div>
+        </div>
+        <div className="card kpi">
+          <div className="label">กำไรสุทธิเดือนนี้</div>
+          <div
+            className="mono"
+            style={{ fontSize: 22, fontWeight: 700, marginTop: 8, color: thisMonthProfit >= 0 ? '#10B981' : '#EF4444' }}
+          >
+            {thisMonthProfit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            <span style={{ fontSize: 13, fontWeight: 500, marginLeft: 4 }}>฿</span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+            {thisMonthProfit >= 0 ? 'กำไร' : 'ขาดทุน'} จากราคาขาย KPS
           </div>
         </div>
       </div>
@@ -1164,7 +1248,8 @@ function ExpStock() {
                 <th style={{ width: 60 }}>ลำดับ</th>
                 <th>รายการสินค้า</th>
                 <th className="right">จำนวนคงเหลือ</th>
-                <th className="right">ราคาเฉลี่ย / หน่วย</th>
+                <th className="right">ราคาทุน / หน่วย</th>
+                <th className="right" style={{ color: '#0369A1' }}>ราคาขาย / หน่วย</th>
                 <th className="right">มูลค่ารวม</th>
               </tr>
             </thead>
@@ -1183,13 +1268,16 @@ function ExpStock() {
                     {s.qty} <span className="muted" style={{ fontSize: 11, marginLeft: 4 }}>{s.unit}</span>
                   </td>
                   <td className="num right">{db.fmt(s.unitCost)} ฿</td>
+                  <td className="num right" style={{ color: '#0369A1' }}>
+                    <SellPriceCell item={s} onSaved={refresh} />
+                  </td>
                   <td className="num right" style={{ fontWeight: 600, color: 'var(--primary)' }}>
                     {db.fmt(s.qty * s.unitCost)} ฿
                   </td>
                 </tr>
               ))}
               <tr style={{ background: 'var(--green-50)', fontWeight: 700 }}>
-                <td colSpan={4} className="right">
+                <td colSpan={5} className="right">
                   มูลค่าสต็อครวม
                 </td>
                 <td className="num right" style={{ fontSize: 15, color: 'var(--primary)' }}>
@@ -1614,9 +1702,18 @@ function VendorEditModal({
               <input value={form.code} readOnly style={{ background: 'var(--bg-2)', color: 'var(--text-muted)' }} />
             </Field>
             <Field label="ประเภท">
-              <select value={form.type} onChange={(e) => set('type', e.target.value)}>
-                {PARTNER_TYPES.map((t) => <option key={t}>{t}</option>)}
-              </select>
+              <input
+                list="partner-type-options"
+                value={form.type}
+                onChange={(e) => set('type', e.target.value)}
+                placeholder="เลือกหรือพิมพ์ประเภทใหม่..."
+              />
+              <datalist id="partner-type-options">
+                {[...new Set([
+                  ...PARTNER_TYPES,
+                  ...db.getAll<Partner>('partners').map((p) => p.type).filter(Boolean),
+                ])].map((t) => <option key={t} value={t} />)}
+              </datalist>
             </Field>
             <Field label="ชื่อร้านค้า / ช่าง *">
               <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="เช่น ศูนย์ซ่อม ABC" />

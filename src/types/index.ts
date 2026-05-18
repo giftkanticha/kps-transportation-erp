@@ -295,6 +295,7 @@ export interface StockItem {
   qty: number
   unit: string
   unitCost: number
+  sellPrice?: number
   reorderAt: number
 }
 
