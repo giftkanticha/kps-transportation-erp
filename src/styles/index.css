@@ -11,6 +11,10 @@
   --bg: #F8FAFC;
   --bg-elev: #ffffff;
   --bg-sunk: #F1F5F9;
+  /* Aliases used by inline styles across pages — keep solid to avoid translucent overlays */
+  --card: #ffffff;
+  --bg-2: #F1F5F9;
+  --primary-tint: #E6F0FF;
 
   --line: #E2E8F0;
   --line-strong: #CBD5E1;
@@ -68,6 +72,7 @@ input, select, textarea { font-family: inherit; }
   height: 100vh;
   background: var(--bg);
   transition: grid-template-columns .25s cubic-bezier(.4,0,.2,1);
+  isolation: isolate; /* contain z-index from pages so modals can't leak into the shell */
 }
 .app.collapsed { grid-template-columns: 72px 1fr; }
 
@@ -186,7 +191,13 @@ input, select, textarea { font-family: inherit; }
 .app.collapsed .logout-btn span { display: none; }
 
 /* ---------- Topbar ---------- */
-.main { display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+.main {
+  display: flex; flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg); /* solid — prevents see-through if a page omits its own bg */
+  position: relative;
+}
 .topbar {
   height: 60px;
   background: var(--bg-elev);
@@ -262,6 +273,8 @@ input, select, textarea { font-family: inherit; }
   flex: 1; min-height: 0;
   overflow: auto;
   padding: 24px 28px 60px;
+  background: var(--bg); /* solid — guarantees no see-through under any rendered page */
+  position: relative;
 }
 
 /* ---------- Typography ---------- */
@@ -465,18 +478,19 @@ h3.section-title { font-size: 11.5px; font-weight: 700; text-transform: uppercas
   position: fixed; inset: 0;
   background: rgba(15,23,42,.5);
   display: grid; place-items: center;
-  z-index: 50;
+  z-index: 1000; /* high enough to clear all in-page sticky elements */
   padding: 24px;
   backdrop-filter: blur(2px);
 }
 .modal {
-  background: var(--bg-elev);
+  background: var(--bg-elev); /* always solid white — never let page content bleed through */
   border-radius: var(--r-lg);
   width: 100%; max-width: 560px;
   max-height: calc(100vh - 48px);
   display: flex; flex-direction: column;
   box-shadow: var(--shadow-lg);
   overflow: hidden;
+  position: relative; z-index: 1;
 }
 .modal.wide { max-width: 780px; }
 .modal.xwide { max-width: 1000px; }
