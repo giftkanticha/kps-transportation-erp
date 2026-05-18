@@ -298,6 +298,8 @@ export interface SubDriver {
   accountNo: string
   status: string
   subId: string
+  address?: string
+  vehicleTypes?: string[]
 }
 
 export interface SubJob {

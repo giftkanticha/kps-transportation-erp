@@ -17,6 +17,47 @@ const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
   paid: { label: 'ชำระแล้ว', cls: 'green' },
 }
 
+const VEHICLE_TYPE_OPTIONS = ['4ล้อ', '6ล้อ', '10ล้อ', '18ล้อ', '22ล้อ', 'ตู้คอนเทนเนอร์', 'พ่วงข้าง']
+
+// ─── Confirm Dialog (shared) ─────────────────────────────────────────────────
+
+interface ConfirmDialogProps {
+  title: string
+  message: string
+  confirmLabel: string
+  destructive?: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+function ConfirmDialog({ title, message, confirmLabel, destructive, onConfirm, onCancel }: ConfirmDialogProps) {
+  return (
+    <div
+      onClick={onCancel}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100 }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--card)', borderRadius: 12, width: '90%', maxWidth: 440, padding: 24, boxShadow: '0 10px 40px rgba(0,0,0,.25)' }}
+      >
+        <h2 style={{ margin: '0 0 10px 0', fontSize: 17, fontWeight: 700 }}>{title}</h2>
+        <p style={{ margin: '0 0 22px 0', color: 'var(--text-2)', fontSize: 14, lineHeight: 1.55 }}>{message}</p>
+        <div className="row btn-row" style={{ justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onCancel}>
+            <Icon name="close" size={15} /> ยกเลิก
+          </button>
+          <button
+            className={`btn ${destructive ? 'danger solid' : 'primary'}`}
+            onClick={onConfirm}
+          >
+            <Icon name={destructive ? 'close' : 'check'} size={15} /> {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Edit Driver Modal ───────────────────────────────────────────────────────
 
 interface DriverEditModalProps {
@@ -51,19 +92,30 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
     accountNo: driver?.accountNo ?? '',
     status: driver?.status ?? 'active',
     subId: driver?.subId ?? (subs[0]?.id ?? ''),
+    address: driver?.address ?? '',
   })
+  const [vehicleTypes, setVehicleTypes] = useState<string[]>(driver?.vehicleTypes ?? [])
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  const toggleType = (t: string) => {
+    setVehicleTypes(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t])
+  }
 
   const save = () => {
     if (!form.name.trim() || !form.plate.trim() || !form.phone.trim()) {
       alert('กรุณากรอก ชื่อ, ทะเบียนรถ และเบอร์โทร')
       return
     }
+    if (vehicleTypes.length === 0) {
+      alert('กรุณาเลือกประเภทรถที่สามารถขับได้อย่างน้อย 1 ประเภท')
+      return
+    }
+    const payload = { ...form, vehicleTypes }
     if (isNew) {
-      db.add<SubDriver>('subDrivers', { ...form, id: uid('sd') })
+      db.add<SubDriver>('subDrivers', { ...payload, id: uid('sd') })
     } else {
-      db.update<SubDriver>('subDrivers', driver!.id, form)
+      db.update<SubDriver>('subDrivers', driver!.id, payload)
     }
     onSaved()
     onClose()
@@ -135,11 +187,64 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
               </select>
             </Field>
           </div>
+
+          <div style={{ marginTop: 16 }}>
+            <Field label="ที่อยู่">
+              <textarea
+                value={form.address}
+                onChange={e => set('address', e.target.value)}
+                placeholder="เช่น 123/4 ถ.สุขุมวิท แขวงคลองเตย กรุงเทพฯ 10110"
+                rows={2}
+                style={{ width: '100%', resize: 'vertical' }}
+              />
+            </Field>
+          </div>
+
+          <div style={{ marginTop: 14 }}>
+            <label style={{ display: 'block', fontSize: 12.5, fontWeight: 500, color: 'var(--text-2)', marginBottom: 8 }}>
+              ประเภทรถที่สามารถขับได้ * <span className="muted" style={{ fontWeight: 400 }}>(เลือกได้หลายประเภท)</span>
+            </label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {VEHICLE_TYPE_OPTIONS.map(t => {
+                const checked = vehicleTypes.includes(t)
+                return (
+                  <label
+                    key={t}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '8px 14px', borderRadius: 999, cursor: 'pointer',
+                      border: `1px solid ${checked ? 'var(--primary)' : 'var(--line)'}`,
+                      background: checked ? 'var(--primary-50)' : 'var(--bg-elev)',
+                      color: checked ? 'var(--primary)' : 'var(--text-2)',
+                      fontSize: 13, fontWeight: checked ? 600 : 500,
+                      transition: 'all .12s',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleType(t)}
+                      style={{ accentColor: 'var(--primary)' }}
+                    />
+                    {t}
+                  </label>
+                )
+              })}
+            </div>
+            {vehicleTypes.length === 0 && (
+              <div className="faint" style={{ fontSize: 11, marginTop: 6, color: 'var(--amber)' }}>
+                * กรุณาเลือกอย่างน้อย 1 ประเภท
+              </div>
+            )}
+          </div>
         </div>
-        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn" onClick={onClose}>ยกเลิก</button>
+        <div className="row btn-row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose}>
+            <Icon name="close" size={15} /> ยกเลิก
+          </button>
           <button className="btn primary" onClick={save}>
-            <Icon name="check" size={15} /> {isNew ? 'เพิ่มคนขับ' : 'บันทึกการแก้ไข'}
+            <Icon name="check" size={15} /> {isNew ? 'บันทึก' : 'บันทึกการแก้ไข'}
           </button>
         </div>
       </div>
@@ -175,6 +280,11 @@ function SubOpenForm() {
       const vehicle = vehicles.find(v => v.plate.toLowerCase() === driver.plate.toLowerCase())
       if (vehicle?.type) {
         setForm(f => ({ ...f, driverId, category: vehicle.type }))
+        setCategoryAutoFilled(true)
+        return
+      }
+      if (driver.vehicleTypes && driver.vehicleTypes.length > 0) {
+        setForm(f => ({ ...f, driverId, category: driver.vehicleTypes![0] }))
         setCategoryAutoFilled(true)
         return
       }
@@ -695,10 +805,11 @@ interface DriverActionProps {
   driver: SubDriver
   isAdmin: boolean
   onEdit: () => void
+  onDelete: () => void
   onChanged: () => void
 }
 
-function DriverActionMenu({ driver, isAdmin, onEdit, onChanged }: DriverActionProps) {
+function DriverActionMenu({ driver, isAdmin, onEdit, onDelete, onChanged }: DriverActionProps) {
   const [open, setOpen] = useState(false)
 
   const toggleStatus = () => {
@@ -718,29 +829,40 @@ function DriverActionMenu({ driver, isAdmin, onEdit, onChanged }: DriverActionPr
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 90 }} onClick={() => setOpen(false)} />
           <div style={{
-            position: 'absolute', right: 0, top: 28, zIndex: 100,
+            position: 'absolute', right: 0, top: 32, zIndex: 100,
             background: '#fff', border: '1px solid var(--line)', borderRadius: 10,
-            boxShadow: '0 4px 16px rgba(0,0,0,.1)', minWidth: 160, padding: 6,
+            boxShadow: '0 4px 16px rgba(0,0,0,.1)', minWidth: 180, padding: 6,
           }}>
             {isAdmin ? (
               <>
                 <button
                   className="btn ghost"
                   onClick={() => { setOpen(false); onEdit() }}
-                  style={{ width: '100%', justifyContent: 'flex-start', gap: 8, padding: '7px 12px' }}
+                  style={{ width: '100%', justifyContent: 'flex-start', gap: 8, padding: '8px 12px', minHeight: 36 }}
                 >
-                  <Icon name="edit" size={14} /> แก้ไขข้อมูล
+                  <Icon name="edit" size={14} /> แก้ไข
                 </button>
                 <button
                   className="btn ghost"
                   onClick={toggleStatus}
                   style={{
-                    width: '100%', justifyContent: 'flex-start', gap: 8, padding: '7px 12px',
+                    width: '100%', justifyContent: 'flex-start', gap: 8, padding: '8px 12px', minHeight: 36,
                     color: driver.status === 'active' ? 'var(--amber)' : 'var(--green)',
                   }}
                 >
                   <Icon name={driver.status === 'active' ? 'close' : 'check'} size={14} />
                   {driver.status === 'active' ? 'ระงับการใช้งาน' : 'เปิดใช้งาน'}
+                </button>
+                <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0' }} />
+                <button
+                  className="btn ghost"
+                  onClick={() => { setOpen(false); onDelete() }}
+                  style={{
+                    width: '100%', justifyContent: 'flex-start', gap: 8, padding: '8px 12px', minHeight: 36,
+                    color: '#A32D2D',
+                  }}
+                >
+                  <Icon name="close" size={14} /> ลบ
                 </button>
               </>
             ) : (
@@ -764,9 +886,23 @@ function SubDriversList({ user }: { user?: User }) {
   const [q, setQ] = useState('')
   const [editing, setEditing] = useState<SubDriver | null>(null)
   const [addNew, setAddNew] = useState(false)
+  const [deleting, setDeleting] = useState<SubDriver | null>(null)
 
   const filtered = drivers.filter(d => !q || d.name.toLowerCase().includes(q.toLowerCase()) || d.phone.includes(q) || d.plate.toLowerCase().includes(q.toLowerCase()))
   const today = new Date()
+
+  const confirmDelete = () => {
+    if (!deleting) return
+    const openJobs = db.getAll<SubJob>('subJobs').filter(j => j.driverId === deleting.id && j.status !== 'paid')
+    if (openJobs.length > 0) {
+      alert(`ไม่สามารถลบได้ — คนขับมีงานค้างอยู่ ${openJobs.length} งาน`)
+      setDeleting(null)
+      return
+    }
+    db.remove('subDrivers', deleting.id)
+    setDeleting(null)
+    setTick(n => n + 1)
+  }
 
   return (
     <div className="card">
@@ -802,11 +938,11 @@ function SubDriversList({ user }: { user?: User }) {
           <thead>
             <tr>
               <th>รหัส/ชื่อ-นามสกุล</th>
+              <th>เบอร์โทร</th>
+              <th>ประเภทรถ</th>
               <th>ทะเบียนรถ</th>
-              <th>ข้อมูลติดต่อ</th>
-              <th>เลขบัตรประชาชน</th>
               <th>ใบขับขี่</th>
-              <th>ข้อมูลบัญชี (รับเงิน)</th>
+              <th>ธนาคาร</th>
               <th>สถานะ</th>
               <th>จัดการ</th>
             </tr>
@@ -817,6 +953,7 @@ function SubDriversList({ user }: { user?: User }) {
               const days = Math.round((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24))
               const isExpired = d.licenseStatus === 'expired'
               const isNearExpiry = !isExpired && days <= 30
+              const types = d.vehicleTypes ?? []
 
               return (
                 <tr key={d.id}>
@@ -824,18 +961,42 @@ function SubDriversList({ user }: { user?: User }) {
                     <div style={{ fontWeight: 500 }}>{d.name}</div>
                     <div className="muted mono" style={{ fontSize: 11.5 }}>{d.code}</div>
                   </td>
+                  <td className="mono">{d.phone}</td>
+                  <td>
+                    {types.length > 0 ? (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {types.map(t => (
+                          <span
+                            key={t}
+                            className="badge"
+                            style={{
+                              background: 'var(--primary-50)',
+                              color: 'var(--primary)',
+                              fontSize: 11,
+                              fontWeight: 600,
+                              padding: '2px 8px',
+                            }}
+                          >
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="muted" style={{ fontSize: 12 }}>—</span>
+                    )}
+                  </td>
                   <td>
                     <span style={{ color: 'var(--primary)', fontWeight: 600 }} className="mono">{d.plate}</span>
                   </td>
-                  <td className="mono">{d.phone}</td>
-                  <td className="mono">{d.idCard}</td>
                   <td>
-                    <div style={{ fontSize: 12 }}>{d.license}</div>
-                    <div style={{ fontSize: 11, color: isExpired || isNearExpiry ? 'var(--red)' : 'var(--text-muted)' }}>
-                      <Icon name="alert" size={11} style={{ verticalAlign: -2, marginRight: 2 }} />
-                      หมดอายุ: {db.thaiDate(d.licenseExpire)}
-                      {isExpired ? ' (หมดอายุแล้ว)' : isNearExpiry ? ` (ใกล้หมดอายุ ${days} วัน)` : ''}
-                    </div>
+                    <div style={{ fontSize: 12 }}>{d.license || '—'}</div>
+                    {d.licenseExpire && (
+                      <div style={{ fontSize: 11, color: isExpired || isNearExpiry ? 'var(--red)' : 'var(--text-muted)' }}>
+                        <Icon name="alert" size={11} style={{ verticalAlign: -2, marginRight: 2 }} />
+                        {db.thaiDate(d.licenseExpire)}
+                        {isExpired ? ' (หมดอายุ)' : isNearExpiry ? ` (${days} วัน)` : ''}
+                      </div>
+                    )}
                   </td>
                   <td>
                     <div style={{ fontWeight: 500 }}>{d.accountBank}</div>
@@ -853,6 +1014,7 @@ function SubDriversList({ user }: { user?: User }) {
                       driver={d}
                       isAdmin={isAdmin}
                       onEdit={() => setEditing(d)}
+                      onDelete={() => setDeleting(d)}
                       onChanged={() => setTick(n => n + 1)}
                     />
                   </td>
@@ -882,6 +1044,16 @@ function SubDriversList({ user }: { user?: User }) {
           driver={null}
           onClose={() => setAddNew(false)}
           onSaved={() => setTick(n => n + 1)}
+        />
+      )}
+      {deleting && (
+        <ConfirmDialog
+          title="⚠️ แน่ใจหรือ?"
+          message={`ต้องการลบคนขับ "${deleting.name}" (${deleting.plate}) ออกจากระบบ? การกระทำนี้ไม่สามารถยกเลิกได้`}
+          confirmLabel="ลบคนขับ"
+          destructive
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleting(null)}
         />
       )}
     </div>
