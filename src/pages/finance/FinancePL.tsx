@@ -349,24 +349,9 @@ export function FinancePL() {
   const allVehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
   const [picked, setPicked] = useState<Set<string>>(() => new Set(db.getAll<Vehicle>('vehicles').map(v => v.id)))
 
-  // Print mode: null=normal, 'fleet'=all selected, vehicleId=single truck
-  const [printTarget, setPrintTarget] = useState<'fleet' | string | null>(null)
-
   const ym = `${year}-${String(month + 1).padStart(2, '0')}`
 
   const yearOptions = useMemo(() => Array.from({ length: 11 }, (_, i) => 2025 + i), [])
-
-  // Listen for print complete to reset printTarget
-  useEffect(() => {
-    const reset = () => setPrintTarget(null)
-    window.addEventListener('afterprint', reset)
-    return () => window.removeEventListener('afterprint', reset)
-  }, [])
-
-  const triggerPrint = (target: 'fleet' | string) => {
-    setPrintTarget(target)
-    requestAnimationFrame(() => requestAnimationFrame(() => window.print()))
-  }
 
   const { allRows } = useMemo(() => {
     try {
@@ -468,40 +453,22 @@ export function FinancePL() {
             </select>
           </div>
           <div className="row" style={{ gap: 8, marginLeft: 'auto' }}>
-            <button className="btn" onClick={() => triggerPrint('fleet')}>
+            <button className="btn" onClick={() => window.print()}>
               <Icon name="download" size={14} /> พิมพ์ทั้งหมด ({picked.size} คัน)
             </button>
           </div>
         </div>
       </div>
 
-      {/* ── Print header (fleet) ── */}
-      {(printTarget === 'fleet' || printTarget === null) && (
-        <div className="print-only" style={{ marginBottom: 12 }}>
-          <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>
-            รายงาน P&amp;L รายคัน — {thaiMonthLabel(year, month)}
-          </div>
-          <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
-            KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())} · {picked.size} คัน
-          </div>
+      {/* ── Print header ── */}
+      <div className="print-only" style={{ marginBottom: 12 }}>
+        <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>
+          รายงาน P&amp;L รายคัน — {thaiMonthLabel(year, month)}
         </div>
-      )}
-
-      {/* ── Print header (single vehicle) ── */}
-      {printTarget && printTarget !== 'fleet' && (() => {
-        const row = allRows.find(r => r.v.id === printTarget)
-        return row ? (
-          <div className="print-only" style={{ marginBottom: 12 }}>
-            <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>
-              รายงาน P&amp;L รายคัน — {row.v.plate}
-            </div>
-            <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
-              {row.v.type} {row.v.brand} · คนขับ: {row.driverName} · {thaiMonthLabel(year, month)}
-              · KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())}
-            </div>
-          </div>
-        ) : null
-      })()}
+        <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
+          KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())} · {picked.size} คัน
+        </div>
+      </div>
 
       {/* ── Main content: sidebar + table ── */}
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
@@ -542,7 +509,6 @@ export function FinancePL() {
                     <th className="num right" style={{ whiteSpace: 'nowrap' }}>ค่าใช้จ่าย</th>
                     <th className="num right" style={{ whiteSpace: 'nowrap', color: '#B45309' }}>ดอกเบี้ย</th>
                     <th className="num right" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>กำไรสุทธิ</th>
-                    <th className="no-print" style={{ width: 36 }}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -550,11 +516,9 @@ export function FinancePL() {
                     const profitColor = r.profit >= 0 ? '#10B981' : '#EF4444'
                     const hasActivity = r.rev > 0 || r.totalCost > 0
                     // In single-vehicle print mode, hide other rows
-                    const hiddenInPrint = printTarget && printTarget !== 'fleet' && printTarget !== r.v.id
                     return (
                       <tr
                         key={r.v.id}
-                        className={hiddenInPrint ? 'print-row-hide' : undefined}
                         style={{ opacity: hasActivity ? 1 : 0.5 }}
                       >
                         <td>
@@ -582,29 +546,11 @@ export function FinancePL() {
                         <td className="num right mono" style={{ fontWeight: 700, color: profitColor }}>
                           {fmt2(r.profit)}
                         </td>
-                        {/* Per-vehicle print button */}
-                        <td className="no-print" style={{ textAlign: 'center', padding: '0 6px' }}>
-                          <button
-                            className="btn sm"
-                            style={{ padding: '3px 7px', fontSize: 11, minWidth: 0 }}
-                            onClick={() => triggerPrint(r.v.id)}
-                            title={`พิมพ์รายงาน ${r.v.plate}`}
-                          >
-                            <Icon name="download" size={12} />
-                          </button>
-                        </td>
                       </tr>
                     )
                   })}
                   {/* Totals row */}
-                  <tr
-                    className={
-                      printTarget && printTarget !== 'fleet'
-                        ? 'print-row-hide'
-                        : undefined
-                    }
-                    style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}
-                  >
+                  <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
                     <td>รวมทั้งหมด</td>
                     <td className="num right mono">{fmt2(totals.rev)}</td>
                     <td className="num right mono" style={{ color: '#0369A1' }}>{fmt2(totals.fuelIn)}</td>
@@ -616,7 +562,6 @@ export function FinancePL() {
                     <td className="num right mono" style={{ color: isProfit ? '#10B981' : '#EF4444' }}>
                       {fmt2(totals.profit)}
                     </td>
-                    <td className="no-print"></td>
                   </tr>
                 </tbody>
               </table>
