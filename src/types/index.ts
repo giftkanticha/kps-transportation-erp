@@ -53,6 +53,7 @@ export interface Vehicle {
   tax: string
   insurance: string
   dispatchPermit: string
+  group?: 'INTERNAL' | 'TRANSPORT'
 }
 
 export interface Customer {
@@ -211,6 +212,28 @@ export interface FuelRefill {
   location: string
   at: string
   notes?: string
+}
+
+export type FuelTransactionStatus = 'INTERNAL_DEDUCTED' | 'TRIP_LINKED' | 'FLOATING' | 'REVERSED'
+export type TripFuelRole = 'NORMAL' | 'START_FILL' | 'INTERMEDIATE' | 'END_FILL'
+export type FuelEntryMethod = 'EXPRESS_GRID' | 'TRIP_OPEN' | 'TRIP_REFILL' | 'TRIP_CLOSE' | 'MANUAL_ADMIN'
+
+export interface FuelTransaction {
+  id: string
+  date: string
+  vehicleId: string
+  liters: number
+  pricePerL: number
+  total: number
+  source: 'FACTORY_TANK' | 'EXTERNAL_PUMP'
+  tripId: string | null
+  status: FuelTransactionStatus
+  tripFuelRole: TripFuelRole
+  entryMethod: FuelEntryMethod
+  createdAt: string
+  reversedAt?: string | null
+  reversalOf?: string | null
+  note?: string
 }
 
 export interface FuelRound {
@@ -435,6 +458,7 @@ export interface AppState {
   partners: Partner[]
   subDrivers: SubDriver[]
   subJobs: SubJob[]
+  fuelTransactions: FuelTransaction[]
   activity: ActivityLog[]
   taskCompletions: TaskCompletion[]
   editApprovals: EditApprovalRequest[]

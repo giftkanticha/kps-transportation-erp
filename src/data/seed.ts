@@ -318,6 +318,7 @@ export const SEED: AppState = {
   subJobs,
   activity,
   taskCompletions: [],
+  fuelTransactions: [],
   editApprovals: [
     {
       id: 'ea1',

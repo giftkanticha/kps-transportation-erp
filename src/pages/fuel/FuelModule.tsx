@@ -5,6 +5,8 @@ import { Field } from '../../components/ui/Field'
 import type { CSSProperties } from 'react'
 import type { FuelRecord, FuelStock, Vehicle, Employee } from '../../types'
 import { FuelInventorySummary } from './FuelInventorySummary'
+import { ExpressFuelLog } from './ExpressFuelLog'
+import { FloatingFuel } from './FloatingFuel'
 
 const THAI_MONTHS_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -890,6 +892,8 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
     tab === 'logs' ? 'record' :
     tab === 'report' ? 'report' :
     tab === 'summary' ? 'summary' :
+    tab === 'express' ? 'express' :
+    tab === 'floating' ? 'floating' :
     'overview'
 
   return (
@@ -912,9 +916,11 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
         {(
           [
             ['overview', 'fuel', 'ภาพรวม', 'fuel'],
+            ['express', 'express', '⚡ คีย์ด่วน', 'edit'],
             ['record', 'logs', 'บันทึก', 'edit'],
             ['report', 'report', 'รายงาน', 'chart'],
             ['summary', 'summary', 'สรุปคลังน้ำมัน', 'download'],
+            ['floating', 'floating', 'น้ำมันลอย', 'alert'],
           ] as [string, string, string, string][]
         ).map(([id, route, label, ic]) => (
           <button
@@ -929,9 +935,11 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       </div>
 
       {current === 'overview' && <FuelOverview />}
+      {current === 'express' && <ExpressFuelLog />}
       {current === 'record' && <FuelRecord />}
       {current === 'report' && <FuelReportV2 />}
       {current === 'summary' && <FuelInventorySummary />}
+      {current === 'floating' && <FloatingFuel />}
     </div>
   )
 }
