@@ -92,6 +92,19 @@ export interface DispatchLeg {
   weight: number
   price: number
   amount: number
+  id?: string
+  customerId?: string
+  legType?: 'outbound' | 'backhaul' | 'return'
+  deliveredWeight?: number | null
+  perDiem?: number
+  notes?: string
+  closed?: boolean
+}
+
+export interface OtherExpense {
+  id: string
+  label: string
+  amount: number
 }
 
 export interface Dispatch {
@@ -117,6 +130,9 @@ export interface Dispatch {
   totalAmount: number
   revenue: number
   cost: number
+  roundStatus?: 'draft' | 'closed'
+  returnAt?: string
+  otherExpenses?: OtherExpense[]
 }
 
 export interface Maintenance {

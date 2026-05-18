@@ -11,6 +11,8 @@ import { SEED } from '../data/seed'
 const KEY = 'kps_erp_v5'
 const SESSION_KEY = KEY + '_session'
 
+export const DSP_KMPL_THRESHOLD = 2.5
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 function load(): AppState | null {
@@ -165,6 +167,45 @@ export const db = {
     if (leg.priceMode === 'per_kg') return w * 1000 * p
     if (leg.priceMode === 'per_ton') return w * p
     return p // lump
+  },
+
+  // ── Round helpers ─────────────────────────────────────────────────────────
+
+  lastClosedMileage(vehicleId: string): number | null {
+    if (!vehicleId) return null
+    const rounds = db.getAll<Dispatch>('dispatch')
+      .filter(d => d.vehicleId === vehicleId && d.roundStatus === 'closed' && d.endOdometer != null)
+    if (!rounds.length) return null
+    return Math.max(...rounds.map(d => d.endOdometer ?? 0))
+  },
+
+  nextRoundCode(): string {
+    const today = new Date()
+    const ymd =
+      today.getFullYear().toString() +
+      String(today.getMonth() + 1).padStart(2, '0') +
+      String(today.getDate()).padStart(2, '0')
+    const prefix = `DSP-${ymd}-`
+    const todays = db.getAll<Dispatch>('dispatch').filter(d => d.code?.startsWith(prefix))
+    const seq = String(todays.length + 1).padStart(3, '0')
+    return prefix + seq
+  },
+
+  roundRevenue(d: Dispatch): number {
+    return (d.legs ?? []).reduce((s, l) => s + (l.amount || 0), 0)
+  },
+
+  roundPerDiem(d: Dispatch): number {
+    return (d.legs ?? []).reduce((s, l) => s + (l.perDiem || 0), 0)
+  },
+
+  roundOtherExpenses(d: Dispatch): number {
+    return (d.otherExpenses ?? []).reduce((s, e) => s + (e.amount || 0), 0)
+  },
+
+  roundDistance(d: Dispatch): number {
+    if (d.startOdometer == null || d.endOdometer == null) return 0
+    return Math.max(0, d.endOdometer - d.startOdometer)
   },
 
   // ── Reset ─────────────────────────────────────────────────────────────────

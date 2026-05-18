@@ -14,6 +14,9 @@ import { EmployeeAdd } from './pages/employees/EmployeeAdd'
 import { TiresModule } from './pages/tires/TiresModule'
 import { FuelModule } from './pages/fuel/FuelModule'
 import { DispatchModule } from './pages/dispatch/DispatchModule'
+import { DispatchRoundOpen } from './pages/dispatch/DispatchRoundOpen'
+import { DispatchRoundDetail } from './pages/dispatch/DispatchRoundDetail'
+import { DispatchRoundClose } from './pages/dispatch/DispatchRoundClose'
 import { SubcontractorModule } from './pages/subcontractors/SubcontractorModule'
 import { ExpensesModule } from './pages/expenses/ExpensesModule'
 import { ExpensePivotPage } from './pages/expenses/ExpensePivotPage'
@@ -45,6 +48,7 @@ const crumbMap: Record<string, string> = {
   'fuel.summary': 'ระบบน้ำมัน • สรุปคลังน้ำมันรวม',
   dispatch: 'งานขนส่ง',
   'dispatch.open': 'งานขนส่ง • เปิดงาน',
+  'dispatch.round': 'งานขนส่ง • รายละเอียดรอบ',
   'dispatch.close': 'งานขนส่ง • ปิดงาน',
   'dispatch.fuel': 'งานขนส่ง • รายงานประจำวัน',
   'dispatch.monthly': 'งานขนส่ง • รายงานประจำเดือน',
@@ -137,9 +141,11 @@ export default function App() {
 
       case 'dispatch':
       case 'dispatch.open':
-        return <DispatchModule tab="open" setActive={setActive} user={user} />
+        return <DispatchRoundOpen setActive={setActive} setSubject={setSubject} user={user} />
+      case 'dispatch.round':
+        return <DispatchRoundDetail setActive={setActive} setSubject={setSubject} subject={subject} />
       case 'dispatch.close':
-        return <DispatchModule tab="close" setActive={setActive} user={user} />
+        return <DispatchRoundClose setActive={setActive} setSubject={setSubject} subject={subject} />
       case 'dispatch.fuel':
         return <DispatchModule tab="fuel" setActive={setActive} user={user} />
       case 'dispatch.monthly':
