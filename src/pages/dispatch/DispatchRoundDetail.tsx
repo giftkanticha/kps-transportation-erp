@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { db, uid } from '../../lib/db'
+import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import type { Vehicle, Employee, Dispatch, DispatchLeg, Customer, FuelRound } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -157,6 +157,221 @@ function LegModal({
   )
 }
 
+function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelRound | null }) {
+  const legs = round.legs ?? []
+  const revenue = db.roundRevenue(round)
+  const perDiemTotal = db.roundPerDiem(round)
+  const otherTotal = db.roundOtherExpenses(round)
+  const fuelCost = fuelRound ? db.fuelRoundCost(fuelRound) : (round.cost || 0)
+  const consumed = fuelRound ? db.fuelRoundConsumed(fuelRound) : (round.liters || 0)
+  const distance = db.roundDistance(round)
+  const profit = revenue - fuelCost - perDiemTotal - otherTotal
+  const margin = revenue > 0 ? (profit / revenue) * 100 : 0
+  const kmPerL = consumed > 0 ? distance / consumed : null
+  const isLow = kmPerL != null && kmPerL < DSP_KMPL_THRESHOLD
+
+  const startR = fuelRound?.refills.find(r => r.type === 'start')
+  const inters = fuelRound?.refills.filter(r => r.type === 'intermediate') ?? []
+  const endR = fuelRound?.refills.find(r => r.type === 'end')
+
+  const departTime = round.depart?.slice(11, 16) || '—'
+  const returnTime = round.returnAt?.slice(11, 16) || '—'
+
+  return (
+    <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {fuelRound && (
+        <div className="card">
+          <div className="head"><h3>⛽ Timeline การเติมน้ำมัน (Round {fuelRound.code})</h3></div>
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {startR && (
+              <div style={{ padding: 10, borderRadius: 6, background: 'var(--bg)', fontSize: 12.5 }}>
+                <div style={{ fontWeight: 600 }}>📍 START FULL — {startR.location}</div>
+                <div className="muted" style={{ marginTop: 2 }}>
+                  ⏰ {startR.at.slice(11, 16)} ({db.fmt(startR.mileage)} km) ·
+                  🛢️ {startR.liters} L · 💰 ฿{db.fmt(startR.cost)} <em>(คิดในรอบก่อน)</em>
+                </div>
+              </div>
+            )}
+            {inters.map((r, i) => (
+              <div key={r.id} style={{ padding: 10, borderRadius: 6, background: '#EFF6FF', fontSize: 12.5, border: '1px solid #BFDBFE' }}>
+                <div style={{ fontWeight: 600 }}>➕ INTERMEDIATE #{i + 1} — {r.location}</div>
+                <div className="muted" style={{ marginTop: 2 }}>
+                  ⏰ {r.at.slice(11, 16)} ({db.fmt(r.mileage)} km) ·
+                  🛢️ {r.liters} L · 💰 ฿{db.fmt(r.cost)}
+                </div>
+              </div>
+            ))}
+            {endR && (
+              <div style={{ padding: 10, borderRadius: 6, background: '#ECFDF5', fontSize: 12.5, border: '1px solid #A7F3D0' }}>
+                <div style={{ fontWeight: 600 }}>🏁 END FULL — {endR.location}</div>
+                <div className="muted" style={{ marginTop: 2 }}>
+                  ⏰ {endR.at.slice(11, 16)} ({db.fmt(endR.mileage)} km) ·
+                  🛢️ {endR.liters} L (จนเต็ม) · 💰 ฿{db.fmt(endR.cost)}
+                </div>
+              </div>
+            )}
+            <div
+              style={{
+                marginTop: 6, padding: 12, borderRadius: 6,
+                background: 'var(--card)', border: '1px dashed var(--line)',
+                fontFamily: 'var(--font-mono)', fontSize: 12.5,
+              }}
+            >
+              <table style={{ width: '100%' }}>
+                <tbody>
+                  <tr><td>Start FULL:</td><td className="num right">{startR?.liters ?? 0} L</td></tr>
+                  <tr><td>+ Intermediate:</td><td className="num right">{db.fuelRoundIntermediateTotal(fuelRound)} L</td></tr>
+                  <tr><td>+ End fill:</td><td className="num right">{endR?.liters ?? 0} L</td></tr>
+                  <tr style={{ borderTop: '1px dashed var(--line)' }}>
+                    <td style={{ paddingTop: 6, fontWeight: 600 }}>🎯 Consumed:</td>
+                    <td className="num right" style={{ paddingTop: 6, fontWeight: 700, color: '#0066CC' }}>{consumed.toFixed(1)} L</td>
+                  </tr>
+                  <tr>
+                    <td style={{ fontWeight: 600 }}>📊 Efficiency:</td>
+                    <td className="num right" style={{ fontWeight: 700, color: isLow ? '#EF4444' : '#10B981' }}>
+                      {kmPerL?.toFixed(2) ?? '—'} km/L {isLow && '⚠️'}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={{ fontWeight: 600 }}>💰 Fuel cost:</td>
+                    <td className="num right" style={{ fontWeight: 700 }}>฿{db.fmt(fuelCost)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* P&L summary */}
+      <div className="card">
+        <div className="head"><h3>📊 สรุป P&amp;L</h3></div>
+        <div style={{ padding: 18 }}>
+          <div className="grid-2" style={{ gap: 18 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--green)', marginBottom: 6 }}>📈 รายได้</div>
+              <div className="row" style={{ fontSize: 13 }}>
+                <span>ค่าขนส่ง ({legs.length} ขา)</span>
+                <span className="spacer" />
+                <span className="mono">{db.thb(revenue)}</span>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--red)', marginBottom: 6 }}>💸 ค่าใช้จ่าย</div>
+              <div className="row" style={{ fontSize: 13 }}><span>ค่าน้ำมัน</span><span className="spacer" /><span className="mono">฿{db.fmt(fuelCost)}</span></div>
+              <div className="row" style={{ fontSize: 13 }}><span>เบี้ยเลี้ยง</span><span className="spacer" /><span className="mono">฿{db.fmt(perDiemTotal)}</span></div>
+              <div className="row" style={{ fontSize: 13 }}><span>ค่าใช้จ่ายอื่น</span><span className="spacer" /><span className="mono">฿{db.fmt(otherTotal)}</span></div>
+              <div className="row" style={{ fontSize: 13, fontWeight: 600, borderTop: '1px dashed var(--line)', paddingTop: 4, marginTop: 4 }}>
+                <span>รวม</span><span className="spacer" /><span className="mono">฿{db.fmt(fuelCost + perDiemTotal + otherTotal)}</span>
+              </div>
+            </div>
+          </div>
+          <div
+            style={{
+              marginTop: 18, padding: 14,
+              background: profit >= 0 ? '#ECFDF5' : '#FEE2E2',
+              border: `1px solid ${profit >= 0 ? '#10B981' : '#EF4444'}`,
+              borderRadius: 8,
+            }}
+          >
+            <div className="row" style={{ gap: 24, flexWrap: 'wrap' }}>
+              <div>
+                <div className="muted" style={{ fontSize: 11 }}>💚 กำไรสุทธิ</div>
+                <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: profit >= 0 ? '#10B981' : '#EF4444' }}>
+                  {db.thb(profit)}
+                </div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 11 }}>อัตรากำไร</div>
+                <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{margin.toFixed(1)}%</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 11 }}>ระยะทาง</div>
+                <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{db.fmt(distance)} km</div>
+              </div>
+              {kmPerL != null && (
+                <div>
+                  <div className="muted" style={{ fontSize: 11 }}>KM/L</div>
+                  <div className="mono" style={{ fontSize: 16, fontWeight: 600, color: isLow ? '#EF4444' : 'var(--text-1)' }}>
+                    {kmPerL.toFixed(2)} {isLow && '⚠️'}
+                  </div>
+                </div>
+              )}
+              <div>
+                <div className="muted" style={{ fontSize: 11 }}>เวลา</div>
+                <div className="mono" style={{ fontSize: 13, fontWeight: 600 }}>
+                  ออก {departTime} → ถึง {returnTime}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Per-leg delivery details */}
+          {legs.some(l => l.deliveredWeight != null || (l.perDiem || 0) > 0) && (
+            <div style={{ marginTop: 18 }}>
+              <h4 style={{ margin: '0 0 8px 0', fontSize: 13 }}>รายละเอียดการส่งของแต่ละขา</h4>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>ขา</th>
+                    <th>เส้นทาง</th>
+                    <th className="num">โหลด</th>
+                    <th className="num">ส่ง</th>
+                    <th className="num">ผลต่าง</th>
+                    <th className="num">เบี้ยเลี้ยง</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {legs.map((l, i) => {
+                    const dw = l.deliveredWeight ?? 0
+                    const isReturn = l.legType === 'return'
+                    const diff = isReturn ? 0 : (l.weight || 0) - dw
+                    return (
+                      <tr key={l.id || i}>
+                        <td>{i + 1}</td>
+                        <td>{l.origin} → {l.destination}</td>
+                        <td className="num">{isReturn ? '—' : (l.weight || 0).toFixed(2)}</td>
+                        <td className="num">{isReturn ? '—' : (l.deliveredWeight != null ? dw.toFixed(2) : '—')}</td>
+                        <td className="num">
+                          {isReturn
+                            ? '—'
+                            : (diff > 0.001
+                              ? <span style={{ color: 'var(--amber)' }}>⚠️ {diff.toFixed(2)}</span>
+                              : <span style={{ color: 'var(--green)' }}>ครบ</span>)}
+                        </td>
+                        <td className="num">฿{db.fmt(l.perDiem || 0)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {(round.otherExpenses ?? []).length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <h4 style={{ margin: '0 0 8px 0', fontSize: 13 }}>ค่าใช้จ่ายอื่นๆ</h4>
+              <table className="tbl">
+                <thead>
+                  <tr><th>รายการ</th><th className="num">จำนวน</th></tr>
+                </thead>
+                <tbody>
+                  {(round.otherExpenses ?? []).map(e => (
+                    <tr key={e.id}>
+                      <td>{e.label}</td>
+                      <td className="num">฿{db.fmt(e.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const subj = subject as { type?: string; id?: string } | null
   const [tick, setTick] = useState(0)
@@ -265,8 +480,8 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             {' • '}ออก {db.thaiDate(round.depart || round.date)}
           </div>
         </div>
-        {!isClosed && (
-          <div className="actions">
+        <div className="actions no-print">
+          {!isClosed && (
             <button
               className="btn primary"
               onClick={() => {
@@ -278,8 +493,13 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             >
               <Icon name="check" size={15} /> ไปปิดงาน →
             </button>
-          </div>
-        )}
+          )}
+          {isClosed && (
+            <button className="btn" onClick={() => window.print()}>
+              <Icon name="download" size={15} /> พิมพ์ / PDF
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Round info */}
@@ -466,6 +686,8 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
           </div>
         )}
       </div>
+
+      {isClosed && <ClosedSummary round={round} fuelRound={fuelRound} />}
 
       {editingLeg && (
         <LegModal

@@ -20,6 +20,7 @@ import { DispatchModule } from './pages/dispatch/DispatchModule'
 import { DispatchRoundOpen } from './pages/dispatch/DispatchRoundOpen'
 import { DispatchRoundDetail } from './pages/dispatch/DispatchRoundDetail'
 import { DispatchRoundClose } from './pages/dispatch/DispatchRoundClose'
+import { DispatchSummaryReport } from './pages/dispatch/DispatchSummaryReport'
 import { SubcontractorModule } from './pages/subcontractors/SubcontractorModule'
 import { ExpensesModule } from './pages/expenses/ExpensesModule'
 import { ExpensePivotPage } from './pages/expenses/ExpensePivotPage'
@@ -164,7 +165,7 @@ export default function App() {
       case 'dispatch.monthly':
         return <DispatchModule tab="monthly" setActive={setActive} user={user} />
       case 'dispatch.report':
-        return <DispatchModule tab="report" setActive={setActive} user={user} />
+        return <DispatchSummaryReport setActive={setActive} setSubject={setSubject} />
       case 'dispatch.history':
         return <DispatchModule tab="history" setActive={setActive} user={user} />
 
