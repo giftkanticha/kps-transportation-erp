@@ -24,7 +24,6 @@ import { DispatchSummaryReport } from './pages/dispatch/DispatchSummaryReport'
 import { DispatchHistory } from './pages/dispatch/DispatchHistory'
 import { SubcontractorModule } from './pages/subcontractors/SubcontractorModule'
 import { ExpensesModule } from './pages/expenses/ExpensesModule'
-import { ExpensePivotPage } from './pages/expenses/ExpensePivotPage'
 import { FinancePL } from './pages/finance/FinancePL'
 import { FinanceFixed } from './pages/finance/FinanceFixed'
 import { FinanceSummary } from './pages/finance/FinanceSummary'
@@ -72,7 +71,6 @@ const crumbMap: Record<string, string> = {
   'expenses.stock': 'สต็อคคลัง KPS',
   'expenses.report': 'ค่าใช้จ่าย • รายงานสรุป',
   'expenses.vendors': 'ทะเบียนร้านค้า/ช่าง',
-  'expenses.pivot': 'สรุปค่าใช้จ่ายรวมรายคัน/คู่ค้า',
   customers: 'ลูกค้า',
   partners: 'คู่ค้า / ช่าง',
   maintenance: 'การบำรุงรักษา',
@@ -190,8 +188,6 @@ export default function App() {
         return <ExpensesModule tab="report" setActive={setActive} />
       case 'expenses.vendors':
         return <ExpensesModule tab="vendors" setActive={setActive} />
-      case 'expenses.pivot':
-        return <ExpensePivotPage />
 
       case 'finance':
         return <FinancePL />

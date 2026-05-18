@@ -44,6 +44,19 @@ const applyStockDelta = (lines: { stockItemId?: string; qty: number }[], sign: 1
   })
 }
 
+function genExpCode(): string {
+  const now = new Date()
+  const yyyymmdd = String(now.getFullYear()) +
+    String(now.getMonth() + 1).padStart(2, '0') +
+    String(now.getDate()).padStart(2, '0')
+  const prefix = `EXP-${yyyymmdd}-`
+  const existing = db.getAll<ExpenseHeader>('expenseHeaders').filter(h => h.code.startsWith(prefix))
+  return prefix + String(existing.length + 1).padStart(3, '0')
+}
+function toBeCode(code: string): string {
+  return code.replace(/^EXP-(\d{4})/, (_, y) => `EXP-${+y + 543}`)
+}
+
 export function ExpensesModule({ tab, setActive }: ExpensesModuleProps) {
   const current =
     tab === 'finance'
@@ -141,6 +154,7 @@ function ExpenseFormBody({
   vehicles,
   partners,
   stocks,
+  docCode,
 }: {
   hdr: HeaderForm
   setHdr: (next: HeaderForm) => void
@@ -149,6 +163,7 @@ function ExpenseFormBody({
   vehicles: Vehicle[]
   partners: Partner[]
   stocks: StockItem[]
+  docCode?: string
 }) {
   const setH = <K extends keyof HeaderForm>(k: K, v: HeaderForm[K]) =>
     setHdr({ ...hdr, [k]: v })
@@ -260,6 +275,22 @@ function ExpenseFormBody({
               />
             </Field>
           </div>
+
+          {docCode && (
+            <div style={{ marginTop: 10 }}>
+              <Field label="เลขที่เอกสาร (อัตโนมัติ)">
+                <input
+                  readOnly
+                  value={toBeCode(docCode)}
+                  style={{
+                    background: 'var(--bg-2, #F1F5F9)', color: 'var(--text-muted)',
+                    cursor: 'default', borderRadius: 8, border: '1px solid #E2E8F0',
+                    padding: '8px 14px', fontSize: 13, fontFamily: 'var(--mono)', maxWidth: 280,
+                  }}
+                />
+              </Field>
+            </div>
+          )}
 
           <div
             style={{
@@ -432,6 +463,7 @@ function ExpRecord() {
   const [hdr, setHdr] = useState<HeaderForm>(emptyHeader())
   const [lines, setLines] = useState<LineItem[]>([emptyLine()])
   const [editing, setEditing] = useState<ExpenseHeader | null>(null)
+  const [docCode] = useState(() => genExpCode())
 
   const handleSave = () => {
     if (!hdr.vehicleId || !hdr.partnerId) {
@@ -445,7 +477,7 @@ function ExpRecord() {
     const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
     const h = db.add<ExpenseHeader>('expenseHeaders', {
       id: uid('eh'),
-      code: 'EXH-' + Date.now().toString().slice(-3),
+      code: genExpCode(),
       date: hdr.date,
       vehicleId: hdr.vehicleId,
       partnerId: hdr.partnerId,
@@ -489,6 +521,7 @@ function ExpRecord() {
         vehicles={vehicles}
         partners={partners}
         stocks={stocks}
+        docCode={docCode}
       />
 
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginBottom: 18 }}>
@@ -692,6 +725,7 @@ function ExpenseEditModal({
             vehicles={vehicles}
             partners={partners}
             stocks={stocks}
+            docCode={header.code}
           />
         </div>
         <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
@@ -738,19 +772,19 @@ function PayConfirmModal({
         zIndex: 2000,
       }}
     >
-      <div className="card" style={{ width: 480, maxWidth: '95vw' }}>
+      <div className="card" style={{ width: 600, maxWidth: '96vw', background: '#ffffff' }}>
         <div className="row" style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
           <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>ยืนยันการชำระเงิน</h3>
           <button className="btn ghost icon sm" onClick={onClose}>
             <Icon name="close" size={16} />
           </button>
         </div>
-        <div style={{ padding: 22 }}>
+        <div style={{ padding: 24 }}>
           <p style={{ margin: '0 0 14px', fontSize: 13.5, color: 'var(--text-2)' }}>
             ตรวจสอบยอดก่อนยืนยัน เมื่อบันทึกแล้วสถานะจะเปลี่ยนเป็น{' '}
             <strong style={{ color: 'var(--green)' }}>ชำระแล้ว</strong>
           </p>
-          <div style={{ padding: 16, background: 'var(--bg-sunk)', borderRadius: 10 }}>
+          <div style={{ padding: '18px 20px', background: 'var(--bg, #F8FAFC)', borderRadius: 10 }}>
             <div className="grid-2" style={{ gap: 10 }}>
               <Info label="รหัส AP" value={<span className="mono">{header.code}</span>} />
               <Info label="วันที่" value={db.thaiDate(header.date)} />
@@ -1210,15 +1244,110 @@ function ExpStock() {
   )
 }
 
+// ─── PivotTab ─────────────────────────────────────────────────────────────────
+
+function PivotTab({ dateFrom, dateTo }: { dateFrom: string; dateTo: string }) {
+  const headers = useMemo(() => {
+    const all = db.getAll<ExpenseHeader>('expenseHeaders')
+    return all.filter(h => {
+      if (dateFrom && h.date < dateFrom) return false
+      if (dateTo && h.date > dateTo) return false
+      return true
+    })
+  }, [dateFrom, dateTo])
+
+  const activeVendorIds = useMemo(() => Array.from(new Set(headers.map(h => h.partnerId))), [headers])
+  const activeVendors = useMemo(() =>
+    activeVendorIds.map(id => db.get<Partner>('partners', id)).filter(Boolean) as Partner[],
+    [activeVendorIds],
+  )
+  const vehicles = db.getAll<Vehicle>('vehicles')
+
+  const matrix = useMemo(() => {
+    const m: Record<string, Record<string, number>> = {}
+    for (const h of headers) {
+      if (!m[h.vehicleId]) m[h.vehicleId] = {}
+      m[h.vehicleId][h.partnerId] = (m[h.vehicleId][h.partnerId] ?? 0) + h.total
+    }
+    return m
+  }, [headers])
+
+  const rowTotal = (vid: string) => Object.values(matrix[vid] ?? {}).reduce((s, v) => s + v, 0)
+  const colTotal = (pid: string) => Object.values(matrix).reduce((s, row) => s + (row[pid] ?? 0), 0)
+  const grandTotal = activeVendorIds.reduce((s, pid) => s + colTotal(pid), 0)
+  const fmtV = (n: number) => n > 0 ? new Intl.NumberFormat('en-US').format(n) : '—'
+
+  if (activeVendors.length === 0) {
+    return (
+      <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
+        <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
+        <div>ไม่มีข้อมูลค่าใช้จ่ายในช่วงเวลาที่เลือก</div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--line)', display: 'flex', gap: 24, fontSize: 13 }}>
+        <span style={{ color: 'var(--text-muted)' }}>รถที่มีรายจ่าย <strong style={{ color: 'var(--text)' }}>{vehicles.filter(v => matrix[v.id]).length} คัน</strong></span>
+        <span style={{ color: 'var(--text-muted)' }}>คู่ค้า <strong style={{ color: 'var(--text)' }}>{activeVendors.length} ราย</strong></span>
+        <span style={{ color: 'var(--text-muted)' }}>ยอดรวม <strong style={{ color: 'var(--primary)' }}>฿{new Intl.NumberFormat('en-US').format(grandTotal)}</strong></span>
+      </div>
+      <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th style={{ minWidth: 110, position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)', zIndex: 2 }}>ทะเบียนรถ</th>
+              {activeVendors.map(p => (
+                <th key={p.id} className="num right" style={{ minWidth: 110, whiteSpace: 'nowrap' }}>{p.name}</th>
+              ))}
+              <th className="num right" style={{ minWidth: 110, fontWeight: 700, color: 'var(--primary)' }}>รวมต่อคัน</th>
+            </tr>
+          </thead>
+          <tbody>
+            {vehicles.filter(v => matrix[v.id]).map(v => (
+              <tr key={v.id}>
+                <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>
+                  <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{v.plate}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.type}</div>
+                </td>
+                {activeVendors.map(p => (
+                  <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>
+                    {fmtV(matrix[v.id]?.[p.id] ?? 0)}
+                  </td>
+                ))}
+                <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)', fontSize: 12 }}>
+                  {fmtV(rowTotal(v.id))}
+                </td>
+              </tr>
+            ))}
+            <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
+              <td style={{ position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)' }}>รวมต่อคู่ค้า</td>
+              {activeVendors.map(p => (
+                <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>{fmtV(colTotal(p.id))}</td>
+              ))}
+              <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
+                {fmtV(grandTotal)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // ─── Tab 4: รายงานสรุป (Unchanged) ───────────────────────────────────────────
 
 function ExpReport() {
   const vehicles = db.getAll<Vehicle>('vehicles')
   const [innerTab, setInnerTab] = useState('repair')
   const headers = db.getAll<ExpenseHeader>('expenseHeaders')
+  const allLines = db.getAll<ExpenseLine>('expenseLines')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [vehicleFilter, setVehicleFilter] = useState('')
+  const [detailHeader, setDetailHeader] = useState<ExpenseHeader | null>(null)
 
   const filteredHeaders = headers.filter((h) => {
     if (vehicleFilter && h.vehicleId !== vehicleFilter) return false
@@ -1230,9 +1359,7 @@ function ExpReport() {
   const innerTabs: [string, string][] = [
     ['repair', 'ประวัติการซ่อม'],
     ['lines', 'รายละเอียดรายการ'],
-    ['monthly', 'ค่าใช้จ่ายรายเดือน'],
-    ['ap', 'เจ้าหนี้รายเดือน'],
-    ['pivot', 'Pivot รถ × ร้านค้า'],
+    ['pivot', 'สรุปรายคัน × คู่ค้า'],
   ]
 
   return (
@@ -1273,10 +1400,11 @@ function ExpReport() {
               </Field>
             </div>
           </div>
-          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0, overflow: 'auto' }}>
             <table className="tbl">
               <thead>
                 <tr>
+                  <th>เลขที่เอกสาร</th>
                   <th>วันที่</th>
                   <th>ทะเบียนรถ</th>
                   <th>ประเภทรถ</th>
@@ -1292,6 +1420,15 @@ function ExpReport() {
                   const p = db.get<Partner>('partners', h.partnerId)
                   return (
                     <tr key={h.id}>
+                      <td>
+                        <button
+                          className="btn ghost sm"
+                          style={{ color: 'var(--primary)', fontFamily: 'var(--mono)', fontSize: 12, fontWeight: 600, padding: '2px 6px' }}
+                          onClick={() => setDetailHeader(h)}
+                        >
+                          {toBeCode(h.code)}
+                        </button>
+                      </td>
                       <td className="num muted">{db.thaiDate(h.date)}</td>
                       <td>
                         <span style={{ color: 'var(--primary)', fontWeight: 600 }} className="mono">
@@ -1317,7 +1454,7 @@ function ExpReport() {
                   )
                 })}
                 <tr style={{ background: 'var(--primary-50)', fontWeight: 700 }}>
-                  <td colSpan={5} className="right">
+                  <td colSpan={6} className="right">
                     รวม
                   </td>
                   <td className="num right">{db.fmt(filteredHeaders.reduce((s, h) => s + h.total, 0))} ฿</td>
@@ -1326,25 +1463,69 @@ function ExpReport() {
               </tbody>
             </table>
           </div>
+          {detailHeader && (
+            <div
+              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}
+              onClick={() => setDetailHeader(null)}
+            >
+              <div
+                className="card"
+                style={{ width: 700, maxWidth: '96vw', background: '#ffffff', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
+                onClick={e => e.stopPropagation()}
+              >
+                <div className="row" style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>รายละเอียดการซ่อม</h3>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                      {toBeCode(detailHeader.code)} · {db.thaiDate(detailHeader.date)} · {db.nameOf('vehicles', detailHeader.vehicleId)} · {db.nameOf('partners', detailHeader.partnerId)}
+                    </div>
+                  </div>
+                  <button className="btn ghost icon sm" onClick={() => setDetailHeader(null)}><Icon name="close" size={16} /></button>
+                </div>
+                <div style={{ overflow: 'auto', flex: 1 }}>
+                  <table className="tbl" style={{ width: '100%' }}>
+                    <thead>
+                      <tr>
+                        <th>รายการ</th>
+                        <th>หมวด</th>
+                        <th className="num right">จำนวน</th>
+                        <th className="num right">ราคา/หน่วย</th>
+                        <th className="num right">รวม</th>
+                        <th>หมายเหตุ</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allLines.filter(l => l.headerId === detailHeader.id).map((l, i) => (
+                        <tr key={i}>
+                          <td style={{ fontWeight: 500 }}>{l.item || '—'}</td>
+                          <td><span className="badge gray">{l.category}</span></td>
+                          <td className="num right">{l.qty}</td>
+                          <td className="num right mono">{db.fmt(l.unitPrice)}</td>
+                          <td className="num right mono" style={{ fontWeight: 600 }}>{db.fmt(l.amount)}</td>
+                          <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{l.note || '—'}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
+                        <td colSpan={4} className="right">รวมทั้งหมด</td>
+                        <td className="num right mono">{db.fmt(detailHeader.total)} ฿</td>
+                        <td></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
 
-      {innerTab !== 'repair' && (
+      {innerTab === 'lines' && (
         <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
           <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
-          <div>
-            รายงาน
-            {innerTab === 'lines'
-              ? 'รายละเอียดรายการ'
-              : innerTab === 'monthly'
-                ? 'ค่าใช้จ่ายรายเดือน'
-                : innerTab === 'ap'
-                  ? 'เจ้าหนี้รายเดือน'
-                  : 'Pivot รถ × ร้านค้า'}{' '}
-            — อยู่ในระหว่างเตรียมข้อมูล
-          </div>
+          <div>รายละเอียดรายการ — อยู่ในระหว่างเตรียมข้อมูล</div>
         </div>
       )}
+      {innerTab === 'pivot' && <PivotTab dateFrom={dateFrom} dateTo={dateTo} />}
     </div>
   )
 }
