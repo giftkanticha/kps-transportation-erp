@@ -2,12 +2,41 @@ import { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
+import type { CSSProperties } from 'react'
 import type { FuelRecord, FuelStock, Vehicle, Employee } from '../../types'
 import { FuelInventorySummary } from './FuelInventorySummary'
 
+const THAI_MONTHS_FULL = [
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+  'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
+]
+const THAI_MONTHS_SHORT = [
+  'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+]
+
+function daysInMonth(year: number, month: number) {
+  return new Date(year, month, 0).getDate()
+}
+
+const tabBtn = (active: boolean): CSSProperties => ({
+  padding: '6px 16px',
+  borderRadius: 7,
+  border: 'none',
+  background: active ? 'var(--primary)' : 'transparent',
+  color: active ? '#fff' : 'var(--text-2)',
+  fontWeight: active ? 600 : 400,
+  cursor: 'pointer',
+  fontSize: 13.5,
+  transition: 'all .15s',
+})
+
+const isFactoryFuel = (f: FuelRecord) =>
+  !['PTT', 'Shell', 'Bangchak', 'Esso'].some(s => f.station?.includes(s))
+
 // ── Tab 1: ภาพรวม ─── (Stock In editable + Stock Out history)
 
-const inlineInput: React.CSSProperties = {
+const inlineInput: CSSProperties = {
   width: '100%',
   height: 32,
   padding: '0 10px',
@@ -531,245 +560,272 @@ function FuelRecord() {
   )
 }
 
-// ─── Tab 3: รายงาน ─── (Vehicle picker + daily table)
+// ─── Tab 3: รายงาน ─── (Per-vehicle fuel report with source & time toggles)
 function FuelReportV2() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const [month, setMonth] = useState(5)
-  const [year, setYear] = useState(2025)
-  const [picked, setPicked] = useState<Record<string, boolean>>(
-    vehicles.reduce<Record<string, boolean>>((acc, v) => ({ ...acc, [v.id]: true }), {}),
+  const today = new Date()
+  const [month, setMonth] = useState(today.getMonth() + 1)
+  const [year, setYear] = useState(today.getFullYear())
+  const [source, setSource] = useState<'tank' | 'external'>('tank')
+  const [viewMode, setViewMode] = useState<'monthly' | 'yearly'>('monthly')
+
+  const allFuelings = useMemo(() => db.getAll<FuelRecord>('fuel'), [])
+  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
+
+  const filteredFuel = useMemo(
+    () => allFuelings.filter(f => source === 'tank' ? isFactoryFuel(f) : !isFactoryFuel(f)),
+    [allFuelings, source],
   )
-  const [searchPlate, setSearchPlate] = useState('')
 
-  const pickedIds = useMemo(() => Object.keys(picked).filter((k) => picked[k]), [picked])
+  const days = daysInMonth(year, month)
 
-  // Demo pivot data — in production this would be derived from fuel records filtered by month/year
-  const days = [1, 2, 3, 4]
-  const data: Record<string, Record<number, number | null> & { total: number }> = {
-    v1: { 1: 25, 2: 20, 3: null, 4: null, total: 150 },
-    v2: { 1: 30, 2: null, 3: 28, 4: null, total: 120 },
-    v3: { 1: 15, 2: 25, 3: null, 4: null, total: 95 },
+  const monthlyMatrix = useMemo<Record<number, Record<string, number>>>(() => {
+    const data: Record<number, Record<string, number>> = {}
+    for (let d = 1; d <= days; d++) data[d] = {}
+    filteredFuel.forEach(f => {
+      const dt = new Date(f.date)
+      if (dt.getFullYear() !== year || dt.getMonth() + 1 !== month) return
+      const d = dt.getDate()
+      data[d][f.vehicleId] = (data[d][f.vehicleId] || 0) + (f.liters || 0)
+    })
+    return data
+  }, [filteredFuel, year, month, days])
+
+  const yearlyMatrix = useMemo<Record<string, Record<number, number>>>(() => {
+    const data: Record<string, Record<number, number>> = {}
+    filteredFuel.forEach(f => {
+      const dt = new Date(f.date)
+      if (dt.getFullYear() !== year) return
+      const m = dt.getMonth() + 1
+      if (!data[f.vehicleId]) data[f.vehicleId] = {}
+      data[f.vehicleId][m] = (data[f.vehicleId][m] || 0) + (f.liters || 0)
+    })
+    return data
+  }, [filteredFuel, year])
+
+  const activeVehicles = useMemo(() => {
+    const usedIds = new Set<string>()
+    if (viewMode === 'monthly') {
+      for (let d = 1; d <= days; d++) {
+        Object.keys(monthlyMatrix[d] || {}).forEach(id => usedIds.add(id))
+      }
+    } else {
+      Object.keys(yearlyMatrix).forEach(id => usedIds.add(id))
+    }
+    return vehicles.filter(v => usedIds.has(v.id) || v.status === 'available' || v.status === 'on-trip')
+  }, [vehicles, monthlyMatrix, yearlyMatrix, viewMode, days])
+
+  const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const dailyTotal = (d: number) => activeVehicles.reduce((sum, v) => sum + (monthlyMatrix[d]?.[v.id] || 0), 0)
+  const vehicleMonthlyTotal = (vid: string) => {
+    let t = 0
+    for (let d = 1; d <= days; d++) t += monthlyMatrix[d]?.[vid] || 0
+    return t
   }
+  const vehicleYearlyTotal = (vid: string) => {
+    let t = 0
+    for (let m = 1; m <= 12; m++) t += yearlyMatrix[vid]?.[m] || 0
+    return t
+  }
+  const monthColTotal = (m: number) => activeVehicles.reduce((sum, v) => sum + (yearlyMatrix[v.id]?.[m] || 0), 0)
+  const grandTotalMonthly = activeVehicles.reduce((sum, v) => sum + vehicleMonthlyTotal(v.id), 0)
+  const grandTotalYearly = activeVehicles.reduce((sum, v) => sum + vehicleYearlyTotal(v.id), 0)
 
-  const dayTotals = days.map((d) =>
-    pickedIds.reduce((s, vid) => s + (data[vid]?.[d] ?? 0), 0),
-  )
-  const grand = pickedIds.reduce((s, vid) => s + (data[vid]?.total ?? 0), 0)
-
-  const monthNames = [
-    'มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน',
-    'กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม',
-  ]
+  const sourceLabel = source === 'tank' ? 'ถังโรงงาน' : 'ปั๊มนอก'
+  const periodLabel = viewMode === 'monthly'
+    ? `${THAI_MONTHS_FULL[month - 1]} พ.ศ. ${year + 543}`
+    : `ปี พ.ศ. ${year + 543}`
 
   return (
     <div>
-      {/* Filter strip */}
-      <div className="card pad" style={{ marginBottom: 18 }}>
-        <div className="row" style={{ gap: 16, alignItems: 'flex-end' }}>
-          <Field label="เดือน">
-            <select
-              value={month}
-              onChange={(e) => setMonth(+e.target.value)}
-              style={{ width: 160 }}
-            >
-              {monthNames.map((m, i) => (
-                <option key={i} value={i + 1}>
-                  {m} ({String(i + 1).padStart(2, '0')})
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="ปี">
-            <select
-              value={year}
-              onChange={(e) => setYear(+e.target.value)}
-              style={{ width: 120 }}
-            >
-              {[2567, 2568, 2569, 2570].map((y) => (
-                <option key={y} value={y - 543}>
-                  {y}
-                </option>
+      {/* Controls */}
+      <div className="card pad no-print" style={{ marginBottom: 18 }}>
+        <div className="row" style={{ gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          {viewMode === 'monthly' && (
+            <Field label="เดือน">
+              <select value={month} onChange={e => setMonth(Number(e.target.value))} style={{ width: 160 }}>
+                {THAI_MONTHS_FULL.map((m, i) => (
+                  <option key={i} value={i + 1}>{m}</option>
+                ))}
+              </select>
+            </Field>
+          )}
+          <Field label="ปี (พ.ศ.)">
+            <select value={year} onChange={e => setYear(Number(e.target.value))} style={{ width: 120 }}>
+              {Array.from({ length: 11 }, (_, i) => 2025 + i).map(y => (
+                <option key={y} value={y}>{y + 543}</option>
               ))}
             </select>
           </Field>
           <div className="spacer" />
-          <button className="btn">รีเซ็ต</button>
-          <button className="btn primary">ค้นหา</button>
+          {/* Source toggle */}
+          <div style={{ display: 'flex', gap: 0, padding: 3, borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC' }}>
+            <button style={tabBtn(source === 'tank')} onClick={() => setSource('tank')}>ถังโรงงาน</button>
+            <button style={tabBtn(source === 'external')} onClick={() => setSource('external')}>ปั๊มนอก</button>
+          </div>
+          {/* Time toggle */}
+          <div style={{ display: 'flex', gap: 0, padding: 3, borderRadius: 10, border: '1px solid #E2E8F0', background: '#F8FAFC' }}>
+            <button style={tabBtn(viewMode === 'monthly')} onClick={() => setViewMode('monthly')}>ดูรายงานรายเดือน</button>
+            <button style={tabBtn(viewMode === 'yearly')} onClick={() => setViewMode('yearly')}>ดูรายงานภาพรวมรายปี</button>
+          </div>
+          <button className="btn primary" onClick={() => window.print()}>
+            <Icon name="download" size={15} /> พิมพ์
+          </button>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 16 }}>
-        {/* Left: vehicle picker */}
-        <div className="card">
-          <div style={{ padding: 16, borderBottom: '1px solid var(--line)' }}>
-            <div className="row">
-              <span style={{ fontWeight: 600 }}>เลือกรถ</span>
-              <div className="spacer" />
-              <span className="badge blue">
-                {pickedIds.length}/{vehicles.length} คัน
-              </span>
-            </div>
-            <div style={{ position: 'relative', marginTop: 10 }}>
-              <Icon
-                name="search"
-                size={13}
-                style={{
-                  position: 'absolute',
-                  left: 10,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--text-faint)',
-                }}
-              />
-              <input
-                value={searchPlate}
-                onChange={(e) => setSearchPlate(e.target.value)}
-                placeholder="ค้นหาทะเบียน..."
-                style={{
-                  width: '100%',
-                  height: 32,
-                  padding: '0 12px 0 30px',
-                  border: '1px solid var(--line)',
-                  borderRadius: 6,
-                  background: 'var(--bg)',
-                  fontSize: 12.5,
-                }}
-              />
-            </div>
-          </div>
-          <div style={{ padding: '10px 14px' }}>
-            <label
-              className="row"
-              style={{ gap: 8, padding: '6px 0', cursor: 'pointer', fontSize: 13 }}
-            >
-              <input
-                type="checkbox"
-                checked={vehicles.every((v) => picked[v.id])}
-                onChange={(e) =>
-                  setPicked(
-                    vehicles.reduce<Record<string, boolean>>(
-                      (acc, v) => ({ ...acc, [v.id]: e.target.checked }),
-                      {},
-                    ),
-                  )
-                }
-                style={{ accentColor: 'var(--primary)' }}
-              />
-              <span style={{ fontWeight: 600 }}>เลือกทั้งหมด</span>
-            </label>
-            {vehicles
-              .filter((v) => !searchPlate || v.plate.includes(searchPlate))
-              .map((v) => (
-                <label
-                  key={v.id}
-                  className="row"
-                  style={{
-                    gap: 8,
-                    padding: '8px 0',
-                    cursor: 'pointer',
-                    fontSize: 13,
-                    borderTop: '1px solid var(--line)',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={!!picked[v.id]}
-                    onChange={() => setPicked((p) => ({ ...p, [v.id]: !p[v.id] }))}
-                    style={{ accentColor: 'var(--primary)' }}
-                  />
-                  <span className="mono" style={{ fontWeight: 500, flex: 1 }}>
-                    {v.plate}
-                  </span>
-                  <span className="muted mono" style={{ fontSize: 11 }}>
-                    {data[v.id]?.total ?? 0} ล.
-                  </span>
-                </label>
-              ))}
-          </div>
-          <div className="row" style={{ padding: 14, borderTop: '1px solid var(--line)', gap: 8 }}>
-            <button
-              className="btn sm outline"
-              style={{ flex: 1 }}
-              onClick={() =>
-                setPicked(
-                  vehicles.reduce<Record<string, boolean>>(
-                    (acc, v) => ({ ...acc, [v.id]: true }),
-                    {},
-                  ),
-                )
-              }
-            >
-              เลือกทั้งหมด
-            </button>
-            <button className="btn sm" style={{ flex: 1 }} onClick={() => setPicked({})}>
-              ล้างทั้งหมด
-            </button>
-          </div>
+      {/* Print header */}
+      <div
+        className="print-only"
+        style={{ textAlign: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid #000' }}
+      >
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>KPS Transportations</h1>
+        <div style={{ fontSize: 14, fontWeight: 600, marginTop: 6 }}>
+          รายงานการใช้น้ำมัน{viewMode === 'yearly' ? 'ภาพรวมรายปี' : 'รายเดือน'} — {sourceLabel}
         </div>
+        <div style={{ fontSize: 13, marginTop: 4 }}>{periodLabel}</div>
+        <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</div>
+      </div>
 
-        {/* Right: daily table */}
+      {/* Monthly: per-vehicle daily matrix */}
+      {viewMode === 'monthly' && (
         <div className="card">
           <div className="head">
-            <div>
-              <h3>รายงานการใช้น้ำมันรายวัน</h3>
-              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                แสดงผลรถทั้งหมด {pickedIds.length} คัน (เฉพาะที่มีการใช้งาน)
-              </div>
-            </div>
-            <div className="right">
-              <button className="btn sm">Excel</button>
-              <button className="btn sm primary">พิมพ์ (A4)</button>
-            </div>
+            <h3>การใช้น้ำมันรายวันต่อคัน — {THAI_MONTHS_FULL[month - 1]} {year + 543} ({sourceLabel})</h3>
+            <div className="right muted" style={{ fontSize: 12 }}>{activeVehicles.length} คัน · {days} วัน</div>
           </div>
-          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-            <table className="tbl">
-              <thead>
-                <tr>
-                  <th>วันที่ \ ทะเบียน</th>
-                  {pickedIds.map((vid) => (
-                    <th key={vid} className="right mono">
-                      {db.nameOf('vehicles', vid)}
-                    </th>
-                  ))}
-                  <th className="right">รวมรายวัน</th>
-                </tr>
-              </thead>
-              <tbody>
-                {days.map((d, i) => (
-                  <tr key={d}>
-                    <td>
-                      {d} {monthNames[month - 1]?.slice(0, 3)} {year - 543 + 543}
+          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0, overflowX: 'auto' }}>
+            {activeVehicles.length === 0 ? (
+              <div className="empty" style={{ padding: 40 }}>ไม่มีข้อมูลการใช้น้ำมัน</div>
+            ) : (
+              <table className="tbl" style={{ minWidth: 'max-content' }}>
+                <thead>
+                  <tr>
+                    <th style={{ position: 'sticky', left: 0, zIndex: 2, background: 'var(--bg-sunk)', minWidth: 90 }}>วันที่</th>
+                    {activeVehicles.map(v => (
+                      <th key={v.id} className="right mono" style={{ whiteSpace: 'nowrap' }}>{v.plate}</th>
+                    ))}
+                    <th className="right" style={{ background: '#FFF8E1', color: '#7A5A00', whiteSpace: 'nowrap' }}>รวมรายวัน</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: days }, (_, i) => i + 1).map(d => {
+                    const tot = dailyTotal(d)
+                    return (
+                      <tr key={d}>
+                        <td style={{ position: 'sticky', left: 0, zIndex: 1, background: 'var(--card)', fontWeight: 500 }}>
+                          {d} {THAI_MONTHS_SHORT[month - 1]}
+                        </td>
+                        {activeVehicles.map(v => {
+                          const val = monthlyMatrix[d]?.[v.id] || 0
+                          return (
+                            <td key={v.id} className="num right mono" style={{ color: val > 0 ? 'var(--text-1)' : 'var(--text-faint)' }}>
+                              {val > 0 ? fmt(val) : '—'}
+                            </td>
+                          )
+                        })}
+                        <td className="num right mono" style={{ background: '#FFF8E1', fontWeight: 700, color: '#7A5A00' }}>
+                          {tot > 0 ? fmt(tot) : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  <tr style={{ background: 'var(--primary-50)', fontWeight: 700 }}>
+                    <td style={{ position: 'sticky', left: 0, zIndex: 1, background: 'var(--primary-50)', color: 'var(--primary)' }}>
+                      รวมต่อคัน
                     </td>
-                    {pickedIds.map((vid) => {
-                      const val = data[vid]?.[d]
+                    {activeVehicles.map(v => (
+                      <td key={v.id} className="num right mono" style={{ color: 'var(--primary)' }}>
+                        {fmt(vehicleMonthlyTotal(v.id))}
+                      </td>
+                    ))}
+                    <td className="num right mono" style={{ background: '#FFE08A', color: '#5A3D00', fontWeight: 800 }}>
+                      {fmt(grandTotalMonthly)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Yearly: per-vehicle 12-month summary */}
+      {viewMode === 'yearly' && (
+        <div className="card">
+          <div className="head">
+            <h3>ภาพรวมการใช้น้ำมันรายปี พ.ศ. {year + 543} ({sourceLabel})</h3>
+          </div>
+          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0, overflowX: 'auto' }}>
+            {activeVehicles.length === 0 ? (
+              <div className="empty" style={{ padding: 40 }}>ไม่มีข้อมูลการใช้น้ำมัน</div>
+            ) : (
+              <table className="tbl" style={{ minWidth: 'max-content' }}>
+                <thead>
+                  <tr>
+                    <th style={{ position: 'sticky', left: 0, zIndex: 2, background: 'var(--bg-sunk)', minWidth: 100 }}>ทะเบียนรถ</th>
+                    {THAI_MONTHS_SHORT.map((m, i) => (
+                      <th key={i} className="right" style={{ whiteSpace: 'nowrap' }}>{m}</th>
+                    ))}
+                    <th className="right" style={{ background: '#FFF8E1', color: '#7A5A00', whiteSpace: 'nowrap' }}>รวมทั้งปี</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeVehicles.map(v => (
+                    <tr key={v.id}>
+                      <td style={{ position: 'sticky', left: 0, zIndex: 1, background: 'var(--card)', fontWeight: 600 }} className="mono">
+                        {v.plate}
+                      </td>
+                      {Array.from({ length: 12 }, (_, i) => i + 1).map(m => {
+                        const val = yearlyMatrix[v.id]?.[m] || 0
+                        return (
+                          <td key={m} className="num right mono" style={{ color: val > 0 ? 'var(--text-1)' : 'var(--text-faint)' }}>
+                            {val > 0 ? fmt(val) : '—'}
+                          </td>
+                        )
+                      })}
+                      <td className="num right mono" style={{ background: '#FFF8E1', fontWeight: 700, color: '#7A5A00' }}>
+                        {fmt(vehicleYearlyTotal(v.id))}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: 'var(--primary-50)', fontWeight: 700 }}>
+                    <td style={{ position: 'sticky', left: 0, zIndex: 1, background: 'var(--primary-50)', color: 'var(--primary)' }}>
+                      รวมทุกคัน
+                    </td>
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map(m => {
+                      const tot = monthColTotal(m)
                       return (
-                        <td key={vid} className="num right">
-                          {val ?? '-'}
+                        <td key={m} className="num right mono" style={{ color: 'var(--primary)' }}>
+                          {tot > 0 ? fmt(tot) : '—'}
                         </td>
                       )
                     })}
-                    <td className="num right" style={{ fontWeight: 600 }}>
-                      {dayTotals[i] || '-'}
+                    <td className="num right mono" style={{ background: '#FFE08A', color: '#5A3D00', fontWeight: 800 }}>
+                      {fmt(grandTotalYearly)}
                     </td>
                   </tr>
-                ))}
-                <tr style={{ background: 'var(--bg-sunk)', fontWeight: 700 }}>
-                  <td>รวมทั้งหมด</td>
-                  {pickedIds.map((vid) => (
-                    <td key={vid} className="num right">
-                      {data[vid]?.total ?? 0}
-                    </td>
-                  ))}
-                  <td
-                    className="num right"
-                    style={{ color: 'var(--green)', background: 'var(--green-50)' }}
-                  >
-                    {grand}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            )}
           </div>
+        </div>
+      )}
+
+      {/* Signature block (print only) */}
+      <div
+        className="print-only"
+        style={{ marginTop: 40, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 60, pageBreakInside: 'avoid', breakInside: 'avoid' }}
+      >
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 50, fontSize: 13 }}>ผู้จัดทำ</div>
+          <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>(.....................................)  </div>
+          <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 50, fontSize: 13 }}>ผู้อนุมัติ</div>
+          <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>(.....................................)  </div>
+          <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
         </div>
       </div>
     </div>
