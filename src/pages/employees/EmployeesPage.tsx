@@ -82,15 +82,16 @@ function ConfirmDialog({
       >
         <h2 style={{ margin: '0 0 10px 0', fontSize: 17, fontWeight: 700 }}>{title}</h2>
         <p style={{ margin: '0 0 20px 0', color: 'var(--text-2)', fontSize: 14 }}>{message}</p>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div className="btn-row" style={{ justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onCancel}>
+            <Icon name="close" size={15} /> ยกเลิก
+          </button>
           <button
-            onClick={onCancel}
-            style={{ background: 'var(--bg-sunk)', border: '1px solid var(--line)', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 13 }}
-          >ยกเลิก</button>
-          <button
+            className={`btn ${destructive ? 'danger solid' : 'primary'}`}
             onClick={onConfirm}
-            style={{ background: destructive ? '#A32D2D' : 'var(--primary)', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
-          >{confirmLabel}</button>
+          >
+            <Icon name={destructive ? 'close' : 'check'} size={15} /> {confirmLabel}
+          </button>
         </div>
       </div>
     </div>
@@ -286,9 +287,13 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
             />
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button className="btn" onClick={onClose}>ยกเลิก</button>
-          <button className="btn primary" onClick={save}>บันทึกการแก้ไข</button>
+        <div className="row btn-row" style={{ justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose}>
+            <Icon name="close" size={15} /> ยกเลิก
+          </button>
+          <button className="btn primary" onClick={save}>
+            <Icon name="check" size={15} /> บันทึกการแก้ไข
+          </button>
         </div>
       </div>
     </div>

@@ -294,12 +294,12 @@ function VehicleEditModal({ vehicle, user, mode, onClose, onSuccess, onError }: 
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div className="row btn-row" style={{ justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose} disabled={saving}>
-            <Icon name="close" size={14} /> ยกเลิก
+            <Icon name="close" size={15} /> ยกเลิก
           </button>
           <button className="btn primary" onClick={submit} disabled={saving}>
-            <Icon name="check" size={14} /> {saving ? 'กำลังบันทึก…' : (mode === 'edit' ? 'บันทึก' : 'ส่งคำขอ')}
+            <Icon name="check" size={15} /> {saving ? 'กำลังบันทึก…' : (mode === 'edit' ? 'บันทึก' : 'ส่งคำขอ')}
           </button>
         </div>
       </div>
@@ -345,36 +345,15 @@ function ConfirmDialog({ title, message, confirmLabel, destructive, onConfirm, o
         <p style={{ margin: '0 0 22px 0', color: 'var(--text-2)', fontSize: 14, lineHeight: 1.55 }}>
           {message}
         </p>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button
-            onClick={onCancel}
-            style={{
-              background: 'var(--bg-sunk)',
-              color: 'var(--text-1)',
-              border: '1px solid var(--line)',
-              padding: '8px 16px',
-              borderRadius: 6,
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: 'pointer',
-            }}
-          >
-            ยกเลิก
+        <div className="row btn-row" style={{ justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onCancel}>
+            <Icon name="close" size={15} /> ยกเลิก
           </button>
           <button
+            className={`btn ${destructive ? 'danger solid' : 'primary'}`}
             onClick={onConfirm}
-            style={{
-              background: destructive ? '#A32D2D' : 'var(--primary)',
-              color: '#fff',
-              border: 'none',
-              padding: '8px 16px',
-              borderRadius: 6,
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: 'pointer',
-            }}
           >
-            {confirmLabel}
+            <Icon name={destructive ? 'close' : 'check'} size={15} /> {confirmLabel}
           </button>
         </div>
       </div>
