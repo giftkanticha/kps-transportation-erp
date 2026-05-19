@@ -422,16 +422,11 @@ function FuelReportV2() {
       </div>
 
       {/* Print header */}
-      <div
-        className="print-only"
-        style={{ textAlign: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid #000' }}
-      >
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>KPS Transportations</h1>
-        <div style={{ fontSize: 14, fontWeight: 600, marginTop: 6 }}>
-          รายงานการใช้น้ำมัน{viewMode === 'yearly' ? 'ภาพรวมรายปี' : 'รายเดือน'} — {sourceLabel} ({metric === 'liters' ? 'จำนวนลิตร' : 'จำนวนเงิน'})
-        </div>
-        <div style={{ fontSize: 13, marginTop: 4 }}>{periodLabel}</div>
-        <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</div>
+      <div className="kps-print-header print-only">
+        <p className="co">KPS Transportations</p>
+        <p className="ttl">รายงานการใช้น้ำมัน{viewMode === 'yearly' ? 'ภาพรวมรายปี' : 'รายเดือน'} — {sourceLabel} ({metric === 'liters' ? 'จำนวนลิตร' : 'จำนวนเงิน'})</p>
+        <p className="sub">{periodLabel}</p>
+        <p className="ts">พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</p>
       </div>
 
       {/* Monthly: per-vehicle daily matrix */}

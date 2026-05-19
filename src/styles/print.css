@@ -3,7 +3,7 @@
    Default fallback: A4 portrait 12mm margin.
 */
 
-@page { size: A4 portrait; margin: 12mm; }
+@page { size: A4 portrait; margin: 8mm 10mm; }
 
 /* ── Screen: hide print-only elements ─────────────────────────── */
 .print-only    { display: none !important; }
@@ -20,31 +20,31 @@
   .page-head .actions, .btn-row { display: none !important; }
   .main  { margin-left: 0 !important; }
   .content { padding: 8px 0 0 !important; }
-  body { background: #fff; }
+  body { background: #fff; font-size: 9pt; line-height: 1.3; }
 
   /* ── KPS document header ─────────────────────────────────────── */
   .kps-print-header {
     text-align: center;
     border-bottom: 2px solid #1D4ED8;
-    padding-bottom: 10px;
-    margin-bottom: 14px;
+    padding-bottom: 6px;
+    margin-bottom: 10px;
   }
-  .kps-print-header .co   { font-size: 15pt; font-weight: 700; color: #1D4ED8; margin: 0; }
-  .kps-print-header .ttl  { font-size: 13pt; font-weight: 600; margin: 3px 0 1px; }
-  .kps-print-header .sub  { font-size: 10pt; color: #444; margin: 0; }
-  .kps-print-header .ts   { font-size: 9pt;  color: #888; margin-top: 3px; }
+  .kps-print-header .co   { font-size: 13pt; font-weight: 700; color: #1D4ED8; margin: 0; }
+  .kps-print-header .ttl  { font-size: 11pt; font-weight: 600; margin: 2px 0 1px; }
+  .kps-print-header .sub  { font-size: 8.5pt; color: #444; margin: 0; }
+  .kps-print-header .ts   { font-size: 7.5pt; color: #888; margin-top: 2px; }
 
   /* ── Signature block ─────────────────────────────────────────── */
   .kps-print-sig {
     grid-template-columns: 1fr 1fr;
-    gap: 60px;
-    margin-top: 40px;
+    gap: 40px;
+    margin-top: 20px;
     page-break-inside: avoid;
   }
   .kps-print-sig-slot { text-align: center; }
-  .kps-print-sig-slot .line { border-top: 1px solid #000; padding-top: 6px; margin-top: 50px; font-size: 13pt; }
-  .kps-print-sig-slot .name { font-size: 11pt; color: #555; margin-top: 3px; }
-  .kps-print-sig-slot .date { font-size: 11pt; color: #555; }
+  .kps-print-sig-slot .line { border-top: 1px solid #000; padding-top: 4px; margin-top: 30px; font-size: 10pt; }
+  .kps-print-sig-slot .name { font-size: 9pt; color: #555; margin-top: 2px; }
+  .kps-print-sig-slot .date { font-size: 9pt; color: #555; }
 
   /* ── General card/table overrides ───────────────────────────── */
   .card { box-shadow: none !important; border: 1px solid #ccc !important; page-break-inside: avoid; }
@@ -59,12 +59,14 @@
 
   /* ── Compact print table (.print-compact) ───────────────────── */
   .print-compact th,
-  .print-compact td { font-size: 8pt !important; padding: 2px 4px !important; }
+  .print-compact td { font-size: 7.5pt !important; padding: 2px 4px !important; }
 
   /* ── Standard print table ───────────────────────────────────── */
   .print-area .tbl th,
-  .print-area .tbl td { font-size: 9.5pt !important; padding: 3px 6px !important; }
+  .print-area .tbl td { font-size: 8pt !important; padding: 2px 5px !important; }
   .print-area .card { border: 1px solid #ccc !important; }
+  .print-area .card .head h3 { font-size: 10pt !important; margin: 0 0 4px !important; }
+  .print-area .card .head { padding: 8px 12px !important; }
 
   /* ── Stock history modal: flatten for print ─────────────────── */
   .hist-overlay {

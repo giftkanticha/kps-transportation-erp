@@ -112,11 +112,11 @@ export function FuelInventorySummary() {
       </div>
 
       {/* Print header */}
-      <div className="print-only" style={{ textAlign: 'center', marginBottom: 16, paddingBottom: 12, borderBottom: '2px solid #000' }}>
-        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>KPS Transportations</h1>
-        <div style={{ fontSize: 14, fontWeight: 600, marginTop: 6 }}>รายงานสรุปคลังน้ำมันโรงงาน</div>
-        <div style={{ fontSize: 13, marginTop: 4 }}>{THAI_MONTHS_FULL[month - 1]} พ.ศ. {year + 543}</div>
-        <div style={{ fontSize: 11, color: '#555', marginTop: 4 }}>พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</div>
+      <div className="kps-print-header print-only">
+        <p className="co">KPS Transportations</p>
+        <p className="ttl">รายงานสรุปคลังน้ำมันโรงงาน</p>
+        <p className="sub">{THAI_MONTHS_FULL[month - 1]} พ.ศ. {year + 543}</p>
+        <p className="ts">พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</p>
       </div>
 
       {/* Daily table */}
@@ -164,19 +164,16 @@ export function FuelInventorySummary() {
       </div>
 
       {/* Signature block (print only) */}
-      <div
-        className="print-only"
-        style={{ marginTop: 40, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 60, pageBreakInside: 'avoid', breakInside: 'avoid' }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 50, fontSize: 13 }}>ผู้จัดทำ</div>
-          <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>(.....................................)</div>
-          <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
+      <div className="kps-print-sig print-only">
+        <div className="kps-print-sig-slot">
+          <div className="line">ผู้จัดทำ</div>
+          <div className="name">(.....................................)</div>
+          <div className="date">วันที่ ......./......./.......</div>
         </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 50, fontSize: 13 }}>ผู้อนุมัติ</div>
-          <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>(.....................................)</div>
-          <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
+        <div className="kps-print-sig-slot">
+          <div className="line">ผู้อนุมัติ</div>
+          <div className="name">(.....................................)</div>
+          <div className="date">วันที่ ......./......./.......</div>
         </div>
       </div>
     </div>
