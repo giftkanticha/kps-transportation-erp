@@ -21,8 +21,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers as Record<string, string> || {}),
   }
-  const res = await fetch(BASE + path, { ...options, headers })
-  const data = await res.json()
+  let res: Response
+  try {
+    res = await fetch(BASE + path, { ...options, headers })
+  } catch {
+    throw new Error('ไม่สามารถเชื่อมต่อกับ server ได้ — กรุณารอสักครู่แล้วลองใหม่')
+  }
+  const text = await res.text()
+  let data: any
+  try {
+    data = JSON.parse(text)
+  } catch {
+    throw new Error('ไม่สามารถเชื่อมต่อกับ server ได้ — กรุณารอสักครู่แล้วลองใหม่')
+  }
   if (!data.success) throw new Error(data.error || 'Request failed')
   return data.data as T
 }

@@ -27,8 +27,9 @@ npx tsx src/seed.ts
 # ── Start backend server ──────────────────────────────────────────────────────
 if ! curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
   echo "[hook] Starting backend server on port 3001..."
-  nohup npm run dev > /tmp/kps-server.log 2>&1 &
-  for i in $(seq 1 15); do
+  bash -c 'cd '"$CLAUDE_PROJECT_DIR"'/server && npm run dev > /tmp/kps-server.log 2>&1' &
+  disown $!
+  for i in $(seq 1 20); do
     if curl -sf http://localhost:3001/api/health > /dev/null 2>&1; then
       echo "[hook] Backend ready"
       break
@@ -43,7 +44,8 @@ fi
 cd "$CLAUDE_PROJECT_DIR"
 if ! curl -sf http://localhost:5173 > /dev/null 2>&1; then
   echo "[hook] Starting Vite frontend on port 5173..."
-  nohup npm run dev -- --host 0.0.0.0 --port 5173 > /tmp/kps-vite.log 2>&1 &
+  bash -c 'cd '"$CLAUDE_PROJECT_DIR"' && npm run dev -- --host 0.0.0.0 --port 5173 > /tmp/kps-vite.log 2>&1' &
+  disown $!
   echo "[hook] Vite starting in background"
 else
   echo "[hook] Frontend already running"
