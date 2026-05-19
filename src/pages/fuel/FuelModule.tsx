@@ -908,11 +908,11 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       <div className="tabs no-print" style={{ marginBottom: 22 }}>
         {(
           [
-            ['overview', 'fuel', '📊 ภาพรวม', 'fuel'],
+            ['overview', 'fuel', '📦 คลังน้ำมัน', 'fuel'],
             ['express', 'express', '⚡ คีย์ด่วน', 'edit'],
             ['floating', 'floating', '🟡 น้ำมันลอย', 'alert'],
             ['report', 'report', '📋 รายงาน', 'chart'],
-            ['summary', 'summary', '📦 สรุปคลัง', 'download'],
+            ['summary', 'summary', '📝 บันทึกเข้า-ออก', 'download'],
             ['reconcile', 'reconcile', '🔍 ตรวจสอบข้อมูล', 'search'],
           ] as [string, string, string, string][]
         ).map(([id, route, label, ic]) => (
@@ -927,11 +927,11 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
         ))}
       </div>
 
-      {current === 'overview' && <FuelOverview />}
+      {current === 'overview' && <FuelInventorySummary />}
       {current === 'express' && <ExpressFuelLog setActive={setActive} />}
       {current === 'floating' && <FloatingFuel />}
       {current === 'report' && <FuelReportV2 />}
-      {current === 'summary' && <FuelInventorySummary />}
+      {current === 'summary' && <FuelOverview />}
       {current === 'reconcile' && <FuelReconciliation />}
     </div>
   )

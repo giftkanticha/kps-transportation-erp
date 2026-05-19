@@ -203,9 +203,11 @@ const fuel: FuelRecord[] = [
 ]
 
 const fuelStock: FuelStock[] = [
-  { id: 'fs1', date: '2025-05-15', supplier: 'PTT Station', liters: 1000, pricePerL: 35.0, invoiceNo: 'INV-20240515', total: 35000 },
-  { id: 'fs2', date: '2025-05-01', supplier: 'Bangchak',    liters: 1100, pricePerL: 34.5, invoiceNo: 'INV-20240501', total: 37950 },
-  { id: 'fs3', date: '2025-04-15', supplier: 'PTT Station', liters: 1200, pricePerL: 34.0, invoiceNo: 'INV-20240415', total: 40800 },
+  { id: 'fs1', date: '2026-05-19', supplier: 'บริษัท ปตท. น้ำมัน จำกัด',              liters: 1000, pricePerL: 35.00, invoiceNo: 'INV-2605191', total: 35000, recordedAt: new Date('2026-05-19T08:30:00').toISOString() },
+  { id: 'fs2', date: '2026-05-10', supplier: 'บริษัท บางจาก คอร์ปอเรชั่น จำกัด',      liters: 1100, pricePerL: 34.50, invoiceNo: 'INV-2605101', total: 37950, recordedAt: new Date('2026-05-10T09:15:00').toISOString() },
+  { id: 'fs3', date: '2026-04-25', supplier: 'บริษัท ปตท. น้ำมัน จำกัด',              liters: 1200, pricePerL: 34.00, invoiceNo: 'INV-2604251', total: 40800, recordedAt: new Date('2026-05-19T14:00:00').toISOString() },
+  { id: 'fs4', date: '2026-04-08', supplier: 'บริษัท เชลล์ แห่งประเทศไทย จำกัด',     liters:  900, pricePerL: 35.50, invoiceNo: 'INV-2604081', total: 31950, recordedAt: new Date('2026-04-08T10:00:00').toISOString() },
+  { id: 'fs5', date: '2026-03-20', supplier: 'บริษัท บางจาก คอร์ปอเรชั่น จำกัด',     liters: 1050, pricePerL: 34.00, invoiceNo: 'INV-2603201', total: 35700, recordedAt: new Date('2026-03-20T08:00:00').toISOString() },
 ]
 
 const expenses: Expense[] = [
