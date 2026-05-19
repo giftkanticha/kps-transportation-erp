@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import type { SubDriver, SubJob, User, Subcontractor, Vehicle } from '../../types'
 import { db, uid } from '../../lib/db'
-import { Icon, Field, Info } from '../../components/ui'
+import { Icon, Field, Info, PrintButton } from '../../components/ui'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -798,14 +798,22 @@ function SubHistoryTab() {
 
   return (
     <div className="card">
+      {/* Print-only KPS header */}
+      <div className="kps-print-header print-only">
+        <p className="co">KPS Transportations</p>
+        <p className="ttl">รายงานประวัติการจ้างรถรับจ้างร่วม</p>
+        <p className="sub">{filtered.length} รายการ</p>
+        <p className="ts">พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</p>
+      </div>
+
       <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
-        <div className="row">
+        <div className="row sub-hist-actions">
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>ประวัติการจ้างรถรับจ้าง</h3>
           <div className="spacer" />
-          <button className="btn"><Icon name="download" size={14} /> ส่งออกข้อมูล</button>
+          <PrintButton orientation="landscape" label="พิมพ์รายงาน" />
         </div>
 
-        <div className="row" style={{ marginTop: 14, gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+        <div className="row sub-hist-filters" style={{ marginTop: 14, gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <Field label="ทะเบียนรถ">
             <select value={plateF} onChange={e => setPlateF(e.target.value)} style={{ width: 180 }}>
               <option value="all">ทั้งหมด</option>
@@ -844,7 +852,7 @@ function SubHistoryTab() {
               <th className="right">ราคาค่าบรรทุก</th>
               <th className="right">ค่าขนส่งรวม</th>
               <th>สถานะ</th>
-              <th>ดำเนินการ</th>
+              <th className="sub-hist-action-col">ดำเนินการ</th>
             </tr>
           </thead>
           <tbody>
@@ -870,7 +878,7 @@ function SubHistoryTab() {
                       : '—'}
                   </td>
                   <td>{statusBadge(j.status)}</td>
-                  <td>
+                  <td className="sub-hist-action-col">
                     <div className="row" style={{ gap: 4 }}>
                       <button
                         className="btn ghost icon sm"

@@ -730,7 +730,6 @@ input:focus, select:focus, textarea:focus {
 
 /* ── Print rules ──────────────────────────────────────────────── */
 @media print {
-  @page { size: A4 landscape; margin: 10mm; }
   body { background: #fff; }
   .sidebar, .topbar, .no-print, .tabs, .page-head .actions { display: none !important; }
   .main { margin-left: 0 !important; }

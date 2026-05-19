@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
+import { usePrint } from '../../hooks/usePrint'
 import type { CSSProperties } from 'react'
 import type { FuelRecord, Vehicle, Employee } from '../../types'
 import { FuelStockDashboard } from './FuelStockDashboard'
@@ -269,6 +270,7 @@ function FuelRecord() {
 
 // ─── Tab 3: รายงาน ─── (Per-vehicle fuel report with source, time & metric toggles)
 function FuelReportV2() {
+  const { print } = usePrint()
   const today = new Date()
   const [month, setMonth] = useState(today.getMonth() + 1)
   const [year, setYear] = useState(today.getFullYear())
@@ -413,7 +415,7 @@ function FuelReportV2() {
               <button style={tabBtn(viewMode === 'yearly')} onClick={() => setViewMode('yearly')}>ภาพรวมรายปี</button>
             </>,
           )}
-          <button className="btn primary" onClick={() => window.print()} style={{ height: 36 }}>
+          <button className="btn primary" onClick={() => print('landscape')} style={{ height: 36 }}>
             <Icon name="download" size={15} /> พิมพ์
           </button>
         </div>

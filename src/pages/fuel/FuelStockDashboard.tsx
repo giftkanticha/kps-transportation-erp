@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
 import type { FuelStock, FuelTransaction, Vehicle, Dispatch, User } from '../../types'
-import { Icon, Field } from '../../components/ui'
+import { Icon, Field, PrintButton } from '../../components/ui'
 
 const FUEL_SUPPLIERS = [
   'บริษัท ปตท. น้ำมัน จำกัด',
@@ -14,9 +14,10 @@ const FUEL_SUPPLIERS = [
 const PAGE_SIZE = 20
 
 // ─── Modal overlay ────────────────────────────────────────────────────────────
-function ModalOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+function ModalOverlay({ children, onClose, className }: { children: React.ReactNode; onClose: () => void; className?: string }) {
   return (
     <div
+      className={className}
       style={{
         position: 'fixed', inset: 0, zIndex: 900,
         background: 'rgba(0,0,0,.45)', display: 'flex',
@@ -188,8 +189,16 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
   }
 
   return (
-    <ModalOverlay onClose={onClose}>
-      <div style={{ background: 'var(--card)', borderRadius: 14, width: '100%', maxWidth: 900, maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,.25)' }}>
+    <ModalOverlay className="hist-overlay" onClose={onClose}>
+      <div className="hist-box" style={{ background: 'var(--card)', borderRadius: 14, width: '100%', maxWidth: 900, maxHeight: '90vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 60px rgba(0,0,0,.25)' }}>
+        {/* Print-only KPS header */}
+        <div className="kps-print-header print-only">
+          <p className="co">KPS Transportations</p>
+          <p className="ttl">{type === 'in' ? 'รายงานน้ำมันเข้าคลัง (Stock In)' : 'รายงานน้ำมันออกคลัง (Stock Out)'}</p>
+          <p className="sub">{filtered.length} รายการ</p>
+          <p className="ts">พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</p>
+        </div>
+
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>
@@ -197,7 +206,10 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
             </h2>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{filtered.length} รายการ</div>
           </div>
-          <button className="btn ghost icon" onClick={onClose}><Icon name="close" size={16} /></button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <PrintButton orientation="landscape" label="พิมพ์" className="btn sm no-print" />
+            <button className="btn ghost icon no-print" onClick={onClose}><Icon name="close" size={16} /></button>
+          </div>
         </div>
 
         <div style={{ padding: '12px 24px', borderBottom: '1px solid var(--line)', display: 'flex', gap: 10, flexWrap: 'wrap', flexShrink: 0 }}>
@@ -213,7 +225,7 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          <table className="tbl" style={{ width: '100%' }}>
+          <table className="tbl print-compact" style={{ width: '100%' }}>
             <thead>
               <tr>
                 <th>วันที่เกิดเหตุ</th>
@@ -237,7 +249,7 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
                 <th className="num right">ยอดสะสม</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="hist-screen-only">
               {paginated.length === 0 ? (
                 <tr><td colSpan={type === 'in' ? 8 : 7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
               ) : paginated.map(r => {
@@ -293,10 +305,45 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
                 }
               })}
             </tbody>
+            <tbody className="hist-print-all">
+              {filtered.map(r => {
+                const balance = balanceMap[(r as { id: string }).id]
+                if (type === 'in') {
+                  const s = r as FuelStock
+                  return (
+                    <tr key={s.id}>
+                      <td className="mono">{db.thaiDate(s.date)}</td>
+                      <td className="num right mono" style={{ color: 'var(--green)', fontWeight: 600 }}>+{db.fmt(s.liters)}</td>
+                      <td>{s.supplier}</td>
+                      <td className="num right mono">{s.pricePerL ? s.pricePerL.toFixed(2) : '—'}</td>
+                      <td className="num right mono">{s.total ? db.thb(s.total) : '—'}</td>
+                      <td>{s.invoiceNo || '—'}</td>
+                      <td>{s.recordedAt ? new Date(s.recordedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
+                      <td className="num right mono" style={{ fontWeight: 600 }}>{balance != null ? db.fmt(balance) : '—'}</td>
+                    </tr>
+                  )
+                } else {
+                  const t = r as FuelTransaction
+                  const plate = vehicles.find(v => v.id === t.vehicleId)?.plate ?? '—'
+                  const tripCode = dispatches.find(d => d.id === t.tripId)?.code ?? (t.tripId ? '…' : '—')
+                  return (
+                    <tr key={t.id}>
+                      <td className="mono">{db.thaiDate(t.date)}</td>
+                      <td className="num right mono" style={{ color: '#DC2626', fontWeight: 600 }}>−{db.fmt(t.liters)}</td>
+                      <td className="mono">{plate}</td>
+                      <td className="mono">{tripCode}</td>
+                      <td>{t.tripFuelRole === 'TRIP_OPENING' ? 'ต้นรอบ' : t.tripFuelRole === 'TRIP_CLOSING' ? 'ปลายรอบ' : t.tripFuelRole === 'INTERMEDIATE' ? 'กลางทาง' : 'ทั่วไป'}</td>
+                      <td>{t.createdAt ? new Date(t.createdAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
+                      <td className="num right mono" style={{ fontWeight: 600 }}>{balance != null ? db.fmt(balance) : '—'}</td>
+                    </tr>
+                  )
+                }
+              })}
+            </tbody>
           </table>
         </div>
 
-        <div style={{ padding: '12px 24px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <div className="hist-screen-only" style={{ padding: '12px 24px', borderTop: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
           <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>หน้า {page} / {totalPages} · {filtered.length} รายการ</span>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>← ก่อนหน้า</button>

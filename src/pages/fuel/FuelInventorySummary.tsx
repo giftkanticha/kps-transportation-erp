@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
 import type { FuelRecord, FuelStock } from '../../types'
-import { Icon, Field } from '../../components/ui'
+import { Field, PrintButton } from '../../components/ui'
 
 const THAI_MONTHS_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -64,9 +64,7 @@ export function FuelInventorySummary() {
           <div className="page-sub">รายงานรายวันต่อเดือน • พิมพ์ได้</div>
         </div>
         <div className="actions">
-          <button className="btn" onClick={() => window.print()}>
-            <Icon name="download" size={15} /> พิมพ์รายงาน
-          </button>
+          <PrintButton orientation="portrait" label="พิมพ์รายงาน" />
         </div>
       </div>
 
