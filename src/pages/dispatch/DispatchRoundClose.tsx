@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, OtherExpense } from '../../types'
+import type { Vehicle, Employee, Dispatch, DispatchLeg, OtherExpense, FuelTransaction } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -179,8 +179,22 @@ function CloseForm({
   const [returnAt, setReturnAt] = useState('')
   const [otherExp, setOtherExp] = useState<OtherExpense[]>([])
   const [roundNotes, setRoundNotes] = useState('')
+  const [closingFuelLiters, setClosingFuelLiters] = useState('')
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
+
+  // Fuel transactions linked to this round
+  const linkedFuelTxs = useMemo(
+    () => db.getAll<FuelTransaction>('fuelTransactions')
+      .filter(t => t.tripId === roundId && t.status !== 'REVERSED'),
+    [roundId, tick],
+  )
+  const fuelOpening = linkedFuelTxs.filter(t => t.tripFuelRole === 'TRIP_OPENING')
+  const fuelIntermediate = linkedFuelTxs.filter(t => t.tripFuelRole === 'INTERMEDIATE')
+  const fuelClosing = linkedFuelTxs.filter(t => t.tripFuelRole === 'TRIP_CLOSING')
+  const fuelNormal = linkedFuelTxs.filter(t => t.tripFuelRole === 'NORMAL')
+  const sumIntermediate = fuelIntermediate.reduce((s, t) => s + t.liters, 0)
+  const sumNormal = fuelNormal.reduce((s, t) => s + t.liters, 0)
 
   // Initialize form from round
   useEffect(() => {
@@ -238,7 +252,13 @@ function CloseForm({
     : 0
   const fuelCost = round.cost || 0
   const profit = revenue - fuelCost - perDiemTotal - otherTotal
-  const kmPerL = round.liters && distance ? distance / round.liters : null
+
+  // New KM/L calc: INTERMEDIATE + TRIP_CLOSING input (TRIP_OPENING excluded)
+  const closingL = parseFloat(closingFuelLiters) || 0
+  const totalFuelForKmpl = sumIntermediate + sumNormal + closingL
+  const kmPerL = distance > 0 && totalFuelForKmpl > 0
+    ? distance / totalFuelForKmpl
+    : round.liters && distance ? distance / round.liters : null
   const isKmlLow = kmPerL != null && kmPerL < DSP_KMPL_THRESHOLD
 
   const buildLegsPatch = (markClosed: boolean): DispatchLeg[] =>
@@ -290,6 +310,36 @@ function CloseForm({
       }
       const em = endMileage ? Number(endMileage) : null
       const dist = em != null && round.startOdometer != null ? Math.max(0, em - round.startOdometer) : null
+
+      let finalLiters: number | null = round.liters
+      let finalKmPerL: number | null = null
+
+      if (mode === 'close') {
+        // Create TRIP_CLOSING fuel transaction if liters provided
+        if (closingL > 0) {
+          db.add<FuelTransaction>('fuelTransactions', {
+            id: uid('ftx'),
+            date: new Date().toISOString().slice(0, 10),
+            vehicleId: round.vehicleId ?? '',
+            liters: closingL,
+            pricePerL: 35,
+            total: closingL * 35,
+            source: 'FACTORY_TANK',
+            tripId: round.id,
+            status: 'TRIP_LINKED',
+            tripFuelRole: 'TRIP_CLOSING',
+            entryMethod: 'TRIP_CLOSE',
+            createdAt: new Date().toISOString(),
+            reversedAt: null,
+            reversalOf: null,
+            note: `TRIP_CLOSING สำหรับรอบ ${round.code}`,
+          })
+        }
+        // Final fuel = INTERMEDIATE + NORMAL + TRIP_CLOSING (NOT TRIP_OPENING)
+        finalLiters = totalFuelForKmpl > 0 ? totalFuelForKmpl : round.liters
+        finalKmPerL = dist && finalLiters ? dist / finalLiters : null
+      }
+
       db.update<Dispatch>('dispatch', round.id, {
         legs: newLegs,
         endOdometer: em,
@@ -300,18 +350,19 @@ function CloseForm({
         perDiem: perDiemTotal,
         revenue,
         totalAmount: revenue,
-        kmPerL: round.liters && dist ? dist / round.liters : null,
+        liters: finalLiters,
+        kmPerL: finalKmPerL,
         roundStatus: mode === 'close' ? 'closed' : 'draft',
         status: mode === 'close' ? 'completed' : round.status,
         progress: mode === 'close' ? 100 : round.progress,
       })
       setTick(t => t + 1)
       if (mode === 'close') {
-        setToast({ kind: 'success', msg: `✅ ปิดรอบ ${round.code} เรียบร้อย` })
+        setToast({ kind: 'success', msg: `✅ ปิดรอบ ${round.code} เรียบร้อย${finalKmPerL ? ` · KM/L = ${finalKmPerL.toFixed(2)}` : ''}` })
         setTimeout(() => {
           setSubject(null)
           setActive('dispatch.open')
-        }, 1200)
+        }, 1400)
       } else {
         setToast({ kind: 'success', msg: '✅ บันทึกร่างเรียบร้อย' })
         setSaving(false)
@@ -598,6 +649,131 @@ function CloseForm({
             style={{ resize: 'vertical', minHeight: 56 }}
           />
         </Field>
+      </div>
+
+      {/* Fuel lifecycle card */}
+      <h3 className="section-title" style={{ marginBottom: 10 }}>น้ำมันในรอบ</h3>
+      <div className="card pad" style={{ marginBottom: 16 }}>
+
+        {/* TRIP_OPENING — not counted */}
+        {fuelOpening.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>
+              เติมต้นรอบ (TRIP_OPENING) — ไม่นับในการคำนวณ KM/L
+            </div>
+            {fuelOpening.map(t => (
+              <div
+                key={t.id}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '7px 12px', background: 'var(--bg)', borderRadius: 7, marginBottom: 4, opacity: 0.65,
+                }}
+              >
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {db.thaiDate(t.date)} · {t.source === 'FACTORY_TANK' ? 'คลังโรงงาน' : 'ปั้มนอก'}
+                </span>
+                <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'line-through' }}>
+                  {t.liters.toFixed(2)} L
+                </span>
+              </div>
+            ))}
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              ↑ น้ำมันนี้นับเป็น TRIP_CLOSING ของรอบก่อนหน้าแล้ว
+            </div>
+          </div>
+        )}
+
+        {/* INTERMEDIATE + NORMAL — counted */}
+        {(fuelIntermediate.length > 0 || fuelNormal.length > 0) && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#3B82F6', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6 }}>
+              เติมระหว่างทาง — นับในการคำนวณ
+            </div>
+            {[...fuelIntermediate, ...fuelNormal].map(t => (
+              <div
+                key={t.id}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '7px 12px', background: '#EFF6FF', borderRadius: 7, marginBottom: 4,
+                }}
+              >
+                <span style={{ fontSize: 12 }}>
+                  {db.thaiDate(t.date)} · {t.source === 'FACTORY_TANK' ? 'คลังโรงงาน' : 'ปั้มนอก'}
+                  {t.tripFuelRole === 'NORMAL' && <span className="badge" style={{ marginLeft: 6, fontSize: 10 }}>ทั่วไป</span>}
+                </span>
+                <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: '#3B82F6' }}>
+                  {t.liters.toFixed(2)} L
+                </span>
+              </div>
+            ))}
+            {(sumIntermediate + sumNormal) > 0 && (
+              <div style={{ textAlign: 'right', fontSize: 11, color: '#3B82F6', fontWeight: 600, marginTop: 2 }}>
+                รวม {(sumIntermediate + sumNormal).toFixed(2)} L
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TRIP_CLOSING — input or saved */}
+        <div style={{ borderTop: fuelOpening.length > 0 || fuelIntermediate.length > 0 || fuelNormal.length > 0 ? '1px solid var(--line)' : 'none', paddingTop: fuelOpening.length > 0 || fuelIntermediate.length > 0 || fuelNormal.length > 0 ? 14 : 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
+            เติมปลายรอบ (TRIP_CLOSING) — นับในการคำนวณ
+          </div>
+          {fuelClosing.length > 0 ? (
+            fuelClosing.map(t => (
+              <div
+                key={t.id}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '7px 12px', background: '#F0FDF4', borderRadius: 7, marginBottom: 4,
+                }}
+              >
+                <span style={{ fontSize: 12 }}>บันทึกแล้ว · {db.thaiDate(t.date)}</span>
+                <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: 'var(--green)' }}>
+                  {t.liters.toFixed(2)} L ✓
+                </span>
+              </div>
+            ))
+          ) : (
+            <Field label="จำนวนน้ำมันเติมปลายรอบ (ลิตร)">
+              <input
+                type="number"
+                step="0.01"
+                value={closingFuelLiters}
+                onChange={e => setClosingFuelLiters(e.target.value)}
+                placeholder="0.00"
+                disabled={isClosed}
+              />
+            </Field>
+          )}
+        </div>
+
+        {/* KM/L live preview */}
+        {distance > 0 && (
+          <div
+            style={{
+              marginTop: 14, padding: '12px 14px',
+              background: isKmlLow ? '#FEF2F2' : (kmPerL != null ? '#F0FDF4' : 'var(--bg)'),
+              borderRadius: 8, borderLeft: `3px solid ${isKmlLow ? 'var(--red)' : (kmPerL != null ? 'var(--green)' : 'var(--line)')}`,
+            }}
+          >
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6 }}>
+              คำนวณ KM/L: {db.fmt(distance)} km ÷ (
+              {sumIntermediate + sumNormal > 0 ? `${(sumIntermediate + sumNormal).toFixed(2)}L กลางทาง` : ''}
+              {sumIntermediate + sumNormal > 0 && closingL > 0 ? ' + ' : ''}
+              {closingL > 0 ? `${closingL.toFixed(2)}L ปลายรอบ` : (fuelClosing.length > 0 ? `${fuelClosing.reduce((s,t) => s + t.liters, 0).toFixed(2)}L ปลายรอบ` : '?L ปลายรอบ')}
+              )
+            </div>
+            {kmPerL != null ? (
+              <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: isKmlLow ? 'var(--red)' : 'var(--green)' }}>
+                = {kmPerL.toFixed(2)} KM/L {isKmlLow ? '⚠️ ต่ำกว่าเกณฑ์' : '✓ ปกติ'}
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>กรอกน้ำมันปลายรอบเพื่อคำนวณ</div>
+            )}
+          </div>
+        )}
+
       </div>
 
       {/* Sticky summary footer */}

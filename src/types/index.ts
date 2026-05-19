@@ -215,7 +215,7 @@ export interface FuelRefill {
 }
 
 export type FuelTransactionStatus = 'INTERNAL_DEDUCTED' | 'TRIP_LINKED' | 'FLOATING' | 'REVERSED'
-export type TripFuelRole = 'NORMAL' | 'START_FILL' | 'INTERMEDIATE' | 'END_FILL'
+export type TripFuelRole = 'NORMAL' | 'TRIP_OPENING' | 'INTERMEDIATE' | 'TRIP_CLOSING'
 export type FuelEntryMethod = 'EXPRESS_GRID' | 'TRIP_OPEN' | 'TRIP_REFILL' | 'TRIP_CLOSE' | 'MANUAL_ADMIN'
 
 export interface FuelTransaction {
