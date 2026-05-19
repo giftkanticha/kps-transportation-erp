@@ -106,8 +106,8 @@
 /* ── Tire layout print ─────────────────────────────────────────── */
 .tire-print-layout {
   display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 18px;
+  grid-template-columns: 1fr auto;
+  gap: 24px;
   align-items: start;
   margin-top: 10px;
 }

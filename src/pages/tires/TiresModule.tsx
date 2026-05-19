@@ -629,7 +629,7 @@ function TiresAll({ onViewHistory }: { onViewHistory: (serial: string) => void }
                     <td>
                       <span
                         className="mono"
-                        style={{ fontWeight: 700, color: 'var(--primary)', cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textDecorationColor: 'var(--primary)' }}
+                        style={{ fontWeight: 700, color: 'var(--primary)', cursor: 'pointer' }}
                         onClick={() => onViewHistory(t.serial)}
                         title="คลิกเพื่อดูประวัติยางเส้นนี้"
                       >
@@ -1240,6 +1240,31 @@ function TiresLayout({ onViewHistory }: { onViewHistory?: (serial: string) => vo
                   </div>
                 ))}
               </div>
+
+              {spares.length > 0 && (
+                <div style={{ marginTop: 12 }}>
+                  <p className="tire-print-section-label" style={{ marginBottom: 6 }}>ยางสำรอง ({spares.length} เส้น)</p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {spares.map((t) => {
+                      const km = computeAccumKm(t, vehicles)
+                      const ks = kmStatus(km)
+                      return (
+                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f8fafc', border: '1px solid #ddd', borderRadius: 8, padding: '5px 10px' }}>
+                          <svg width="22" height="22" viewBox="0 0 22 22">
+                            <circle cx="11" cy="11" r="10" fill="#f8fafc" stroke="#94a3b8" strokeWidth="2" />
+                            <circle cx="11" cy="11" r="4" fill="#94a3b8" opacity=".5" />
+                            <text x="11" y="7" textAnchor="middle" fontSize="5" fill="#666" fontWeight="700">S</text>
+                          </svg>
+                          <div>
+                            <div style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: '7.5pt', color: ks.color }}>{t.serial}</div>
+                            <div style={{ fontSize: '6.5pt', color: '#666' }}>{t.brand} {t.model}</div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
@@ -2073,7 +2098,81 @@ function TiresHistoryFull({ initialSerial }: { initialSerial?: string }) {
                   <span className="muted">ติดตั้งเมื่อ: {db.thaiDate(tire.installedDate)}</span>
                 </div>
               </div>
+              <PrintButton orientation="portrait" label="พิมพ์ประวัติ" className="btn no-print" />
             </div>
+          </div>
+
+          {/* Print-only history report */}
+          <div className="print-only">
+            <div className="kps-print-header">
+              <p className="co">KPS Transportations</p>
+              <p className="ttl">ประวัติยางรายเส้น — {tire.serial}</p>
+              <p className="sub">{tire.brand} {tire.model} · {tire.size}</p>
+              <p className="ts">พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</p>
+            </div>
+            <table className="tire-print-table" style={{ marginBottom: 12 }}>
+              <tbody>
+                <tr>
+                  <th style={{ width: '25%' }}>หมายเลขยาง</th>
+                  <td className="mono" style={{ fontWeight: 700 }}>{tire.serial}</td>
+                  <th style={{ width: '25%' }}>สถานะ</th>
+                  <td>{LOC_LABEL[tire.status]?.label ?? tire.status}</td>
+                </tr>
+                <tr>
+                  <th>ยี่ห้อ / รุ่น</th>
+                  <td>{tire.brand} {tire.model}</td>
+                  <th>ขนาด</th>
+                  <td className="mono">{tire.size}</td>
+                </tr>
+                <tr>
+                  <th>Km สะสม</th>
+                  <td className="mono" style={{ color: kmStatus(tire.accumulatedKm ?? 0).color, fontWeight: 700 }}>{db.fmt(tire.accumulatedKm ?? 0)} km</td>
+                  <th>รถปัจจุบัน</th>
+                  <td className="mono">{vehicle?.plate ?? '—'}</td>
+                </tr>
+                <tr>
+                  <th>ติดตั้งเมื่อ</th>
+                  <td>{db.thaiDate(tire.installedDate)}</td>
+                  <th>ตำแหน่ง</th>
+                  <td>{tire.position ?? '—'}</td>
+                </tr>
+              </tbody>
+            </table>
+            {events.length > 0 && (
+              <>
+                <p className="tire-print-section-label" style={{ textAlign: 'left', marginBottom: 6 }}>ประวัติการใช้งาน ({events.length} รายการ)</p>
+                <table className="tire-print-table">
+                  <thead>
+                    <tr>
+                      <th>วันที่</th>
+                      <th>ประเภท</th>
+                      <th>รถ</th>
+                      <th>ตำแหน่งจาก</th>
+                      <th>ตำแหน่งถึง</th>
+                      <th style={{ textAlign: 'right' }}>เลขไมล์</th>
+                      <th>หมายเหตุ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {events.map(e => {
+                      const ev = db.get<Vehicle>('vehicles', e.vehicleId)
+                      const cfg = EVT_CFG[e.eventType] ?? EVT_CFG.install
+                      return (
+                        <tr key={e.id}>
+                          <td className="mono">{db.thaiDate(e.date)}</td>
+                          <td style={{ fontWeight: 600, color: cfg.color }}>{cfg.label}</td>
+                          <td className="mono">{ev?.plate ?? '—'}</td>
+                          <td>{e.fromPos ? (e.fromPos.startsWith('spare') ? 'สำรอง' : e.fromPos) : '—'}</td>
+                          <td>{e.toPos ? (e.toPos.startsWith('spare') ? 'สำรอง' : e.toPos) : '—'}</td>
+                          <td className="mono" style={{ textAlign: 'right' }}>{db.fmt(e.odometer)}</td>
+                          <td style={{ color: '#666' }}>{e.note ?? ''}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </>
+            )}
           </div>
 
           {/* Timeline */}
@@ -2409,7 +2508,7 @@ export function TiresModule({ tab, setActive }: { tab: string; setActive: (id: s
             </button>
           )}
           {cur === 'layout' && (
-            <PrintButton orientation="portrait" label="พิมพ์ผังยาง" />
+            <PrintButton orientation="landscape" label="พิมพ์ผังยาง" />
           )}
         </div>
       </div>
