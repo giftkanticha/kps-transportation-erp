@@ -4,3 +4,7 @@ dist
 .env.local
 *.tsbuildinfo
 .DS_Store
+
+# SQLite dev database (auto-generated, not committed)
+server/prisma/dev.db
+server/prisma/dev.db-journal
