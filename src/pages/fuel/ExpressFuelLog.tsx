@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
 import { Icon } from '../../components/ui/Icon'
+import { QuickOpenTripModal } from './QuickOpenTripModal'
 import type { CSSProperties } from 'react'
 import type { Vehicle, Dispatch as DispatchJob, FuelRecord, FuelStock, FuelTransaction } from '../../types'
 
@@ -96,15 +97,16 @@ function autoRoute(
   return { status: 'FLOATING', statusLabel: '🟡 น้ำมันลอย — ยังไม่มีรอบงาน', tripId: null, error: '' }
 }
 
-function persistRow(row: GridRow): void {
+function persistRow(row: GridRow): string {
   const vehicle = db.get<Vehicle>('vehicles', row.vehicleId)
   const liters = parseFloat(row.liters)
   const pricePerL = parseFloat(row.pricePerL) || 35
   const total = liters * pricePerL
+  const txId = uid('ftx')
 
   // Enhanced FuelTransaction record with routing metadata
   db.add<FuelTransaction>('fuelTransactions', {
-    id: uid('ftx'),
+    id: txId,
     date: row.date,
     vehicleId: row.vehicleId,
     liters,
@@ -134,6 +136,8 @@ function persistRow(row: GridRow): void {
     date: row.date,
     type: 'diesel',
   })
+
+  return txId
 }
 
 // ─── Status badge styles ──────────────────────────────────────────────────────
@@ -161,9 +165,18 @@ const cellInput: CSSProperties = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ExpressFuelLog() {
+interface FloatingToast {
+  message: string
+  vehicleId: string
+  date: string
+  floatingTxId: string
+  plateTerm: string
+}
+
+export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => void }) {
   const [rows, setRows] = useState<GridRow[]>([makeRow()])
-  const [toast, setToast] = useState('')
+  const [toast, setToast] = useState<FloatingToast | null>(null)
+  const [quickOpenCtx, setQuickOpenCtx] = useState<{ vehicleId: string; date: string; floatingTxId: string } | null>(null)
   const [tick, setTick] = useState(0)
 
   const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
@@ -198,11 +211,17 @@ export function ExpressFuelLog() {
     const updated: GridRow = { ...row, ...result, committed: result.status !== 'ERROR' }
 
     if (updated.committed) {
-      persistRow(updated)
+      const txId = persistRow(updated)
       refresh()
       if (result.status === 'FLOATING') {
-        setToast(`🟡 รถ ${row.plateTerm} — บันทึกแล้ว (น้ำมันลอย) สามารถผูกรอบได้ที่เมนู "น้ำมันลอย"`)
-        setTimeout(() => setToast(''), 6000)
+        setToast({
+          message: `🟡 รถ ${row.plateTerm} — บันทึกแล้ว (น้ำมันลอย)`,
+          vehicleId: row.vehicleId,
+          date: row.date,
+          floatingTxId: txId,
+          plateTerm: row.plateTerm,
+        })
+        setTimeout(() => setToast(null), 8000)
       }
     }
 
@@ -292,14 +311,56 @@ export function ExpressFuelLog() {
       {toast && (
         <div style={{
           position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-          background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: 10,
-          padding: '10px 20px', boxShadow: '0 4px 20px rgba(0,0,0,.15)',
+          background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: 12,
+          padding: '12px 16px', boxShadow: '0 4px 24px rgba(0,0,0,.18)',
           fontSize: 13, color: '#78350F', fontWeight: 500, zIndex: 9999,
-          display: 'flex', alignItems: 'center', gap: 12, maxWidth: 540,
+          display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 480, width: '90vw',
         }}>
-          <span style={{ flex: 1 }}>{toast}</span>
-          <button onClick={() => setToast('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#92400E', fontSize: 18, lineHeight: 1 }}>×</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ flex: 1, fontWeight: 600 }}>{toast.message}</span>
+            <button onClick={() => setToast(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#92400E', fontSize: 20, lineHeight: 1, flexShrink: 0 }}>×</button>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => {
+                setQuickOpenCtx({ vehicleId: toast.vehicleId, date: toast.date, floatingTxId: toast.floatingTxId })
+                setToast(null)
+              }}
+              style={{
+                flex: 1, background: '#0066CC', color: '#fff', border: 'none',
+                borderRadius: 8, padding: '8px 0', cursor: 'pointer', fontSize: 13,
+                fontWeight: 600, fontFamily: 'inherit',
+              }}
+            >
+              🚚 เปิดรอบตอนนี้
+            </button>
+            <button
+              onClick={() => { setToast(null); setActive?.('fuel.floating') }}
+              style={{
+                flex: 1, background: '#fff', color: '#92400E', border: '1px solid #FCD34D',
+                borderRadius: 8, padding: '8px 0', cursor: 'pointer', fontSize: 13,
+                fontWeight: 600, fontFamily: 'inherit',
+              }}
+            >
+              ผูกทีหลัง →
+            </button>
+          </div>
         </div>
+      )}
+
+      {/* Quick open trip modal */}
+      {quickOpenCtx && (
+        <QuickOpenTripModal
+          vehicleId={quickOpenCtx.vehicleId}
+          date={quickOpenCtx.date}
+          floatingTxId={quickOpenCtx.floatingTxId}
+          onClose={() => setQuickOpenCtx(null)}
+          onSuccess={(code) => {
+            setQuickOpenCtx(null)
+            refresh()
+            alert(`✅ เปิดรอบ ${code} สำเร็จ — น้ำมันลอยถูกผูกกับรอบนี้แล้ว`)
+          }}
+        />
       )}
 
       {/* Vehicle datalist */}

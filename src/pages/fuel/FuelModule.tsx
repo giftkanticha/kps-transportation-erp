@@ -935,7 +935,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       </div>
 
       {current === 'overview' && <FuelOverview />}
-      {current === 'express' && <ExpressFuelLog />}
+      {current === 'express' && <ExpressFuelLog setActive={setActive} />}
       {current === 'record' && <FuelRecord />}
       {current === 'report' && <FuelReportV2 />}
       {current === 'summary' && <FuelInventorySummary />}

@@ -73,12 +73,15 @@ function docWarn(v: Vehicle): { text: string; color: string } | null {
 
 const VEHICLE_TYPES = ['4ล้อ', '6ล้อ', '10ล้อ', '18ล้อ', '22ล้อ', 'ตู้คอนเทนเนอร์', 'พ่วงข้าง']
 
+type VehicleGroup = 'INTERNAL' | 'TRANSPORT'
+
 interface VehicleEditForm {
   plate: string
   brand: string
   year: string
   type: string
   customType: string
+  group: VehicleGroup
   status: Vehicle['status']
   driverId: string
   odometer: string
@@ -111,6 +114,7 @@ function VehicleEditModal({
     year: String(vehicle.year),
     type: isCustomType ? 'อื่นๆ' : vehicle.type,
     customType: isCustomType ? vehicle.type : '',
+    group: (vehicle.group ?? 'TRANSPORT') as VehicleGroup,
     status: vehicle.status,
     driverId: vehicle.driverId ?? '',
     odometer: String(vehicle.odometer),
@@ -144,6 +148,7 @@ function VehicleEditModal({
         brand: form.brand.trim(),
         year: Number(form.year) || vehicle.year,
         type: effectiveType,
+        group: form.group,
         status: form.status,
         driverId: form.driverId || null,
         odometer: Number(form.odometer) || 0,
@@ -237,6 +242,41 @@ function VehicleEditModal({
                   ))}
                 </select>
               </Field>
+            </div>
+          </div>
+
+          {/* กลุ่มรถ (Fuel Routing) */}
+          <div>
+            <div className="row" style={{ gap: 8, marginBottom: 10 }}>
+              <span style={{ color: 'var(--primary)' }}>⛽</span>
+              <span style={{ fontWeight: 600, fontSize: 14 }}>กลุ่มรถ (ควบคุมการจ่ายน้ำมัน)</span>
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
+                const active = form.group === g
+                return (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => set('group', g)}
+                    style={{
+                      flex: 1, padding: '10px 0', fontSize: 13, fontWeight: 600,
+                      fontFamily: 'inherit', cursor: 'pointer', transition: 'all .12s',
+                      border: `2px solid ${active ? '#0066CC' : 'var(--line)'}`,
+                      borderRadius: 8,
+                      background: active ? '#EFF6FF' : 'var(--card)',
+                      color: active ? '#1D4ED8' : 'var(--text-2)',
+                    }}
+                  >
+                    {g === 'INTERNAL' ? '🏭 โรงงาน (INTERNAL)' : '🚛 ขนส่ง (TRANSPORT)'}
+                  </button>
+                )
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+              {form.group === 'INTERNAL'
+                ? 'น้ำมันถูกตัดสต็อคทันที — ไม่ต้องผูกรอบงาน'
+                : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
             </div>
           </div>
 
@@ -542,6 +582,7 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
                 <th>ทะเบียน</th>
                 <th>ยี่ห้อ/รุ่น</th>
                 <th>ประเภท</th>
+                <th>กลุ่ม</th>
                 <th>สถานะ</th>
                 <th>คนขับ</th>
                 <th className="right">เลขไมล์</th>
@@ -567,6 +608,15 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
                     </td>
                     <td>{v.brand}</td>
                     <td>{v.type}</td>
+                    <td>
+                      {v.group === 'INTERNAL' ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#F0FDF4', color: '#166534' }}>🏭 โรงงาน</span>
+                      ) : v.group === 'TRANSPORT' ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#EFF6FF', color: '#1D4ED8' }}>🚛 ขนส่ง</span>
+                      ) : (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>
+                      )}
+                    </td>
                     <td><StatusBadge status={v.status} /></td>
                     <td>{dr ? dr.name : <span className="muted">—</span>}</td>
                     <td className="num right">{db.fmt(v.odometer)}</td>
@@ -598,7 +648,7 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-2)' }}>
+                  <td colSpan={9} style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-2)' }}>
                     ไม่พบรายการรถ
                   </td>
                 </tr>

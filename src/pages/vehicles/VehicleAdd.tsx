@@ -7,12 +7,15 @@ interface VehicleAddProps {
   setActive: (id: string) => void
 }
 
+type VehicleGroup = 'INTERNAL' | 'TRANSPORT'
+
 interface VehicleForm {
   plate: string
   brand: string
   year: string
   type: string
   customType: string
+  group: VehicleGroup
   status: string
   driverId: string
   odometer: number
@@ -31,6 +34,7 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
     year: '',
     type: '10ล้อ',
     customType: '',
+    group: 'TRANSPORT',
     status: 'available',
     driverId: '',
     odometer: 0,
@@ -52,6 +56,7 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
     db.add<Partial<Vehicle>>('vehicles', {
       ...form,
       type: form.type === 'อื่นๆ' ? (form.customType.trim() || 'อื่นๆ') : form.type,
+      group: form.group,
       status: form.status as Vehicle['status'],
       odometer: +form.odometer || 0,
       nextServiceKm: +form.nextServiceKm || 0,
@@ -162,6 +167,41 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
                 ))}
               </select>
             </Field>
+          </div>
+        </div>
+
+        {/* Group */}
+        <div className="card pad">
+          <div className="row" style={{ marginBottom: 12 }}>
+            <span>⛽</span>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>กลุ่มรถ (ควบคุมการจ่ายน้ำมัน)</h3>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
+              const active = form.group === g
+              return (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => set('group', g)}
+                  style={{
+                    flex: 1, padding: '12px 0', fontSize: 14, fontWeight: 600,
+                    fontFamily: 'inherit', cursor: 'pointer', transition: 'all .12s',
+                    border: `2px solid ${active ? '#0066CC' : 'var(--line)'}`,
+                    borderRadius: 8,
+                    background: active ? '#EFF6FF' : 'var(--card)',
+                    color: active ? '#1D4ED8' : 'var(--text-2)',
+                  }}
+                >
+                  {g === 'INTERNAL' ? '🏭 โรงงาน (INTERNAL)' : '🚛 ขนส่ง (TRANSPORT)'}
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
+            {form.group === 'INTERNAL'
+              ? 'น้ำมันถูกตัดสต็อคทันที — ไม่ต้องผูกรอบงาน'
+              : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
           </div>
         </div>
 
