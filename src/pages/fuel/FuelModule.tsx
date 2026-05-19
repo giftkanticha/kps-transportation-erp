@@ -7,6 +7,7 @@ import type { FuelRecord, FuelStock, Vehicle, Employee } from '../../types'
 import { FuelInventorySummary } from './FuelInventorySummary'
 import { ExpressFuelLog } from './ExpressFuelLog'
 import { FloatingFuel } from './FloatingFuel'
+import { FuelReconciliation } from './FuelReconciliation'
 
 const THAI_MONTHS_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -893,6 +894,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
     tab === 'summary' ? 'summary' :
     tab === 'express' ? 'express' :
     tab === 'floating' ? 'floating' :
+    tab === 'reconcile' ? 'reconcile' :
     'overview'
 
   return (
@@ -911,6 +913,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
             ['floating', 'floating', '🟡 น้ำมันลอย', 'alert'],
             ['report', 'report', '📋 รายงาน', 'chart'],
             ['summary', 'summary', '📦 สรุปคลัง', 'download'],
+            ['reconcile', 'reconcile', '🔍 ตรวจสอบข้อมูล', 'search'],
           ] as [string, string, string, string][]
         ).map(([id, route, label, ic]) => (
           <button
@@ -929,6 +932,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       {current === 'floating' && <FloatingFuel />}
       {current === 'report' && <FuelReportV2 />}
       {current === 'summary' && <FuelInventorySummary />}
+      {current === 'reconcile' && <FuelReconciliation />}
     </div>
   )
 }

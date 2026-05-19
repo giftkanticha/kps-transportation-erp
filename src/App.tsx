@@ -50,6 +50,7 @@ const crumbMap: Record<string, string> = {
   'fuel.floating': 'ระบบน้ำมัน • น้ำมันลอย',
   'fuel.report': 'ระบบน้ำมัน • รายงาน',
   'fuel.summary': 'ระบบน้ำมัน • สรุปคลังน้ำมันรวม',
+  'fuel.reconcile': 'ระบบน้ำมัน • ตรวจสอบข้อมูล',
   dispatch: 'งานขนส่ง',
   'dispatch.open': 'งานขนส่ง • เปิดงาน',
   'dispatch.round': 'งานขนส่ง • รายละเอียดรอบ',
@@ -145,6 +146,8 @@ export default function App() {
         return <FuelModule tab="report" setActive={setActive} />
       case 'fuel.summary':
         return <FuelModule tab="summary" setActive={setActive} />
+      case 'fuel.reconcile':
+        return <FuelModule tab="reconcile" setActive={setActive} />
 
       case 'dispatch':
       case 'dispatch.open':

@@ -8,7 +8,7 @@ import type { Vehicle, Dispatch as DispatchJob, FuelRecord, FuelStock, FuelTrans
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type FuelSource = 'FACTORY_TANK' | 'EXTERNAL_PUMP'
-type RowStatus = 'PENDING' | 'INTERNAL_DEDUCTED' | 'TRIP_LINKED' | 'FLOATING' | 'ERROR'
+type RowStatus = 'PENDING' | 'INTERNAL_DEDUCTED' | 'TRIP_LINKED' | 'FLOATING' | 'ERROR' | 'REVERSED'
 
 interface GridRow {
   key: string
@@ -23,6 +23,9 @@ interface GridRow {
   tripId: string | null
   error: string
   committed: boolean
+  txId: string
+  fuelRecId: string
+  reversed: boolean
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -43,6 +46,9 @@ function makeRow(): GridRow {
     tripId: null,
     error: '',
     committed: false,
+    txId: '',
+    fuelRecId: '',
+    reversed: false,
   }
 }
 
@@ -77,12 +83,10 @@ function autoRoute(
   }
 
   const group = vehicle.group ?? 'TRANSPORT'
-
   if (group === 'INTERNAL') {
     return { status: 'INTERNAL_DEDUCTED', statusLabel: '🟢 ตัดสต็อค (รถโรงงาน)', tripId: null, error: '' }
   }
 
-  // TRANSPORT: find active/scheduled dispatch for this vehicle on this date
   const dispatches = db.getAll<DispatchJob>('dispatch').filter(d =>
     d.vehicleId === vehicleId &&
     d.date?.slice(0, 10) === date &&
@@ -97,14 +101,14 @@ function autoRoute(
   return { status: 'FLOATING', statusLabel: '🟡 น้ำมันลอย — ยังไม่มีรอบงาน', tripId: null, error: '' }
 }
 
-function persistRow(row: GridRow): string {
+function persistRow(row: GridRow): { txId: string; fuelRecId: string } {
   const vehicle = db.get<Vehicle>('vehicles', row.vehicleId)
   const liters = parseFloat(row.liters)
   const pricePerL = parseFloat(row.pricePerL) || 35
   const total = liters * pricePerL
   const txId = uid('ftx')
+  const fuelRecId = uid('f')
 
-  // Enhanced FuelTransaction record with routing metadata
   db.add<FuelTransaction>('fuelTransactions', {
     id: txId,
     date: row.date,
@@ -122,9 +126,8 @@ function persistRow(row: GridRow): string {
     reversalOf: null,
   })
 
-  // Also write FuelRecord for backward-compat with FuelInventorySummary reports
   db.add<FuelRecord>('fuel', {
-    id: uid('f'),
+    id: fuelRecId,
     code: `EXP-${row.date.replace(/-/g, '')}`,
     vehicleId: row.vehicleId,
     driverId: vehicle?.driverId ?? '',
@@ -137,7 +140,7 @@ function persistRow(row: GridRow): string {
     type: 'diesel',
   })
 
-  return txId
+  return { txId, fuelRecId }
 }
 
 // ─── Status badge styles ──────────────────────────────────────────────────────
@@ -148,22 +151,70 @@ const BADGE: Record<RowStatus, CSSProperties> = {
   TRIP_LINKED: { background: '#EFF6FF', color: '#1D4ED8', padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 },
   FLOATING: { background: '#FFFBEB', color: '#92400E', padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 },
   ERROR: { background: '#FEF2F2', color: '#991B1B', padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600 },
+  REVERSED: { background: '#F1F5F9', color: '#94A3B8', padding: '2px 10px', borderRadius: 20, fontSize: 12, fontWeight: 600, textDecoration: 'line-through' },
 }
 
 const cellInput: CSSProperties = {
-  height: 36,
-  padding: '0 9px',
-  border: '1px solid var(--line)',
+  height: 34,
+  padding: '0 8px',
+  border: '1px solid #93C5FD',
   borderRadius: 6,
   fontSize: 13,
   outline: 'none',
-  background: '#fff',
+  background: '#EFF6FF',
   fontFamily: 'inherit',
   width: '100%',
   boxSizing: 'border-box',
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Confirm Delete Dialog ─────────────────────────────────────────────────────
+
+function ConfirmReverseDialog({ plateTerm, liters, onConfirm, onCancel }: {
+  plateTerm: string
+  liters: string
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+    }}>
+      <div style={{
+        background: '#fff', borderRadius: 12, width: 380, padding: 24,
+        boxShadow: '0 10px 40px rgba(0,0,0,.2)',
+      }}>
+        <div style={{ fontSize: 32, textAlign: 'center', marginBottom: 12 }}>⚠️</div>
+        <h3 style={{ margin: '0 0 8px', textAlign: 'center', fontSize: 16, fontWeight: 700 }}>ยืนยันการลบรายการ?</h3>
+        <p style={{ margin: '0 0 20px', textAlign: 'center', fontSize: 13, color: '#64748B' }}>
+          ทะเบียน <strong>{plateTerm}</strong> · {liters} ลิตร<br />
+          รายการนี้จะถูกยกเลิก และสต็อกจะถูกคืนอัตโนมัติ
+        </p>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn"
+            onClick={onCancel}
+            style={{ flex: 1 }}
+          >
+            ยกเลิก
+          </button>
+          <button
+            onClick={onConfirm}
+            style={{
+              flex: 1, background: '#DC2626', color: '#fff', border: 'none',
+              borderRadius: 7, padding: '8px 0', cursor: 'pointer', fontSize: 13,
+              fontWeight: 600, fontFamily: 'inherit',
+            }}
+          >
+            ✓ ยืนยันลบ
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Float toast type ─────────────────────────────────────────────────────────
 
 interface FloatingToast {
   message: string
@@ -173,11 +224,22 @@ interface FloatingToast {
   plateTerm: string
 }
 
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => void }) {
   const [rows, setRows] = useState<GridRow[]>([makeRow()])
   const [toast, setToast] = useState<FloatingToast | null>(null)
   const [quickOpenCtx, setQuickOpenCtx] = useState<{ vehicleId: string; date: string; floatingTxId: string } | null>(null)
   const [tick, setTick] = useState(0)
+
+  // Edit state
+  const [editingKey, setEditingKey] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState<{ date: string; plateTerm: string; vehicleId: string; liters: string; pricePerL: string; source: FuelSource }>({
+    date: '', plateTerm: '', vehicleId: '', liters: '', pricePerL: '35', source: 'FACTORY_TANK',
+  })
+
+  // Reverse confirm
+  const [reverseTarget, setReverseTarget] = useState<GridRow | null>(null)
 
   const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
   const balance = useMemo(() => getFactoryBalance(), [tick])
@@ -211,7 +273,9 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     const updated: GridRow = { ...row, ...result, committed: result.status !== 'ERROR' }
 
     if (updated.committed) {
-      const txId = persistRow(updated)
+      const { txId, fuelRecId } = persistRow(updated)
+      updated.txId = txId
+      updated.fuelRecId = fuelRecId
       refresh()
       if (result.status === 'FLOATING') {
         setToast({
@@ -255,9 +319,103 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     })
   }
 
+  // ── Edit ────────────────────────────────────────────────────────────────────
+
+  const startEdit = (row: GridRow) => {
+    setEditingKey(row.key)
+    setEditDraft({
+      date: row.date,
+      plateTerm: row.plateTerm,
+      vehicleId: row.vehicleId,
+      liters: row.liters,
+      pricePerL: row.pricePerL,
+      source: row.source,
+    })
+  }
+
+  const cancelEdit = () => setEditingKey(null)
+
+  const saveEdit = (row: GridRow, i: number) => {
+    const foundVehicle = vehicles.find(v => v.plate.toLowerCase() === editDraft.plateTerm.trim().toLowerCase())
+    const vehicleId = foundVehicle?.id ?? row.vehicleId
+    const liters = parseFloat(editDraft.liters)
+    const pricePerL = parseFloat(editDraft.pricePerL) || 35
+    const total = liters * pricePerL
+
+    const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters)
+
+    // Update FuelTransaction
+    if (row.txId) {
+      db.update<FuelTransaction>('fuelTransactions', row.txId, {
+        date: editDraft.date,
+        vehicleId,
+        liters,
+        pricePerL,
+        total,
+        source: editDraft.source,
+        tripId: result.tripId,
+        status: result.status as FuelTransaction['status'],
+      })
+    }
+
+    // Update FuelRecord (backward compat)
+    if (row.fuelRecId) {
+      db.update<FuelRecord>('fuel', row.fuelRecId, {
+        date: editDraft.date,
+        vehicleId,
+        liters,
+        pricePerL,
+        total,
+        station: editDraft.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
+      })
+    }
+
+    patchRow(i, {
+      date: editDraft.date,
+      plateTerm: editDraft.plateTerm,
+      vehicleId,
+      liters: editDraft.liters,
+      pricePerL: editDraft.pricePerL,
+      source: editDraft.source,
+      status: result.status,
+      statusLabel: result.statusLabel,
+      tripId: result.tripId,
+    })
+
+    setEditingKey(null)
+    refresh()
+  }
+
+  // ── Reverse ──────────────────────────────────────────────────────────────────
+
+  const confirmReverse = (row: GridRow) => {
+    // Mark FuelTransaction as REVERSED
+    if (row.txId) {
+      db.update<FuelTransaction>('fuelTransactions', row.txId, {
+        status: 'REVERSED',
+        reversedAt: new Date().toISOString(),
+      })
+    }
+
+    // Remove FuelRecord so factory balance is restored
+    if (row.fuelRecId) {
+      try { db.remove('fuel', row.fuelRecId) } catch { /* already deleted */ }
+    }
+
+    setRows(prev => prev.map(r =>
+      r.key === row.key
+        ? { ...r, reversed: true, status: 'REVERSED', statusLabel: '🚫 ยกเลิกแล้ว' }
+        : r,
+    ))
+    setReverseTarget(null)
+    refresh()
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
   const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const uncommitted = rows.filter(r => !r.committed && (r.vehicleId || r.liters)).length
-  const committed = rows.filter(r => r.committed).length
+  const committed = rows.filter(r => r.committed && !r.reversed).length
 
   return (
     <div>
@@ -358,8 +516,23 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
           onSuccess={(code) => {
             setQuickOpenCtx(null)
             refresh()
-            alert(`✅ เปิดรอบ ${code} สำเร็จ — น้ำมันลอยถูกผูกกับรอบนี้แล้ว`)
+            // Update row status in grid
+            setRows(prev => prev.map(r =>
+              r.txId === quickOpenCtx.floatingTxId
+                ? { ...r, status: 'TRIP_LINKED', statusLabel: `🔵 ผูกรอบ ${code}` }
+                : r,
+            ))
           }}
+        />
+      )}
+
+      {/* Confirm reverse dialog */}
+      {reverseTarget && (
+        <ConfirmReverseDialog
+          plateTerm={reverseTarget.plateTerm}
+          liters={reverseTarget.liters}
+          onConfirm={() => confirmReverse(reverseTarget)}
+          onCancel={() => setReverseTarget(null)}
         />
       )}
 
@@ -390,12 +563,12 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#F8FAFC', borderBottom: '2px solid #E2E8F0' }}>
-                {['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'แหล่งน้ำมัน', 'สถานะ', ''].map((h, hi) => (
+                {['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ'].map((h, hi) => (
                   <th key={hi} style={{
                     padding: '9px 12px',
-                    textAlign: hi === 0 || hi === 7 ? 'center' : hi >= 3 && hi <= 4 ? 'right' : 'left',
+                    textAlign: hi === 0 ? 'center' : hi >= 3 && hi <= 4 ? 'right' : hi === 7 ? 'center' : 'left',
                     color: '#64748B', fontSize: 11, fontWeight: 700,
-                    width: [40, 130, 155, 95, 110, 165, undefined, 36][hi],
+                    width: [40, 130, 155, 95, 110, 165, undefined, 120][hi],
                     whiteSpace: 'nowrap',
                   }}>{h}</th>
                 ))}
@@ -403,91 +576,159 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
             </thead>
             <tbody>
               {rows.map((row, i) => {
-                const locked = row.committed
-                const rowBg = row.status === 'ERROR' ? '#FEF2F2' : locked ? '#FAFAFA' : '#fff'
+                const isEditing = editingKey === row.key && row.committed && !row.reversed
+                const locked = row.committed && !isEditing
+                const rowBg = row.reversed ? '#F8FAFC'
+                  : row.status === 'ERROR' ? '#FEF2F2'
+                  : isEditing ? '#F0F9FF'
+                  : locked ? '#FAFAFA'
+                  : '#fff'
                 const plateInvalid = !locked && row.plateTerm !== '' && !row.vehicleId
 
                 return (
-                  <tr key={row.key} style={{ borderBottom: '1px solid #F1F5F9', background: rowBg, transition: 'background .1s' }}>
+                  <tr
+                    key={row.key}
+                    style={{
+                      borderBottom: '1px solid #F1F5F9',
+                      background: rowBg,
+                      opacity: row.reversed ? 0.5 : 1,
+                      transition: 'background .1s',
+                    }}
+                  >
                     {/* # */}
                     <td style={{ padding: '5px 12px', textAlign: 'center', color: '#CBD5E1', fontSize: 12 }}>{i + 1}</td>
 
                     {/* วันที่ */}
                     <td style={{ padding: '5px 7px' }}>
-                      <input
-                        id={`cell-${i}-0`}
-                        type="date"
-                        value={row.date}
-                        disabled={locked}
-                        onChange={e => patchRow(i, { date: e.target.value })}
-                        onKeyDown={onKeyDown(i, false)}
-                        style={{ ...cellInput, opacity: locked ? 0.55 : 1 }}
-                      />
+                      {isEditing ? (
+                        <input
+                          type="date"
+                          value={editDraft.date}
+                          onChange={e => setEditDraft(d => ({ ...d, date: e.target.value }))}
+                          style={cellInput}
+                        />
+                      ) : (
+                        <input
+                          id={`cell-${i}-0`}
+                          type="date"
+                          value={row.date}
+                          disabled={locked || row.reversed}
+                          onChange={e => patchRow(i, { date: e.target.value })}
+                          onKeyDown={onKeyDown(i, false)}
+                          style={{ ...cellInput, border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
+                        />
+                      )}
                     </td>
 
                     {/* ทะเบียน */}
                     <td style={{ padding: '5px 7px' }}>
-                      <input
-                        id={`cell-${i}-1`}
-                        list="fuel-plates-dl"
-                        value={row.plateTerm}
-                        disabled={locked}
-                        onChange={e => handlePlateChange(i, e.target.value)}
-                        onKeyDown={onKeyDown(i, false)}
-                        placeholder="ทะเบียนรถ..."
-                        style={{
-                          ...cellInput,
-                          opacity: locked ? 0.55 : 1,
-                          borderColor: plateInvalid ? '#EF4444' : undefined,
-                          background: plateInvalid ? '#FEF2F2' : undefined,
-                        }}
-                      />
+                      {isEditing ? (
+                        <input
+                          list="fuel-plates-dl"
+                          value={editDraft.plateTerm}
+                          onChange={e => {
+                            const found = vehicles.find(v => v.plate.toLowerCase() === e.target.value.trim().toLowerCase())
+                            setEditDraft(d => ({ ...d, plateTerm: e.target.value, vehicleId: found?.id ?? d.vehicleId }))
+                          }}
+                          style={cellInput}
+                          placeholder="ทะเบียนรถ..."
+                        />
+                      ) : (
+                        <input
+                          id={`cell-${i}-1`}
+                          list="fuel-plates-dl"
+                          value={row.plateTerm}
+                          disabled={locked || row.reversed}
+                          onChange={e => handlePlateChange(i, e.target.value)}
+                          onKeyDown={onKeyDown(i, false)}
+                          placeholder="ทะเบียนรถ..."
+                          style={{
+                            ...cellInput,
+                            border: plateInvalid ? '1px solid #EF4444' : '1px solid var(--line)',
+                            background: plateInvalid ? '#FEF2F2' : locked ? 'transparent' : '#fff',
+                            opacity: locked ? 0.55 : 1,
+                          }}
+                        />
+                      )}
                     </td>
 
                     {/* ลิตร */}
                     <td style={{ padding: '5px 7px' }}>
-                      <input
-                        id={`cell-${i}-2`}
-                        type="number"
-                        min="0"
-                        step="0.5"
-                        value={row.liters}
-                        disabled={locked}
-                        onChange={e => patchRow(i, { liters: e.target.value })}
-                        onKeyDown={onKeyDown(i, false)}
-                        placeholder="0.00"
-                        style={{ ...cellInput, textAlign: 'right', opacity: locked ? 0.55 : 1 }}
-                      />
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={editDraft.liters}
+                          onChange={e => setEditDraft(d => ({ ...d, liters: e.target.value }))}
+                          style={{ ...cellInput, textAlign: 'right' }}
+                        />
+                      ) : (
+                        <input
+                          id={`cell-${i}-2`}
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={row.liters}
+                          disabled={locked || row.reversed}
+                          onChange={e => patchRow(i, { liters: e.target.value })}
+                          onKeyDown={onKeyDown(i, false)}
+                          placeholder="0.00"
+                          style={{ ...cellInput, textAlign: 'right', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
+                        />
+                      )}
                     </td>
 
                     {/* ราคา/ลิตร */}
                     <td style={{ padding: '5px 7px' }}>
-                      <input
-                        id={`cell-${i}-3`}
-                        type="number"
-                        min="0"
-                        step="0.5"
-                        value={row.pricePerL}
-                        disabled={locked}
-                        onChange={e => patchRow(i, { pricePerL: e.target.value })}
-                        onKeyDown={onKeyDown(i, false)}
-                        style={{ ...cellInput, textAlign: 'right', opacity: locked ? 0.55 : 1 }}
-                      />
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={editDraft.pricePerL}
+                          onChange={e => setEditDraft(d => ({ ...d, pricePerL: e.target.value }))}
+                          style={{ ...cellInput, textAlign: 'right' }}
+                        />
+                      ) : (
+                        <input
+                          id={`cell-${i}-3`}
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={row.pricePerL}
+                          disabled={locked || row.reversed}
+                          onChange={e => patchRow(i, { pricePerL: e.target.value })}
+                          onKeyDown={onKeyDown(i, false)}
+                          style={{ ...cellInput, textAlign: 'right', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
+                        />
+                      )}
                     </td>
 
                     {/* แหล่ง */}
                     <td style={{ padding: '5px 7px' }}>
-                      <select
-                        id={`cell-${i}-4`}
-                        value={row.source}
-                        disabled={locked}
-                        onChange={e => patchRow(i, { source: e.target.value as FuelSource })}
-                        onKeyDown={onKeyDown(i, true)}
-                        style={{ ...cellInput, cursor: locked ? 'default' : 'pointer', opacity: locked ? 0.55 : 1 }}
-                      >
-                        <option value="FACTORY_TANK">🏭 ถังโรงงาน</option>
-                        <option value="EXTERNAL_PUMP">⛽ ปั๊มนอก</option>
-                      </select>
+                      {isEditing ? (
+                        <select
+                          value={editDraft.source}
+                          onChange={e => setEditDraft(d => ({ ...d, source: e.target.value as FuelSource }))}
+                          style={cellInput}
+                        >
+                          <option value="FACTORY_TANK">🏭 ถังโรงงาน</option>
+                          <option value="EXTERNAL_PUMP">⛽ ปั๊มนอก</option>
+                        </select>
+                      ) : (
+                        <select
+                          id={`cell-${i}-4`}
+                          value={row.source}
+                          disabled={locked || row.reversed}
+                          onChange={e => patchRow(i, { source: e.target.value as FuelSource })}
+                          onKeyDown={onKeyDown(i, true)}
+                          style={{ ...cellInput, cursor: (locked || row.reversed) ? 'default' : 'pointer', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
+                        >
+                          <option value="FACTORY_TANK">🏭 ถังโรงงาน</option>
+                          <option value="EXTERNAL_PUMP">⛽ ปั๊มนอก</option>
+                        </select>
+                      )}
                     </td>
 
                     {/* สถานะ */}
@@ -501,20 +742,75 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                       )}
                     </td>
 
-                    {/* Delete */}
-                    <td style={{ padding: '5px 4px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => removeRow(i)}
-                        title="ลบแถว"
-                        style={{
-                          width: 26, height: 26, borderRadius: 6, border: 'none',
-                          cursor: 'pointer', background: 'transparent',
-                          color: '#CBD5E1', fontSize: 17, lineHeight: '1',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.background = '#FEF2F2'; e.currentTarget.style.color = '#EF4444' }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#CBD5E1' }}
-                      >×</button>
+                    {/* จัดการ */}
+                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                      {isEditing ? (
+                        <div style={{ display: 'flex', gap: 5, justifyContent: 'center' }}>
+                          <button
+                            onClick={() => saveEdit(row, i)}
+                            style={{
+                              background: '#0066CC', color: '#fff', border: 'none',
+                              borderRadius: 6, padding: '5px 10px', cursor: 'pointer',
+                              fontSize: 11, fontWeight: 600, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                            }}
+                          >
+                            ✓ บันทึก
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            style={{
+                              background: 'none', color: '#64748B', border: '1px solid #E2E8F0',
+                              borderRadius: 6, padding: '5px 8px', cursor: 'pointer',
+                              fontSize: 11, fontFamily: 'inherit',
+                            }}
+                          >
+                            ยกเลิก
+                          </button>
+                        </div>
+                      ) : row.committed && !row.reversed ? (
+                        <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+                          <button
+                            onClick={() => startEdit(row)}
+                            title="แก้ไข"
+                            style={{
+                              width: 28, height: 28, borderRadius: 6, border: '1px solid #E2E8F0',
+                              cursor: 'pointer', background: 'transparent', color: '#64748B',
+                              fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#EFF6FF'; e.currentTarget.style.color = '#0066CC'; e.currentTarget.style.borderColor = '#BFDBFE' }}
+                            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#64748B'; e.currentTarget.style.borderColor = '#E2E8F0' }}
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            onClick={() => setReverseTarget(row)}
+                            title="ลบ / ยกเลิก"
+                            style={{
+                              width: 28, height: 28, borderRadius: 6, border: '1px solid #E2E8F0',
+                              cursor: 'pointer', background: 'transparent', color: '#CBD5E1',
+                              fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = '#FEF2F2'; e.currentTarget.style.color = '#EF4444'; e.currentTarget.style.borderColor = '#FECACA' }}
+                            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#CBD5E1'; e.currentTarget.style.borderColor = '#E2E8F0' }}
+                          >
+                            🗑
+                          </button>
+                        </div>
+                      ) : row.reversed ? (
+                        <span style={{ fontSize: 11, color: '#94A3B8' }}>ยกเลิกแล้ว</span>
+                      ) : (
+                        <button
+                          onClick={() => removeRow(i)}
+                          title="ลบแถว"
+                          style={{
+                            width: 26, height: 26, borderRadius: 6, border: 'none',
+                            cursor: 'pointer', background: 'transparent', color: '#CBD5E1',
+                            fontSize: 17, lineHeight: '1', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = '#FEF2F2'; e.currentTarget.style.color = '#EF4444' }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#CBD5E1' }}
+                        >×</button>
+                      )}
                     </td>
                   </tr>
                 )
@@ -531,19 +827,11 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
           </span>
           <div style={{ flex: 1 }} />
           {uncommitted > 0 && (
-            <button
-              className="btn primary"
-              onClick={commitAll}
-              style={{ fontSize: 13 }}
-            >
+            <button className="btn primary" onClick={commitAll} style={{ fontSize: 13 }}>
               บันทึกทั้งหมด ({uncommitted})
             </button>
           )}
-          <button
-            className="btn"
-            onClick={() => { setRows([makeRow()]); refresh() }}
-            style={{ fontSize: 13 }}
-          >
+          <button className="btn" onClick={() => { setRows([makeRow()]); refresh() }} style={{ fontSize: 13 }}>
             ล้างตาราง
           </button>
         </div>
@@ -555,6 +843,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
         <span style={BADGE.TRIP_LINKED}>🔵 ผูกรอบงาน</span>
         <span style={BADGE.FLOATING}>🟡 น้ำมันลอย — รอผูกรอบ</span>
         <span style={BADGE.ERROR}>❌ พบข้อผิดพลาด</span>
+        <span style={BADGE.REVERSED}>🚫 ยกเลิกแล้ว</span>
       </div>
     </div>
   )
