@@ -1,79 +1,100 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
-import { api, type ApiUser } from '../lib/api'
+import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import type { Session } from '@supabase/supabase-js'
+import { supabase, type UserProfile, type UserRole } from '../lib/supabase'
 import type { User, KPSRole } from '../types'
 
 interface AuthContextValue {
-  authUser: ApiUser | null
+  session:    Session | null
+  profile:    UserProfile | null
   legacyUser: User | null
-  loading: boolean
-  login: (username: string, password: string) => Promise<void>
-  logout: () => void
-  isAdmin: boolean
+  loading:    boolean
+  login:      (email: string, password: string) => Promise<void>
+  logout:     () => Promise<void>
+  isAdmin:    boolean
   isSuperAdmin: boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
-export function mapToLegacyUser(u: ApiUser): User {
-  const roleMap: Record<string, KPSRole> = {
-    SUPER_ADMIN: 'admin',
-    ADMIN: 'admin',
-    MANAGER: 'manager',
-    EMPLOYEE: 'driver',
-  }
+const ROLE_MAP: Record<UserRole, KPSRole> = {
+  SUPER_ADMIN: 'admin',
+  ADMIN:       'admin',
+  MANAGER:     'manager',
+  EMPLOYEE:    'driver',
+}
+const AVATAR_MAP: Record<UserRole, string> = {
+  SUPER_ADMIN: '👑', ADMIN: '🛡️', MANAGER: '📋', EMPLOYEE: '👤',
+}
+
+function toLegacy(profile: UserProfile, email: string): User {
   return {
-    id: u.id,
-    email: u.email || '',
-    name: u.displayName,
-    role: roleMap[u.role] ?? 'driver',
-    avatar: u.role === 'SUPER_ADMIN' || u.role === 'ADMIN' ? '👑' : u.role === 'MANAGER' ? '📋' : '👤',
-    phone: u.phone || '',
-    title: u.role === 'SUPER_ADMIN' ? 'Super Admin' : u.role === 'ADMIN' ? 'Admin' : u.role === 'MANAGER' ? 'Manager' : 'Employee',
+    id:     profile.id,
+    email,
+    name:   profile.display_name,
+    role:   ROLE_MAP[profile.role] ?? 'driver',
+    avatar: AVATAR_MAP[profile.role] ?? '👤',
+    phone:  profile.phone,
+    title:  profile.role === 'SUPER_ADMIN' ? 'Super Admin'
+          : profile.role === 'ADMIN'       ? 'Admin'
+          : profile.role === 'MANAGER'     ? 'Manager' : 'Employee',
   }
 }
 
-function loadStoredUser(): ApiUser | null {
-  try {
-    const raw = localStorage.getItem('kps_auth_user')
-    return raw ? JSON.parse(raw) : null
-  } catch {
-    return null
-  }
+async function fetchProfile(userId: string): Promise<UserProfile | null> {
+  const { data } = await supabase
+    .from('user_profiles')
+    .select('*')
+    .eq('id', userId)
+    .single()
+  return data as UserProfile | null
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [authUser, setAuthUser] = useState<ApiUser | null>(loadStoredUser)
-  const [loading, setLoading] = useState(false)
+  const [session, setSession]   = useState<Session | null>(null)
+  const [profile, setProfile]   = useState<UserProfile | null>(null)
+  const [loading, setLoading]   = useState(true)
 
-  const login = useCallback(async (username: string, password: string) => {
-    setLoading(true)
-    try {
-      const result = await api.auth.login(username, password)
-      api.setTokens(result.accessToken, result.refreshToken)
-      localStorage.setItem('kps_auth_user', JSON.stringify(result.user))
-      setAuthUser(result.user)
-    } finally {
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
+      setSession(s)
+      if (s) setProfile(await fetchProfile(s.user.id))
       setLoading(false)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
+      setSession(s)
+      setProfile(s ? await fetchProfile(s.user.id) : null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const login = useCallback(async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Email หรือ password ไม่ถูกต้อง' : error.message)
+    const p = await fetchProfile(data.user.id)
+    if (p?.status === 'PENDING_APPROVAL') {
+      await supabase.auth.signOut()
+      throw new Error('บัญชีของคุณรอการอนุมัติจาก Admin')
     }
+    if (p?.status === 'INACTIVE' || p?.status === 'LOCKED') {
+      await supabase.auth.signOut()
+      throw new Error('บัญชีของคุณถูกระงับการใช้งาน')
+    }
+    setProfile(p)
   }, [])
 
-  const logout = useCallback(() => {
-    api.clearTokens()
-    localStorage.removeItem('kps_auth_user')
-    setAuthUser(null)
+  const logout = useCallback(async () => {
+    await supabase.auth.signOut()
   }, [])
 
-  const legacyUser = authUser ? mapToLegacyUser(authUser) : null
+  const legacyUser = session && profile && profile.status === 'ACTIVE'
+    ? toLegacy(profile, session.user.email ?? '')
+    : null
 
   return (
     <AuthContext.Provider value={{
-      authUser,
-      legacyUser,
-      loading,
-      login,
-      logout,
-      isAdmin: authUser?.role === 'SUPER_ADMIN' || authUser?.role === 'ADMIN',
-      isSuperAdmin: authUser?.role === 'SUPER_ADMIN',
+      session, profile, legacyUser, loading, login, logout,
+      isAdmin:      profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN',
+      isSuperAdmin: profile?.role === 'SUPER_ADMIN',
     }}>
       {children}
     </AuthContext.Provider>

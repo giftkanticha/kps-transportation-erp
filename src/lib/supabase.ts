@@ -1,10 +1,25 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+const url  = import.meta.env.VITE_SUPABASE_URL  as string
+const key  = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
-// Will be null if env vars not configured — app falls back to localStorage
-export const supabase =
-  supabaseUrl && supabaseAnonKey
-    ? createClient(supabaseUrl, supabaseAnonKey)
-    : null
+if (!url || !key) {
+  throw new Error('VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY must be set in .env.local')
+}
+
+export const supabase = createClient(url, key)
+
+export type UserRole   = 'SUPER_ADMIN' | 'ADMIN' | 'MANAGER' | 'EMPLOYEE'
+export type UserStatus = 'PENDING_APPROVAL' | 'ACTIVE' | 'INACTIVE' | 'LOCKED'
+
+export interface UserProfile {
+  id:           string
+  display_name: string
+  phone:        string
+  role:         UserRole
+  status:       UserStatus
+  approved_by:  string | null
+  approved_at:  string | null
+  created_at:   string
+  updated_at:   string
+}

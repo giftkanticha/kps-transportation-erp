@@ -1,207 +1,132 @@
 import { useState, useEffect } from 'react'
-import { api, type ResetEntry } from '../../lib/api'
+import { supabase } from '../../lib/supabase'
+import { useAuth } from '../../context/AuthContext'
 import { Icon } from '../../components/ui'
 
+interface ResetEntry { id: string; details?: string; status: string; created_at: string }
+
 export function ResetDataPage() {
-  const [step, setStep] = useState<1 | 2 | 3>(1)
-  const [opts, setOpts] = useState({ expenses: false, trips: false, fuel: false, tires: false, all: false })
+  const { profile } = useAuth()
+  const [step, setStep]       = useState<1|2|3>(1)
+  const [opts, setOpts]       = useState({ expenses:false, trips:false, fuel:false, tires:false, all:false })
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [history, setHistory] = useState<ResetEntry[]>([])
-  const [done, setDone] = useState<null | { expenses: number; trips: number; fuel: number }>(null)
+  const [done, setDone]       = useState<{expenses:number; trips:number; fuel:number} | null>(null)
 
   useEffect(() => {
-    api.reset.history().then(setHistory).catch(() => {})
+    supabase.from('data_reset_log').select('*').order('created_at', { ascending:false }).limit(20)
+      .then(({ data }) => setHistory((data||[]) as ResetEntry[]))
   }, [done])
 
   const toggle = (k: keyof typeof opts) => {
-    if (k === 'all') {
-      const next = !opts.all
-      setOpts({ expenses: next, trips: next, fuel: next, tires: next, all: next })
-    } else {
-      setOpts(o => ({ ...o, [k]: !o[k], all: false }))
-    }
+    if (k === 'all') { const n = !opts.all; setOpts({ expenses:n, trips:n, fuel:n, tires:n, all:n }) }
+    else setOpts(o => ({ ...o, [k]: !o[k], all:false }))
   }
-
   const anySelected = opts.expenses || opts.trips || opts.fuel || opts.tires
 
   const doReset = async () => {
     if (confirm !== 'DELETE') return
     setLoading(true)
     try {
-      // Count before deletion
-      const appState = JSON.parse(localStorage.getItem('kps_erp_v5') || '{}')
+      const raw = JSON.parse(localStorage.getItem('kps_erp_v5') || '{}')
       const counts = {
-        expenses: opts.expenses ? (appState.expenses?.length || 0) : 0,
-        trips: opts.trips ? (appState.dispatch?.length || 0) : 0,
-        fuel: opts.fuel ? ((appState.fuel?.length || 0) + (appState.fuelStock?.length || 0)) : 0,
+        expenses: opts.expenses ? (raw.expenses?.length||0) : 0,
+        trips:    opts.trips    ? (raw.dispatch?.length||0)  : 0,
+        fuel:     opts.fuel     ? ((raw.fuel?.length||0)+(raw.fuelStock?.length||0)) : 0,
       }
+      if (opts.expenses) { raw.expenses = []; raw.vendorExpenses = [] }
+      if (opts.trips)    { raw.dispatch = []; raw.fuelRounds = [] }
+      if (opts.fuel)     { raw.fuel = []; raw.fuelStock = []; raw.fuelRecords = [] }
+      if (opts.tires)    { raw.tires = []; raw.tireEvents = []; raw.tire_events = []; raw.tire_scrap_sales = [] }
+      localStorage.setItem('kps_erp_v5', JSON.stringify(raw))
 
       const parts: string[] = []
       if (opts.expenses) parts.push(`expenses:${counts.expenses}`)
-      if (opts.trips) parts.push(`trips:${counts.trips}`)
-      if (opts.fuel) parts.push(`fuel:${counts.fuel}`)
-      if (opts.tires) parts.push('tires:all')
+      if (opts.trips)    parts.push(`trips:${counts.trips}`)
+      if (opts.fuel)     parts.push(`fuel:${counts.fuel}`)
+      if (opts.tires)    parts.push('tires:all')
 
-      // Clear localStorage data selectively
-      const state = JSON.parse(localStorage.getItem('kps_erp_v5') || '{}')
-      if (opts.expenses) { state.expenses = []; state.vendorExpenses = [] }
-      if (opts.trips) { state.dispatch = []; state.fuelRounds = [] }
-      if (opts.fuel) { state.fuel = []; state.fuelStock = []; state.fuelRecords = [] }
-      if (opts.tires) { state.tires = []; state.tireEvents = []; state.tire_events = []; state.tire_scrap_sales = [] }
-      localStorage.setItem('kps_erp_v5', JSON.stringify(state))
-
-      // Log to backend
-      await api.reset.log(parts.join(', '))
-
-      setDone(counts)
-      setStep(1)
-      setConfirm('')
-      setOpts({ expenses: false, trips: false, fuel: false, tires: false, all: false })
-    } catch (e) {
-      alert('เกิดข้อผิดพลาด: ' + (e as Error).message)
-    } finally {
-      setLoading(false)
-    }
+      await supabase.from('data_reset_log').insert({
+        reset_by: profile!.id, details: parts.join(', '), status:'COMPLETED', completed_at: new Date().toISOString()
+      })
+      setDone(counts); setStep(1); setConfirm(''); setOpts({ expenses:false, trips:false, fuel:false, tires:false, all:false })
+    } catch (e) { alert('เกิดข้อผิดพลาด: ' + (e as Error).message) }
+    finally { setLoading(false) }
   }
 
   return (
     <div>
-      <div className="page-head">
-        <div>
-          <h1 className="page-title">รีเซตข้อมูล</h1>
-          <div className="page-sub">ลบข้อมูลในระบบพร้อม audit log — ไม่สามารถกู้คืนได้</div>
-        </div>
-      </div>
+      <div className="page-head"><div><h1 className="page-title">รีเซตข้อมูล</h1><div className="page-sub">ลบข้อมูลในระบบพร้อม audit log</div></div></div>
 
-      {/* Done */}
       {done && (
-        <div className="card pad" style={{ marginBottom: 18, background: '#f0fdf4', border: '1px solid #86efac' }}>
-          <div style={{ fontWeight: 700, color: '#166534', marginBottom: 6 }}>✅ รีเซตข้อมูลสำเร็จ</div>
-          <div style={{ fontSize: 13, color: '#166534' }}>
-            ลบค่าใช้จ่าย {done.expenses} รายการ · ทริป {done.trips} รายการ · น้ำมัน {done.fuel} รายการ
-          </div>
-          <button className="btn sm" style={{ marginTop: 10 }} onClick={() => setDone(null)}>ปิด</button>
+        <div className="card pad" style={{ marginBottom:18, background:'#f0fdf4', border:'1px solid #86efac' }}>
+          <div style={{ fontWeight:700, color:'#166534', marginBottom:6 }}>✅ รีเซตข้อมูลสำเร็จ</div>
+          <div style={{ fontSize:13, color:'#166534' }}>ลบค่าใช้จ่าย {done.expenses} · ทริป {done.trips} · น้ำมัน {done.fuel} รายการ</div>
+          <button className="btn sm" style={{ marginTop:10 }} onClick={() => setDone(null)}>ปิด</button>
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 18, alignItems: 'start' }}>
-        {/* Step card */}
-        <div className="card" style={{ padding: 24 }}>
-          {/* Step indicator */}
-          <div style={{ display: 'flex', gap: 0, marginBottom: 24 }}>
-            {[1, 2, 3].map(s => (
-              <div key={s} style={{ display: 'flex', alignItems: 'center' }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontWeight: 700, fontSize: 14,
-                  background: step >= s ? 'var(--primary)' : 'var(--bg-sunk)',
-                  color: step >= s ? '#fff' : 'var(--text-muted)',
-                }}>
-                  {s}
-                </div>
-                <div style={{ marginLeft: 8, marginRight: s < 3 ? 0 : 0, fontSize: 13, fontWeight: step === s ? 600 : 400, color: step === s ? 'var(--text)' : 'var(--text-muted)' }}>
-                  {s === 1 ? 'เลือกข้อมูล' : s === 2 ? 'ยืนยัน' : 'พิมพ์ยืนยัน'}
-                </div>
-                {s < 3 && <div style={{ flex: 1, height: 2, background: step > s ? 'var(--primary)' : 'var(--line)', margin: '0 16px', minWidth: 32 }} />}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 340px', gap:18, alignItems:'start' }}>
+        <div className="card" style={{ padding:24 }}>
+          <div style={{ display:'flex', gap:0, marginBottom:24 }}>
+            {[1,2,3].map(s => (
+              <div key={s} style={{ display:'flex', alignItems:'center' }}>
+                <div style={{ width:32, height:32, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:14, background: step>=s ? 'var(--primary)' : 'var(--bg-sunk)', color: step>=s ? '#fff' : 'var(--text-muted)' }}>{s}</div>
+                <div style={{ marginLeft:8, fontSize:13, fontWeight:step===s?600:400, color:step===s?'var(--text)':'var(--text-muted)' }}>{s===1?'เลือกข้อมูล':s===2?'ยืนยัน':'พิมพ์ยืนยัน'}</div>
+                {s<3 && <div style={{ flex:1, height:2, background:step>s?'var(--primary)':'var(--line)', margin:'0 16px', minWidth:32 }} />}
               </div>
             ))}
           </div>
 
-          {/* Step 1: Select */}
           {step === 1 && (
             <div>
-              <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>เลือกข้อมูลที่ต้องการลบ</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 18 }}>
-                ข้อมูลที่เลือกจะถูกลบถาวร ไม่สามารถกู้คืนได้
-              </p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {[
-                  { k: 'all', label: 'ทั้งหมด', desc: 'ลบข้อมูลทุกหมวด', danger: true },
-                  { k: 'expenses', label: 'ค่าใช้จ่าย', desc: 'บันทึกค่าใช้จ่ายทั้งหมด' },
-                  { k: 'trips', label: 'ทริปงานขนส่ง', desc: 'รายการงานขนส่งและรอบน้ำมัน' },
-                  { k: 'fuel', label: 'ข้อมูลน้ำมัน', desc: 'บันทึกน้ำมันและสต็อก' },
-                  { k: 'tires', label: 'ประวัติยาง', desc: 'ข้อมูลยางและประวัติการใช้งาน' },
-                ].map(({ k, label, desc, danger }) => (
-                  <label key={k} style={{
-                    display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
-                    background: opts[k as keyof typeof opts] ? (danger ? '#fee2e2' : 'var(--primary-50)') : 'var(--bg-sunk)',
-                    border: `1px solid ${opts[k as keyof typeof opts] ? (danger ? '#fca5a5' : 'var(--primary-200)') : 'var(--line)'}`,
-                  }}>
-                    <input type="checkbox" checked={opts[k as keyof typeof opts]} onChange={() => toggle(k as keyof typeof opts)}
-                      style={{ width: 16, height: 16, accentColor: danger ? 'var(--red)' : 'var(--primary)' }} />
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 13, color: danger && opts[k as keyof typeof opts] ? 'var(--red)' : 'var(--text)' }}>{label}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{desc}</div>
-                    </div>
+              <h3 style={{ margin:'0 0 6px', fontSize:16 }}>เลือกข้อมูลที่ต้องการลบ</h3>
+              <p style={{ color:'var(--text-muted)', fontSize:13, marginBottom:18 }}>ข้อมูลที่เลือกจะถูกลบถาวร</p>
+              <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                {[{k:'all',label:'ทั้งหมด',desc:'ลบข้อมูลทุกหมวด',danger:true},{k:'expenses',label:'ค่าใช้จ่าย',desc:'บันทึกค่าใช้จ่ายทั้งหมด'},{k:'trips',label:'ทริปงานขนส่ง',desc:'รายการงานขนส่งและรอบน้ำมัน'},{k:'fuel',label:'ข้อมูลน้ำมัน',desc:'บันทึกน้ำมันและสต็อก'},{k:'tires',label:'ประวัติยาง',desc:'ข้อมูลยางและประวัติการใช้งาน'}].map(({k,label,desc,danger}) => (
+                  <label key={k} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 14px', borderRadius:8, cursor:'pointer',
+                    background: opts[k as keyof typeof opts] ? (danger?'#fee2e2':'var(--primary-50)') : 'var(--bg-sunk)',
+                    border: `1px solid ${opts[k as keyof typeof opts] ? (danger?'#fca5a5':'var(--primary-200)') : 'var(--line)'}` }}>
+                    <input type="checkbox" checked={opts[k as keyof typeof opts]} onChange={() => toggle(k as keyof typeof opts)} style={{ width:16, height:16, accentColor:danger?'var(--red)':'var(--primary)' }} />
+                    <div><div style={{ fontWeight:600, fontSize:13, color:danger&&opts[k as keyof typeof opts]?'var(--red)':'var(--text)' }}>{label}</div><div style={{ fontSize:12, color:'var(--text-muted)' }}>{desc}</div></div>
                   </label>
                 ))}
               </div>
-              <div style={{ marginTop: 20 }}>
-                <button className="btn primary" style={{ height: 38 }} disabled={!anySelected} onClick={() => setStep(2)}>
-                  ถัดไป <Icon name="chevron-right" size={14} />
-                </button>
-              </div>
+              <div style={{ marginTop:20 }}><button className="btn primary" style={{ height:38 }} disabled={!anySelected} onClick={() => setStep(2)}>ถัดไป <Icon name="chevron-right" size={14} /></button></div>
             </div>
           )}
 
-          {/* Step 2: Confirm summary */}
           {step === 2 && (
             <div>
-              <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>ยืนยันรายการที่จะลบ</h3>
-              <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 8, padding: 14, marginBottom: 18 }}>
-                <div style={{ fontWeight: 700, color: '#c2410c', marginBottom: 8 }}>⚠️ ข้อมูลต่อไปนี้จะถูกลบถาวร:</div>
-                <ul style={{ margin: 0, padding: '0 0 0 18px', fontSize: 13, color: '#9a3412', lineHeight: 2 }}>
+              <h3 style={{ margin:'0 0 6px', fontSize:16 }}>ยืนยันรายการที่จะลบ</h3>
+              <div style={{ background:'#fff7ed', border:'1px solid #fed7aa', borderRadius:8, padding:14, marginBottom:18 }}>
+                <div style={{ fontWeight:700, color:'#c2410c', marginBottom:8 }}>⚠️ ข้อมูลต่อไปนี้จะถูกลบถาวร:</div>
+                <ul style={{ margin:0, padding:'0 0 0 18px', fontSize:13, color:'#9a3412', lineHeight:2 }}>
                   {opts.expenses && <li>ค่าใช้จ่ายทั้งหมด</li>}
                   {opts.trips && <li>ทริปงานขนส่งทั้งหมด</li>}
                   {opts.fuel && <li>บันทึกน้ำมันทั้งหมด</li>}
                   {opts.tires && <li>ประวัติยางทั้งหมด</li>}
                 </ul>
               </div>
-              <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, padding: 14, marginBottom: 20 }}>
-                <div style={{ fontWeight: 600, color: '#166534', marginBottom: 6 }}>✅ ข้อมูลที่จะคงไว้:</div>
-                <ul style={{ margin: 0, padding: '0 0 0 18px', fontSize: 12, color: '#166534', lineHeight: 1.8 }}>
-                  <li>ทะเบียนรถ</li><li>ข้อมูลพนักงาน</li><li>ลูกค้า / คู่ค้า</li><li>บัญชีผู้ใช้งาน</li>
-                </ul>
-              </div>
-              <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ display:'flex', gap:10 }}>
                 <button className="btn" onClick={() => setStep(1)}><Icon name="arrow-left" size={14} /> ย้อนกลับ</button>
-                <button className="btn" style={{ background: 'var(--red)', color: '#fff', borderColor: 'var(--red)' }} onClick={() => setStep(3)}>
-                  ยืนยัน → ขั้นตอนสุดท้าย
-                </button>
+                <button className="btn" style={{ background:'var(--red)', color:'#fff', borderColor:'var(--red)' }} onClick={() => setStep(3)}>ยืนยัน → ขั้นตอนสุดท้าย</button>
               </div>
             </div>
           )}
 
-          {/* Step 3: Type DELETE */}
           {step === 3 && (
             <div>
-              <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>ยืนยันขั้นสุดท้าย</h3>
-              <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 18 }}>
-                พิมพ์คำว่า <strong style={{ color: 'var(--red)' }}>DELETE</strong> เพื่อยืนยันการลบข้อมูล
-              </p>
-              <input
-                value={confirm}
-                onChange={e => setConfirm(e.target.value)}
-                placeholder="พิมพ์ DELETE"
-                autoFocus
-                style={{
-                  width: '100%', height: 42, padding: '0 14px', border: `2px solid ${confirm === 'DELETE' ? '#16a34a' : confirm ? 'var(--red)' : 'var(--line)'}`,
-                  borderRadius: 8, fontSize: 16, letterSpacing: '.1em', fontWeight: 700,
-                  background: 'var(--bg)', marginBottom: 16,
-                }}
-              />
-              <div style={{ display: 'flex', gap: 10 }}>
+              <h3 style={{ margin:'0 0 6px', fontSize:16 }}>ยืนยันขั้นสุดท้าย</h3>
+              <p style={{ color:'var(--text-muted)', fontSize:13, marginBottom:18 }}>พิมพ์คำว่า <strong style={{ color:'var(--red)' }}>DELETE</strong> เพื่อยืนยัน</p>
+              <input value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="พิมพ์ DELETE" autoFocus
+                style={{ width:'100%', height:42, padding:'0 14px', border:`2px solid ${confirm==='DELETE'?'#16a34a':confirm?'var(--red)':'var(--line)'}`, borderRadius:8, fontSize:16, letterSpacing:'.1em', fontWeight:700, background:'var(--bg)', marginBottom:16 }} />
+              <div style={{ display:'flex', gap:10 }}>
                 <button className="btn" onClick={() => setStep(2)}><Icon name="arrow-left" size={14} /> ย้อนกลับ</button>
-                <button
-                  disabled={confirm !== 'DELETE' || loading}
-                  onClick={doReset}
-                  style={{
-                    height: 38, padding: '0 20px', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer',
-                    background: confirm === 'DELETE' ? 'var(--red)' : 'var(--bg-sunk)',
-                    color: confirm === 'DELETE' ? '#fff' : 'var(--text-muted)',
-                    border: 'none', opacity: loading ? 0.6 : 1,
-                  }}>
+                <button disabled={confirm!=='DELETE'||loading} onClick={doReset}
+                  style={{ height:38, padding:'0 20px', borderRadius:8, fontWeight:700, fontSize:13, cursor:'pointer', border:'none',
+                    background: confirm==='DELETE' ? 'var(--red)' : 'var(--bg-sunk)', color: confirm==='DELETE' ? '#fff' : 'var(--text-muted)', opacity:loading?0.6:1 }}>
                   {loading ? 'กำลังลบ...' : '🗑️ ลบข้อมูล'}
                 </button>
               </div>
@@ -209,22 +134,18 @@ export function ResetDataPage() {
           )}
         </div>
 
-        {/* Reset history */}
         <div className="card">
           <div className="head"><h3>ประวัติการรีเซต</h3></div>
-          {history.length === 0 ? (
-            <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>ยังไม่มีประวัติ</div>
-          ) : (
-            <div style={{ padding: '8px 16px' }}>
-              {history.map(h => (
-                <div key={h.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--line)' }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{new Date(h.createdAt).toLocaleString('th-TH')}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{h.details || '—'}</div>
-                  <div style={{ fontSize: 11, color: h.status === 'COMPLETED' ? 'var(--green)' : 'var(--red)', marginTop: 2 }}>{h.status}</div>
+          {history.length === 0
+            ? <div style={{ padding:20, textAlign:'center', color:'var(--text-muted)', fontSize:13 }}>ยังไม่มีประวัติ</div>
+            : <div style={{ padding:'8px 16px' }}>{history.map(h => (
+                <div key={h.id} style={{ padding:'10px 0', borderBottom:'1px solid var(--line)' }}>
+                  <div style={{ fontSize:12, fontWeight:600 }}>{new Date(h.created_at).toLocaleString('th-TH')}</div>
+                  <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:2 }}>{h.details||'—'}</div>
+                  <div style={{ fontSize:11, color:h.status==='COMPLETED'?'var(--green)':'var(--red)', marginTop:2 }}>{h.status}</div>
                 </div>
-              ))}
-            </div>
-          )}
+              ))}</div>
+          }
         </div>
       </div>
     </div>
