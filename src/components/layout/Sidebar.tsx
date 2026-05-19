@@ -17,7 +17,6 @@ interface SubMenuItem {
 
 const MENU: MenuItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: 'dashboard', roles: ['admin', 'manager', 'driver'] },
-  { id: 'alerts', label: 'แจ้งเตือนและแผนงาน', icon: 'alert', roles: ['admin', 'manager'] },
   {
     id: 'vehicles', label: 'จัดการรถ', icon: 'truck', roles: ['admin', 'manager', 'driver'],
     sub: [
@@ -85,8 +84,6 @@ const MENU: MenuItem[] = [
     id: 'finance', label: 'การเงิน', icon: 'chart', roles: ['admin', 'manager'],
     sub: [
       { id: 'finance', label: 'P&L รายคัน' },
-      { id: 'finance.fixed', label: 'ค่าใช้จ่ายคงที่' },
-      { id: 'finance.summary', label: 'รายงานสรุป' },
     ],
   },
   {

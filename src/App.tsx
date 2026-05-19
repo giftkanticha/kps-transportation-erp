@@ -33,7 +33,6 @@ import { SettingsCompany } from './pages/settings/SettingsCompany'
 
 const crumbMap: Record<string, string> = {
   dashboard: 'Dashboard',
-  alerts: 'แจ้งเตือนและแผนงาน',
   vehicles: 'จัดการรถ',
   'vehicles.add': 'เพิ่มรถใหม่',
   'vehicles.detail': 'รายละเอียดรถ',
@@ -73,8 +72,6 @@ const crumbMap: Record<string, string> = {
   partners: 'คู่ค้า / ช่าง',
   maintenance: 'การบำรุงรักษา',
   finance: 'การเงิน • P&L รายคัน',
-  'finance.fixed': 'การเงิน • ค่าใช้จ่ายคงที่',
-  'finance.summary': 'การเงิน • รายงานสรุป',
   'settings.users': 'ตั้งค่า • ผู้ใช้งาน',
   'settings.company': 'ตั้งค่า • บริษัท',
 }
