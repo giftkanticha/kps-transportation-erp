@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react'
 import { db } from './lib/db'
-import type { User } from './types'
+import { useAuth } from './context/AuthContext'
 import { LoginScreen } from './pages/auth/LoginScreen'
 import { Sidebar } from './components/layout/Sidebar'
 import { Topbar } from './components/layout/Topbar'
+import { UserManagementPage } from './pages/admin/UserManagementPage'
+import { ResetDataPage } from './pages/admin/ResetDataPage'
 import { Dashboard } from './pages/dashboard/Dashboard'
 import { AlertsTasksPage } from './pages/dashboard/AlertsTasksPage'
 import { VehiclesPage } from './pages/vehicles/VehiclesPage'
@@ -74,24 +76,23 @@ const crumbMap: Record<string, string> = {
   finance: 'การเงิน • P&L รายคัน',
   'settings.users': 'ตั้งค่า • ผู้ใช้งาน',
   'settings.company': 'ตั้งค่า • บริษัท',
+  'admin.users': 'จัดการผู้ใช้งาน',
+  'admin.reset': 'รีเซตข้อมูล',
 }
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(() => db.currentUser())
+  const { legacyUser, logout, isAdmin } = useAuth()
   const [active, setActive] = useState('dashboard')
   const [subject, setSubject] = useState<unknown>(null)
   const [collapsed, setCollapsed] = useState(false)
 
   useEffect(() => {
-    if (user?.role === 'driver') setActive('dispatch')
-  }, [user?.id])
+    if (legacyUser?.role === 'driver') setActive('dispatch')
+  }, [legacyUser?.id])
 
-  if (!user) return <LoginScreen onLogin={setUser} />
+  if (!legacyUser) return <LoginScreen />
 
-  const handleLogout = () => {
-    db.logout()
-    setUser(null)
-  }
+  const handleLogout = () => logout()
 
   const handleReset = () => {
     if (confirm('รีเซ็ตข้อมูลทั้งหมดและกลับไปค่าเริ่มต้น?')) {
@@ -103,17 +104,17 @@ export default function App() {
   const renderPage = () => {
     switch (active) {
       case 'dashboard':
-        return <Dashboard user={user} setActive={setActive} />
+        return <Dashboard user={legacyUser} setActive={setActive} />
 
       case 'alerts':
-        return <AlertsTasksPage user={user} />
+        return <AlertsTasksPage user={legacyUser} />
 
       case 'vehicles':
-        return <VehiclesPage setActive={setActive} setSubject={setSubject} user={user} />
+        return <VehiclesPage setActive={setActive} setSubject={setSubject} user={legacyUser} />
       case 'vehicles.add':
         return <VehicleAdd setActive={setActive} />
       case 'vehicles.detail':
-        return <VehicleDetail setActive={setActive} subject={subject} user={user} />
+        return <VehicleDetail setActive={setActive} subject={subject} user={legacyUser} />
       case 'vehicles.management':
         return <VehicleManagement />
 
@@ -148,29 +149,29 @@ export default function App() {
 
       case 'dispatch':
       case 'dispatch.open':
-        return <DispatchRoundOpen setActive={setActive} setSubject={setSubject} user={user} />
+        return <DispatchRoundOpen setActive={setActive} setSubject={setSubject} user={legacyUser} />
       case 'dispatch.round':
         return <DispatchRoundDetail setActive={setActive} setSubject={setSubject} subject={subject} />
       case 'dispatch.close':
         return <DispatchRoundClose setActive={setActive} setSubject={setSubject} subject={subject} />
       case 'dispatch.fuel':
-        return <DispatchModule tab="fuel" setActive={setActive} user={user} />
+        return <DispatchModule tab="fuel" setActive={setActive} user={legacyUser} />
       case 'dispatch.monthly':
-        return <DispatchModule tab="monthly" setActive={setActive} user={user} />
+        return <DispatchModule tab="monthly" setActive={setActive} user={legacyUser} />
       case 'dispatch.report':
         return <DispatchSummaryReport setActive={setActive} setSubject={setSubject} />
       case 'dispatch.history':
         return <DispatchHistory setActive={setActive} setSubject={setSubject} />
 
       case 'subcontractors':
-        return <SubcontractorModule tab="open" setActive={setActive} user={user} />
+        return <SubcontractorModule tab="open" setActive={setActive} user={legacyUser} />
       case 'subcontractors.close':
-        return <SubcontractorModule tab="close" setActive={setActive} user={user} />
+        return <SubcontractorModule tab="close" setActive={setActive} user={legacyUser} />
       case 'subcontractors.history':
       case 'subcontractors.jobs':
-        return <SubcontractorModule tab="history" setActive={setActive} user={user} />
+        return <SubcontractorModule tab="history" setActive={setActive} user={legacyUser} />
       case 'subcontractors.drivers':
-        return <SubcontractorModule tab="drivers" setActive={setActive} user={user} />
+        return <SubcontractorModule tab="drivers" setActive={setActive} user={legacyUser} />
 
       case 'expenses':
         return <ExpensesModule tab="record" setActive={setActive} />
@@ -203,8 +204,13 @@ export default function App() {
       case 'settings.company':
         return <SettingsCompany />
 
+      case 'admin.users':
+        return isAdmin ? <UserManagementPage /> : <Dashboard user={legacyUser} setActive={setActive} />
+      case 'admin.reset':
+        return isAdmin ? <ResetDataPage /> : <Dashboard user={legacyUser} setActive={setActive} />
+
       default:
-        return <Dashboard user={user} setActive={setActive} />
+        return <Dashboard user={legacyUser} setActive={setActive} />
     }
   }
 
@@ -215,12 +221,12 @@ export default function App() {
         setCollapsed={setCollapsed}
         active={active}
         setActive={setActive}
-        user={user}
+        user={legacyUser}
         onLogout={handleLogout}
       />
       <div className="main">
         <Topbar
-          user={user}
+          user={legacyUser}
           crumb={crumbMap[active] ?? 'Dashboard'}
           onLogout={handleLogout}
           onReset={handleReset}

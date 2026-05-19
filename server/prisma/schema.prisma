@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String    @id @default(cuid())
+  username         String    @unique
+  email            String?   @unique
+  displayName      String
+  phone            String?
+  passwordHash     String
+  status           String    @default("PENDING_APPROVAL")
+  role             String    @default("EMPLOYEE")
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+  lastLoginAt      DateTime?
+  approvedBy       String?
+  approvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  loginHistories    LoginHistory[]
+  passwordResets    PasswordReset[]
+  customPermissions RolePermission[]
+  auditLogs         AuditLog[]
+}
+
+model LoginHistory {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ipAddress     String?
+  success       Boolean
+  failureReason String?
+  loginAt       DateTime @default(now())
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model RolePermission {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    String
+  actionLevel String
+  grantedBy   String?
+  remark      String?
+  isOverride  Boolean  @default(false)
+  grantedAt   DateTime @default(now())
+
+  @@unique([userId, category, actionLevel])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action      String
+  category    String?
+  actionLevel String?
+  oldValue    String?
+  newValue    String?
+  details     String?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+}
+
+model DataResetLog {
+  id          String    @id @default(cuid())
+  resetBy     String
+  resetType   String    @default("MANUAL")
+  details     String?
+  status      String
+  errorMsg    String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+}

@@ -93,6 +93,13 @@ const MENU: MenuItem[] = [
       { id: 'settings.company', label: 'ข้อมูลบริษัท' },
     ],
   },
+  {
+    id: 'admin', label: 'Admin Panel', icon: 'settings', roles: ['admin'],
+    sub: [
+      { id: 'admin.users', label: '👥 จัดการผู้ใช้ + ACL' },
+      { id: 'admin.reset', label: '🔄 รีเซตข้อมูล' },
+    ],
+  },
 ]
 
 interface SidebarProps {
