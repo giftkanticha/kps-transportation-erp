@@ -3,7 +3,8 @@ import { db, uid } from '../../lib/db'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import type { CSSProperties } from 'react'
-import type { FuelRecord, FuelStock, Vehicle, Employee } from '../../types'
+import type { FuelRecord, Vehicle, Employee } from '../../types'
+import { FuelStockDashboard } from './FuelStockDashboard'
 import { FuelInventorySummary } from './FuelInventorySummary'
 import { ExpressFuelLog } from './ExpressFuelLog'
 import { FloatingFuel } from './FloatingFuel'
@@ -38,305 +39,6 @@ const isFactoryFuel = (f: FuelRecord) =>
   !['PTT', 'Shell', 'Bangchak', 'Esso'].some(s => f.station?.includes(s))
 
 type FuelVal = { liters: number; amount: number }
-
-// ── Tab 1: ภาพรวม ─── (Stock In editable + Stock Out history)
-
-const inlineInput: CSSProperties = {
-  width: '100%',
-  height: 32,
-  padding: '0 10px',
-  border: '1px solid var(--line)',
-  borderRadius: 6,
-  background: '#fff',
-  fontSize: 13,
-  outline: 'none',
-  fontFamily: 'inherit',
-}
-
-function FuelOverview() {
-  const fuelStock = db.getAll<FuelStock>('fuelStock')
-  const fuel = db.getAll<FuelRecord>('fuel')
-
-  const totalStockL = fuelStock.reduce((s, r) => s + r.liters, 0)
-  const totalStockBaht = fuelStock.reduce((s, r) => s + r.total, 0)
-  const avgPrice = totalStockL > 0 ? totalStockBaht / totalStockL : 0
-  const usedL = fuel.reduce((s, r) => s + r.liters, 0)
-  const stockL = totalStockL - usedL
-
-  // editable stock-in rows
-  const [rows, setRows] = useState<FuelStock[]>(fuelStock)
-
-  const updateRow = (i: number, k: string, v: string) => {
-    setRows((rs) => {
-      const arr = [...rs]
-      const prev = arr[i]
-      const updated: FuelStock = {
-        ...prev,
-        [k]:
-          k === 'date' || k === 'supplier' || k === 'invoiceNo' ? v : +v || 0,
-      }
-      updated.total = (updated.liters || 0) * (updated.pricePerL || 0)
-      arr[i] = updated
-      return arr
-    })
-  }
-
-  const addRow = () =>
-    setRows((r) => [
-      ...r,
-      {
-        id: 'fs' + Math.random().toString(36).slice(2, 8),
-        date: new Date().toISOString().slice(0, 10),
-        supplier: '',
-        liters: 0,
-        pricePerL: 0,
-        invoiceNo: '',
-        total: 0,
-      },
-    ])
-
-  const removeRow = (i: number) => setRows((r) => r.filter((_, idx) => idx !== i))
-
-  const netTotal = rows.reduce((s, r) => s + r.total, 0)
-  const netLiters = rows.reduce((s, r) => s + r.liters, 0)
-
-  const saveRows = () => {
-    rows.forEach((r) => {
-      const existing = db.get<FuelStock>('fuelStock', r.id)
-      if (existing) db.update<FuelStock>('fuelStock', r.id, r)
-      else db.add<FuelStock>('fuelStock', r)
-    })
-    alert('บันทึกเรียบร้อย')
-  }
-
-  const isExternal = (station: string) =>
-    ['PTT', 'Shell', 'Bangchak', 'Esso'].some((s) => station.includes(s))
-
-  return (
-    <div>
-      {/* KPI strip */}
-      <div className="grid-3" style={{ marginBottom: 18 }}>
-        <div className="card kpi">
-          <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
-            <div className="icn-box green">
-              <Icon name="fuel" size={18} />
-            </div>
-            <div className="label">สต๊อคคงเหลือ</div>
-          </div>
-          <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8 }}>
-            {db.fmt(stockL)}{' '}
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>ลิตร</span>
-          </div>
-          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-            ราคาเฉลี่ย: {avgPrice.toFixed(2)} บาท/ลิตร
-          </div>
-        </div>
-        <div className="card kpi">
-          <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
-            <div className="icn-box">
-              <Icon name="arrow-up" size={18} />
-            </div>
-            <div className="label">รับเข้าเดือนนี้</div>
-          </div>
-          <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8 }}>
-            0{' '}
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>ลิตร</span>
-          </div>
-        </div>
-        <div className="card kpi">
-          <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
-            <div className="icn-box amber">
-              <Icon name="arrow-down" size={18} />
-            </div>
-            <div className="label">จ่ายออกเดือนนี้ (จากถัง)</div>
-          </div>
-          <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8 }}>
-            0{' '}
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>ลิตร</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Stock In editable table */}
-      <div className="card" style={{ marginBottom: 18 }}>
-        <div className="head" style={{ alignItems: 'flex-start' }}>
-          <div style={{ flex: 1 }}>
-            <h3>บันทึกน้ำมันเข้า (Stock In)</h3>
-            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-              แก้ไขข้อมูลได้โดยตรงในตาราง • สต๊อคคงเหลือ = รับเข้า - จ่ายออก (จากถังโรงงาน)
-            </div>
-          </div>
-          <div className="right">
-            <button className="btn outline sm" onClick={addRow}>
-              <Icon name="plus" size={13} /> เพิ่มแถว
-            </button>
-            <button className="btn primary sm" onClick={saveRows}>
-              บันทึก
-            </button>
-          </div>
-        </div>
-        <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>วันที่</th>
-                <th>ผู้จำหน่าย *</th>
-                <th className="right">จำนวนลิตร *</th>
-                <th className="right">ราคา/ลิตร (บาท)</th>
-                <th>เลขใบส่งของ</th>
-                <th className="right">จำนวนเงิน</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => (
-                <tr key={r.id}>
-                  <td style={{ padding: '8px 10px' }}>
-                    <input
-                      type="date"
-                      value={r.date}
-                      onChange={(e) => updateRow(i, 'date', e.target.value)}
-                      style={inlineInput}
-                    />
-                  </td>
-                  <td style={{ padding: '8px 10px' }}>
-                    <input
-                      value={r.supplier}
-                      onChange={(e) => updateRow(i, 'supplier', e.target.value)}
-                      style={inlineInput}
-                    />
-                  </td>
-                  <td style={{ padding: '8px 10px' }}>
-                    <input
-                      type="number"
-                      value={r.liters}
-                      onChange={(e) => updateRow(i, 'liters', e.target.value)}
-                      style={{ ...inlineInput, textAlign: 'right' }}
-                    />
-                  </td>
-                  <td style={{ padding: '8px 10px' }}>
-                    <input
-                      type="number"
-                      value={r.pricePerL}
-                      onChange={(e) => updateRow(i, 'pricePerL', e.target.value)}
-                      style={{ ...inlineInput, textAlign: 'right' }}
-                    />
-                  </td>
-                  <td style={{ padding: '8px 10px' }}>
-                    <input
-                      value={r.invoiceNo}
-                      onChange={(e) => updateRow(i, 'invoiceNo', e.target.value)}
-                      style={inlineInput}
-                    />
-                  </td>
-                  <td className="num right" style={{ padding: '8px 10px', fontWeight: 600 }}>
-                    {r.total.toLocaleString('en-US', {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
-                  </td>
-                  <td style={{ padding: '8px 4px' }}>
-                    <button
-                      className="btn ghost icon sm danger"
-                      onClick={() => removeRow(i)}
-                    >
-                      <Icon name="trash" size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ background: 'var(--green-50)' }}>
-                <td
-                  colSpan={5}
-                  className="right"
-                  style={{ padding: '12px 16px', fontWeight: 700 }}
-                >
-                  ผลรวมสุทธิ (Net Total):
-                </td>
-                <td
-                  className="num right mono"
-                  style={{ padding: '12px 16px', fontWeight: 700, fontSize: 16, color: '#166534' }}
-                >
-                  {netTotal.toLocaleString('en-US', {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}{' '}
-                  บาท
-                </td>
-                <td />
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-        <div
-          className="row"
-          style={{
-            padding: '10px 20px',
-            borderTop: '1px solid var(--line)',
-            fontSize: 12,
-            color: 'var(--text-muted)',
-          }}
-        >
-          <span>{rows.length} รายการ</span>
-          <div className="spacer" />
-          <span>รวม {db.fmt(netLiters)} ลิตร</span>
-        </div>
-      </div>
-
-      {/* Stock Out history */}
-      <div className="card">
-        <div className="head" style={{ alignItems: 'flex-start' }}>
-          <div>
-            <h3>ประวัติการจ่ายน้ำมัน (Stock Out จากการเติมรถ)</h3>
-            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-              เฉพาะจากถังโรงงาน — ปั๊มภายนอกไม่นับเป็นการตัดสต๊อค
-            </div>
-          </div>
-        </div>
-        <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>วันที่</th>
-                <th>ทะเบียนรถ</th>
-                <th>คนขับ</th>
-                <th className="right">ลิตร</th>
-                <th className="right">จำนวนเงิน</th>
-                <th>แหล่งน้ำมัน</th>
-              </tr>
-            </thead>
-            <tbody>
-              {fuel.map((f) => (
-                <tr key={f.id}>
-                  <td className="num muted">{db.thaiDate(f.date.slice(0, 10))}</td>
-                  <td>
-                    <a style={{ color: 'var(--primary)', fontWeight: 600 }} className="mono">
-                      {db.nameOf('vehicles', f.vehicleId)}
-                    </a>
-                  </td>
-                  <td>{db.nameOf('employees', f.driverId)}</td>
-                  <td className="num right">{f.liters}</td>
-                  <td className="num right" style={{ fontWeight: 600 }}>
-                    {db.fmt(f.total)} บาท
-                  </td>
-                  <td>
-                    {isExternal(f.station) ? (
-                      <span className="badge amber">ปั๊มภายนอก</span>
-                    ) : (
-                      <span className="badge blue">ถังโรงงาน</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  )
-}
 
 // ─── Tab 2: บันทึก ─── (Fuel record form)
 function FuelRecord() {
@@ -908,11 +610,11 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       <div className="tabs no-print" style={{ marginBottom: 22 }}>
         {(
           [
-            ['overview', 'fuel', '📦 คลังน้ำมัน', 'fuel'],
+            ['overview', 'fuel', '📊 ภาพรวม', 'fuel'],
             ['express', 'express', '⚡ คีย์ด่วน', 'edit'],
             ['floating', 'floating', '🟡 น้ำมันลอย', 'alert'],
             ['report', 'report', '📋 รายงาน', 'chart'],
-            ['summary', 'summary', '📝 บันทึกเข้า-ออก', 'download'],
+            ['summary', 'summary', '📦 สรุปคลัง', 'download'],
             ['reconcile', 'reconcile', '🔍 ตรวจสอบข้อมูล', 'search'],
           ] as [string, string, string, string][]
         ).map(([id, route, label, ic]) => (
@@ -927,11 +629,11 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
         ))}
       </div>
 
-      {current === 'overview' && <FuelInventorySummary />}
+      {current === 'overview' && <FuelStockDashboard />}
       {current === 'express' && <ExpressFuelLog setActive={setActive} />}
       {current === 'floating' && <FloatingFuel />}
       {current === 'report' && <FuelReportV2 />}
-      {current === 'summary' && <FuelOverview />}
+      {current === 'summary' && <FuelInventorySummary />}
       {current === 'reconcile' && <FuelReconciliation />}
     </div>
   )
