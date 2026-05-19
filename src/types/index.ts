@@ -249,7 +249,8 @@ export interface FuelRound {
 
 export interface FuelStock {
   id: string
-  date: string
+  date: string         // transactionDate — when the fuel physically arrived
+  recordedAt?: string  // ISO datetime — when this entry was typed in (audit)
   supplier: string
   liters: number
   pricePerL: number

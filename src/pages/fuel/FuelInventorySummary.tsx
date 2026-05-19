@@ -51,13 +51,18 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
   const total = (Number(form.liters) || 0) * (Number(form.pricePerL) || 0)
 
+  const todayISO = new Date().toISOString().slice(0, 10)
+  const isBackdated = form.date < todayISO
+
   const save = () => {
     if (!form.liters || Number(form.liters) <= 0) return setErr('กรุณาระบุจำนวนลิตร (> 0)')
     if (!form.supplier) return setErr('กรุณาเลือกแหล่งที่มา')
+    if (form.date > todayISO) return setErr('วันที่เกิดเหตุไม่สามารถเป็นอนาคตได้')
     setSaving(true)
     db.add<FuelStock>('fuelStock', {
       id: uid('fs'),
-      date: form.date,
+      date: form.date,                         // transactionDate
+      recordedAt: new Date().toISOString(),    // audit: when entered
       supplier: form.supplier,
       liters: Number(form.liters),
       pricePerL: Number(form.pricePerL) || 0,
@@ -85,9 +90,28 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Audit strip — always visible */}
+          <div style={{ background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8, padding: '8px 14px', fontSize: 12, color: 'var(--text-muted)', display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span>📝 บันทึกเมื่อ:</span>
+            <span className="mono" style={{ fontWeight: 600, color: 'var(--text-1)' }}>
+              {new Date().toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}
+            </span>
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: '#64748B' }}>auto-timestamp</span>
+          </div>
+
           <div className="grid-2" style={{ gap: 14 }}>
-            <Field label="วันที่รับเข้า *">
-              <input type="date" value={form.date} onChange={e => set('date', e.target.value)} />
+            <Field label="วันที่เกิดเหตุ (Transaction Date) *">
+              <input type="date" value={form.date} max={todayISO} onChange={e => set('date', e.target.value)} />
+              {isBackdated && (
+                <div style={{ fontSize: 11, marginTop: 4, color: '#7C3AED', fontWeight: 500 }}>
+                  ⬅️ ย้อนหลัง — รายงานจะ filter ตามวันนี้ถูกต้อง
+                </div>
+              )}
+              {!isBackdated && (
+                <div style={{ fontSize: 11, marginTop: 4, color: 'var(--text-muted)' }}>
+                  💡 ใส่ย้อนหลังได้ (เช่น 15/04 ถึงแม้วันนี้ 19/05)
+                </div>
+              )}
             </Field>
             <Field label="จำนวนลิตร *">
               <input type="number" step="0.01" value={form.liters} onChange={e => set('liters', e.target.value)} placeholder="0.00" />
@@ -233,7 +257,7 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
           <table className="tbl" style={{ width: '100%' }}>
             <thead>
               <tr>
-                <th>วันที่</th>
+                <th>วันที่เกิดเหตุ</th>
                 <th className="num right">ลิตร</th>
                 {type === 'in' ? (
                   <>
@@ -241,12 +265,14 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
                     <th className="num right">ราคา/ลิตร</th>
                     <th className="num right">มูลค่า</th>
                     <th>เลขใบส่งของ</th>
+                    <th>บันทึกเมื่อ</th>
                   </>
                 ) : (
                   <>
                     <th>ทะเบียนรถ</th>
                     <th>รอบงาน</th>
                     <th>ประเภท</th>
+                    <th>บันทึกเมื่อ</th>
                   </>
                 )}
                 <th className="num right">ยอดสะสม</th>
@@ -254,19 +280,31 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
             </thead>
             <tbody>
               {paginated.length === 0 ? (
-                <tr><td colSpan={type === 'in' ? 7 : 6} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
+                <tr><td colSpan={type === 'in' ? 8 : 7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
               ) : paginated.map(r => {
                 const balance = balanceMap[(r as { id: string }).id]
                 if (type === 'in') {
                   const s = r as FuelStock
+                  const recDateISO = s.recordedAt ? s.recordedAt.slice(0, 10) : null
+                  const backdated = recDateISO && recDateISO > s.date
                   return (
                     <tr key={s.id}>
-                      <td className="mono muted">{db.thaiDate(s.date)}</td>
+                      <td>
+                        <div className="mono" style={{ fontSize: 12.5 }}>{db.thaiDate(s.date)}</div>
+                        {backdated && (
+                          <div style={{ fontSize: 10, color: '#7C3AED', fontWeight: 600, marginTop: 1 }}>⬅️ ย้อนหลัง</div>
+                        )}
+                      </td>
                       <td className="num right mono" style={{ color: 'var(--green)', fontWeight: 600 }}>+{db.fmt(s.liters)}</td>
-                      <td style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.supplier}</td>
+                      <td style={{ maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.supplier}</td>
                       <td className="num right mono muted">{s.pricePerL ? `${s.pricePerL.toFixed(2)}` : '—'}</td>
                       <td className="num right mono">{s.total ? db.thb(s.total) : '—'}</td>
                       <td className="muted" style={{ fontSize: 12 }}>{s.invoiceNo || '—'}</td>
+                      <td className="muted" style={{ fontSize: 11 }}>
+                        {s.recordedAt
+                          ? new Date(s.recordedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })
+                          : '—'}
+                      </td>
                       <td className="num right mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{balance != null ? db.fmt(balance) : '—'}</td>
                     </tr>
                   )
@@ -274,9 +312,17 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
                   const t = r as FuelTransaction
                   const plate = vehicles.find(v => v.id === t.vehicleId)?.plate ?? '—'
                   const tripCode = dispatches.find(d => d.id === t.tripId)?.code ?? (t.tripId ? t.tripId.slice(0, 8) : '—')
+                  const txDateISO = t.date
+                  const recDateISO = t.createdAt ? t.createdAt.slice(0, 10) : null
+                  const backdated = recDateISO && recDateISO > txDateISO
                   return (
                     <tr key={t.id}>
-                      <td className="mono muted">{db.thaiDate(t.date)}</td>
+                      <td>
+                        <div className="mono" style={{ fontSize: 12.5 }}>{db.thaiDate(t.date)}</div>
+                        {backdated && (
+                          <div style={{ fontSize: 10, color: '#7C3AED', fontWeight: 600, marginTop: 1 }}>⬅️ ย้อนหลัง</div>
+                        )}
+                      </td>
                       <td className="num right mono" style={{ color: '#DC2626', fontWeight: 600 }}>−{db.fmt(t.liters)}</td>
                       <td className="mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{plate}</td>
                       <td className="mono muted" style={{ fontSize: 12 }}>{tripCode}</td>
@@ -287,6 +333,11 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
                             : t.tripFuelRole === 'INTERMEDIATE' ? 'กลางทาง'
                             : 'ทั่วไป'}
                         </span>
+                      </td>
+                      <td className="muted" style={{ fontSize: 11 }}>
+                        {t.createdAt
+                          ? new Date(t.createdAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })
+                          : '—'}
                       </td>
                       <td className="num right mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{balance != null ? db.fmt(balance) : '—'}</td>
                     </tr>
@@ -537,27 +588,41 @@ export function FuelInventorySummary() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>วันที่</th>
+                  <th>วันที่เกิดเหตุ</th>
                   <th>ผู้จำหน่าย</th>
                   <th className="right">ลิตร</th>
                   <th className="right">ราคา/ลิตร</th>
                   <th className="right">มูลค่า</th>
                   <th>เลขใบส่งของ</th>
+                  <th>บันทึกเมื่อ</th>
                   <th className="right">ยอดสะสม</th>
                   {canDelete && <th style={{ width: 40 }}></th>}
                 </tr>
               </thead>
               <tbody>
-                {recentIn.map(s => (
+                {recentIn.map(s => {
+                  const recDateISO = s.recordedAt ? s.recordedAt.slice(0, 10) : null
+                  const backdated = recDateISO && recDateISO > s.date
+                  return (
                   <tr key={s.id}>
-                    <td className="mono muted">{db.thaiDate(s.date)}</td>
-                    <td style={{ maxWidth: 200, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <td>
+                      <div className="mono" style={{ fontSize: 12.5 }}>{db.thaiDate(s.date)}</div>
+                      {backdated && (
+                        <div style={{ fontSize: 10, color: '#7C3AED', fontWeight: 600, marginTop: 1 }}>⬅️ ย้อนหลัง</div>
+                      )}
+                    </td>
+                    <td style={{ maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {s.supplier}
                     </td>
                     <td className="num right mono" style={{ color: '#166534', fontWeight: 600 }}>+{db.fmt(s.liters)}</td>
                     <td className="num right muted" style={{ fontSize: 12 }}>{s.pricePerL ? `${s.pricePerL.toFixed(2)}` : '—'}</td>
                     <td className="num right mono">{s.total ? db.thb(s.total) : '—'}</td>
                     <td className="muted" style={{ fontSize: 12 }}>{s.invoiceNo || '—'}</td>
+                    <td className="muted" style={{ fontSize: 11 }}>
+                      {s.recordedAt
+                        ? new Date(s.recordedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })
+                        : '—'}
+                    </td>
                     <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
                       {balanceMap[s.id] != null ? db.fmt(balanceMap[s.id]) : '—'}
                     </td>
@@ -574,7 +639,8 @@ export function FuelInventorySummary() {
                       </td>
                     )}
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
