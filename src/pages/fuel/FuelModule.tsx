@@ -889,7 +889,6 @@ function FuelReportV2() {
 // ── Module Router ─────────────────────────────────────────────────
 export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: string) => void }) {
   const current =
-    tab === 'logs' ? 'record' :
     tab === 'report' ? 'report' :
     tab === 'summary' ? 'summary' :
     tab === 'express' ? 'express' :
@@ -902,25 +901,16 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
         <div>
           <h1 className="page-title">ระบบน้ำมัน</h1>
         </div>
-        <div className="actions">
-          <button className="btn">
-            <Icon name="plus" size={14} /> บันทึกน้ำมันเข้า
-          </button>
-          <button className="btn primary">
-            <Icon name="plus" size={14} /> เติมน้ำมันรถ
-          </button>
-        </div>
       </div>
 
       <div className="tabs no-print" style={{ marginBottom: 22 }}>
         {(
           [
-            ['overview', 'fuel', 'ภาพรวม', 'fuel'],
+            ['overview', 'fuel', '📊 ภาพรวม', 'fuel'],
             ['express', 'express', '⚡ คีย์ด่วน', 'edit'],
-            ['record', 'logs', 'บันทึก', 'edit'],
-            ['report', 'report', 'รายงาน', 'chart'],
-            ['summary', 'summary', 'สรุปคลังน้ำมัน', 'download'],
-            ['floating', 'floating', 'น้ำมันลอย', 'alert'],
+            ['floating', 'floating', '🟡 น้ำมันลอย', 'alert'],
+            ['report', 'report', '📋 รายงาน', 'chart'],
+            ['summary', 'summary', '📦 สรุปคลัง', 'download'],
           ] as [string, string, string, string][]
         ).map(([id, route, label, ic]) => (
           <button
@@ -936,10 +926,9 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
 
       {current === 'overview' && <FuelOverview />}
       {current === 'express' && <ExpressFuelLog setActive={setActive} />}
-      {current === 'record' && <FuelRecord />}
+      {current === 'floating' && <FloatingFuel />}
       {current === 'report' && <FuelReportV2 />}
       {current === 'summary' && <FuelInventorySummary />}
-      {current === 'floating' && <FloatingFuel />}
     </div>
   )
 }

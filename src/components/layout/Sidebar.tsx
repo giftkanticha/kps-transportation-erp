@@ -46,13 +46,11 @@ const MENU: MenuItem[] = [
   {
     id: 'fuel', label: 'ระบบน้ำมัน', icon: 'fuel', roles: ['admin', 'manager'],
     sub: [
-      { id: 'fuel', label: 'ภาพรวมคลังน้ำมัน' },
-      { id: 'fuel.logs', label: 'บันทึกน้ำมัน' },
-      { id: 'fuel.report', label: 'รายงานน้ำมันรายเดือน' },
-      { id: 'fuel.summary', label: 'สรุปคลังน้ำมันรวม' },
-      { id: 'fuel.round.open', label: 'เปิดรอบน้ำมัน (ละเอียด)' },
-      { id: 'fuel.round.refill', label: 'เติมปั้มนอก' },
-      { id: 'fuel.round.close', label: 'ปิดรอบน้ำมัน' },
+      { id: 'fuel', label: '📊 ภาพรวมคลังน้ำมัน' },
+      { id: 'fuel.express', label: '⚡ คีย์ด่วนน้ำมัน' },
+      { id: 'fuel.floating', label: '🟡 น้ำมันลอยรอผูก' },
+      { id: 'fuel.report', label: '📋 รายงานน้ำมันรายเดือน' },
+      { id: 'fuel.summary', label: '📦 สรุปคลังน้ำมันรวม' },
     ],
   },
   {
