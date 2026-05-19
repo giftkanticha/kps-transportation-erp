@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
+import { useList, useUpdate, useDelete } from '../../hooks/useTable'
 import type { Vehicle, Employee, User } from '../../types'
 import { Icon, StatusBadge, Field } from '../../components/ui'
 
@@ -106,7 +107,8 @@ function VehicleEditModal({
   onSuccess: (msg: string) => void
   onError: (msg: string) => void
 }) {
-  const employees = db.getAll<Employee>('employees')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
   const isCustomType = !VEHICLE_TYPES.includes(vehicle.type)
   const [form, setForm] = useState<VehicleEditForm>({
     plate: vehicle.plate,
@@ -136,30 +138,33 @@ function VehicleEditModal({
     e => e.position === 'คนขับ' && (!e.vehicleId || e.vehicleId === vehicle.id),
   )
 
-  const submit = () => {
+  const submit = async () => {
     if (saving) return
     if (!form.plate.trim()) { onError('กรุณากรอกทะเบียนรถ'); return }
     if (!form.brand.trim()) { onError('กรุณากรอกยี่ห้อรถ'); return }
     setSaving(true)
     try {
       const effectiveType = form.type === 'อื่นๆ' ? (form.customType.trim() || 'อื่นๆ') : form.type
-      db.update<Vehicle>('vehicles', vehicle.id, {
-        plate: form.plate.trim(),
-        brand: form.brand.trim(),
-        year: Number(form.year) || vehicle.year,
-        type: effectiveType,
-        group: form.group,
-        status: form.status,
-        driverId: form.driverId || null,
-        odometer: Number(form.odometer) || 0,
-        nextServiceKm: Number(form.nextServiceKm) || 0,
-        fuel: Math.min(100, Math.max(0, Number(form.fuel) || 0)),
-        purchaseDate: form.purchaseDate,
-        lastService: form.lastService,
-        nextService: form.nextService,
-        tax: form.tax,
-        insurance: form.insurance,
-        dispatchPermit: form.dispatchPermit,
+      await updateVehicle.mutateAsync({
+        id: vehicle.id,
+        patch: {
+          plate: form.plate.trim(),
+          brand: form.brand.trim(),
+          year: Number(form.year) || vehicle.year,
+          type: effectiveType,
+          group: form.group,
+          status: form.status,
+          driverId: form.driverId || null,
+          odometer: Number(form.odometer) || 0,
+          nextServiceKm: Number(form.nextServiceKm) || 0,
+          fuel: Math.min(100, Math.max(0, Number(form.fuel) || 0)),
+          purchaseDate: form.purchaseDate,
+          lastService: form.lastService,
+          nextService: form.nextService,
+          tax: form.tax,
+          insurance: form.insurance,
+          dispatchPermit: form.dispatchPermit,
+        },
       })
       onSuccess('✅ บันทึกข้อมูลเรียบร้อย')
     } catch (err) {
@@ -479,9 +484,9 @@ function RowActionMenu({
 }
 
 export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
-  const [tick, setTick] = useState(0)
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
-  const employees = useMemo(() => db.getAll<Employee>('employees'), [tick])
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const deleteVehicle = useDelete('vehicles')
   const vehicleTypes = useMemo(() => {
     const types = [...new Set(vehicles.map(v => v.type))].sort()
     return ['ทั้งหมด', ...types]
@@ -510,11 +515,10 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
     })
   }, [vehicles, q, filterStatus, filterType])
 
-  const confirmDelete = (v: Vehicle) => {
+  const confirmDelete = async (v: Vehicle) => {
     try {
-      db.remove('vehicles', v.id)
+      await deleteVehicle.mutateAsync(v.id)
       setDeletingVehicle(null)
-      setTick(t => t + 1)
       setToast({ kind: 'success', msg: `✅ ลบรถ ${v.plate} เรียบร้อย` })
     } catch (err) {
       setToast({ kind: 'error', msg: err instanceof Error ? err.message : 'ลบไม่สำเร็จ' })
@@ -681,7 +685,6 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
           onClose={() => setEditingVehicle(null)}
           onSuccess={msg => {
             setEditingVehicle(null)
-            setTick(t => t + 1)
             setToast({ kind: 'success', msg })
           }}
           onError={msg => setToast({ kind: 'error', msg })}

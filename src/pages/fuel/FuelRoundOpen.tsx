@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db, uid, DEFAULT_TANK_CAPACITY, HOME_BASE } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import type { Vehicle, Dispatch, FuelRound, FuelRefill } from '../../types'
 import { Icon, StatusBadge, Field } from '../../components/ui'
 
@@ -38,7 +39,7 @@ function nowLocal(): string {
 
 export function FuelRoundOpen({ setActive, setSubject }: Props) {
   const [tick, setTick] = useState(0)
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const allRounds = useMemo(() => db.getAll<FuelRound>('fuelRounds'), [tick])
   const openRounds = allRounds.filter(r => r.status === 'open')
 

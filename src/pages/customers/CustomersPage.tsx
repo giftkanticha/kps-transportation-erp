@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useList, useInsert } from '../../hooks/useTable'
 import { db } from '../../lib/db'
 import { Icon, Field, StatusBadge } from '../../components/ui'
 import type { Customer } from '../../types'
@@ -93,19 +94,19 @@ export function CustomersPage() {
     address: '',
   })
 
-  const customers = db.getAll<Customer>('customers')
+  const { data: customers = [] } = useList<Customer>('customers')
+  const insertCustomer = useInsert<Customer>('customers')
   const list = customers.filter(
     (c) => !q || c.name.toLowerCase().includes(q.toLowerCase()) || c.code.includes(q),
   )
 
-  const save = () => {
+  const save = async () => {
     if (!form.name) {
       alert('กรุณากรอกชื่อลูกค้า')
       return
     }
-    db.add<Customer>('customers', {
+    await insertCustomer.mutateAsync({
       ...form,
-      id: '',
       code: 'CUS-' + (1000 + customers.length + 1),
       totalJobs: 0,
       openInvoice: 0,

@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import { db } from '../../lib/db'
+import { useState } from 'react'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import type { Employee, Vehicle } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -20,7 +20,10 @@ interface EmployeeForm {
 }
 
 export function EmployeeAdd({ setActive }: EmployeeAddProps) {
-  const employees = db.getAll<Employee>('employees')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const insertEmployee = useInsert<Employee>('employees')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
   const maxNum = employees.reduce((max, e) => {
     const n = parseInt(e.code.replace(/\D/g, ''), 10)
     return isNaN(n) ? max : Math.max(max, n)
@@ -39,7 +42,6 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
     licenseStatus: 'ok',
   })
   const [vehicleIds, setVehicleIds] = useState<string[]>([])
-  const allVehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
 
   const set = (k: keyof EmployeeForm, v: string) =>
     setForm(f => ({ ...f, [k]: v }))
@@ -48,12 +50,12 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
 
   const isDriver = form.position === 'คนขับ'
 
-  const save = () => {
+  const save = async () => {
     if (!form.name || !form.phone) {
       alert('กรุณากรอกชื่อและเบอร์โทร')
       return
     }
-    const newEmp = db.add<Partial<Employee>>('employees', {
+    const newEmp = await insertEmployee.mutateAsync({
       ...form,
       position: form.position === 'อื่นๆ' ? (form.customPosition.trim() || 'อื่นๆ') : form.position,
       licenseStatus: form.licenseStatus as Employee['licenseStatus'],
@@ -64,11 +66,11 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
       idCard: '',
       accountBank: '',
       accountNo: '',
-    }) as Employee
+    } as Partial<Employee>)
     // Sync Vehicle.driverId for the selected set
-    if (isDriver) {
+    if (isDriver && newEmp?.id) {
       for (const vId of vehicleIds) {
-        db.update<Vehicle>('vehicles', vId, { driverId: newEmp.id })
+        await updateVehicle.mutateAsync({ id: vId, patch: { driverId: newEmp.id } })
       }
     }
     setActive('employees')
@@ -212,7 +214,7 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
                 {allVehicles.map(v => {
                   const checked = vehicleIds.includes(v.id)
                   const otherDriver = !checked && v.driverId
-                    ? db.nameOf('employees', v.driverId)
+                    ? (employees.find(e => e.id === v.driverId)?.name ?? '—')
                     : null
                   return (
                     <label

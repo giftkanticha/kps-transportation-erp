@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { db } from '../../lib/db'
+import { useList, useInsert } from '../../hooks/useTable'
 import type { Employee, Vehicle } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -27,7 +27,8 @@ interface VehicleForm {
 }
 
 export function VehicleAdd({ setActive }: VehicleAddProps) {
-  const employees = db.getAll<Employee>('employees')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const insertVehicle = useInsert<Vehicle>('vehicles')
   const [form, setForm] = useState<VehicleForm>({
     plate: '',
     brand: '',
@@ -48,12 +49,12 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
   const set = (k: keyof VehicleForm, v: string | number) =>
     setForm(f => ({ ...f, [k]: v }))
 
-  const save = () => {
+  const save = async () => {
     if (!form.plate || !form.brand) {
       alert('กรุณากรอกทะเบียนและยี่ห้อ')
       return
     }
-    db.add<Partial<Vehicle>>('vehicles', {
+    await insertVehicle.mutateAsync({
       ...form,
       type: form.type === 'อื่นๆ' ? (form.customType.trim() || 'อื่นๆ') : form.type,
       group: form.group,

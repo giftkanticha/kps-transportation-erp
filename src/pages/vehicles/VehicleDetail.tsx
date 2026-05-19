@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { db } from '../../lib/db'
-import type { Vehicle, Employee, Tire, FuelRecord, Maintenance, Dispatch, User } from '../../types'
+import { useList } from '../../hooks/useTable'
+import type { Vehicle, Employee, Customer, Tire, FuelRecord, Maintenance, Dispatch, User } from '../../types'
 import { Icon, StatusBadge, Info } from '../../components/ui'
 
 interface VehicleDetailProps {
@@ -63,7 +64,10 @@ function TireSummary({ tires }: { tires: Tire[] }) {
 
 export function VehicleDetail({ setActive, subject }: VehicleDetailProps) {
   const subjectObj = subject as { type?: string; id?: string } | null
-  const v = db.get<Vehicle>('vehicles', subjectObj?.id ?? '')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: customers = [] } = useList<Customer>('customers')
+  const v = vehicles.find(x => x.id === (subjectObj?.id ?? ''))
   const [tab, setTab] = useState<TabKey>('overview')
 
   if (!v) {
@@ -80,7 +84,7 @@ export function VehicleDetail({ setActive, subject }: VehicleDetailProps) {
     )
   }
 
-  const driver = db.get<Employee>('employees', v.driverId ?? '')
+  const driver = employees.find(e => e.id === (v.driverId ?? ''))
   const tires = db.getAll<Tire>('tires').filter(t => t.vehicleId === v.id)
   const fuel = db.getAll<FuelRecord>('fuel').filter(f => f.vehicleId === v.id)
   const maintenance = db.getAll<Maintenance>('maintenance').filter(m => m.vehicleId === v.id)
@@ -368,7 +372,7 @@ export function VehicleDetail({ setActive, subject }: VehicleDetailProps) {
                       → {db.destOf(t)}
                     </div>
                   </td>
-                  <td>{db.nameOf('customers', t.customerId)}</td>
+                  <td>{customers.find(c => c.id === t.customerId)?.name ?? '—'}</td>
                   <td className="num muted">{t.depart.slice(0, 10)}</td>
                   <td className="num">{t.distance} km</td>
                   <td className="num">{db.thb(db.amountOf(t))}</td>

@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, OtherExpense, FuelTransaction } from '../../types'
+import { useList } from '../../hooks/useTable'
+import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -90,8 +91,8 @@ function tonToDwInput(weightTon: number | null | undefined, mode: DispatchLeg['p
 function DraftRoundsList({
   setSubject,
 }: { setSubject: (s: unknown) => void }) {
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const employees = db.getAll<Employee>('employees')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
   const drafts = db.getAll<Dispatch>('dispatch').filter(d => d.roundStatus === 'draft')
 
   return (
@@ -169,9 +170,12 @@ function CloseForm({
   setSubject,
 }: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
   const [tick, setTick] = useState(0)
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: customers = [] } = useList<Customer>('customers')
   const round = useMemo(() => db.get<Dispatch>('dispatch', roundId), [roundId, tick])
-  const vehicle = round ? db.get<Vehicle>('vehicles', round.vehicleId ?? '') : undefined
-  const driver = round ? db.get<Employee>('employees', round.driverId ?? '') : undefined
+  const vehicle = round ? vehicles.find(v => v.id === (round.vehicleId ?? '')) : undefined
+  const driver = round ? employees.find(e => e.id === (round.driverId ?? '')) : undefined
 
   const legs = round?.legs ?? []
   const [legStates, setLegStates] = useState<LegCloseState[]>([])
@@ -448,7 +452,7 @@ function CloseForm({
                     ขา {i + 1} — {l.origin} → {l.destination}
                   </div>
                   <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                    {l.customerId ? db.nameOf('customers', l.customerId) : '—'}
+                    {l.customerId ? (customers.find(c => c.id === l.customerId)?.name ?? '—') : '—'}
                     {' • '}{l.cargoType || '—'}
                     {' • '}<span className="badge" style={{ fontSize: 10.5 }}>{legTypeLabel(l.legType)}</span>
                     {' • '}<span className="badge" style={{ fontSize: 10.5 }}>

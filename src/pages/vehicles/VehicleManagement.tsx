@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { db, uid } from '../../lib/db'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import type { Vehicle } from '../../types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -254,12 +254,13 @@ function VehicleFormModal({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function VehicleManagement() {
-  const [tick, setTick] = useState(0)
   const [search, setSearch] = useState('')
   const [filterGroup, setFilterGroup] = useState<VehicleGroup | 'ALL'>('ALL')
   const [modal, setModal] = useState<{ form: FormState; editId: string | null } | null>(null)
 
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const insertVehicle = useInsert<Vehicle>('vehicles')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
 
   const filtered = useMemo(() => {
     let list = vehicles
@@ -297,7 +298,7 @@ export function VehicleManagement() {
       },
     })
 
-  const handleSave = (form: FormState, editId: string | null) => {
+  const handleSave = async (form: FormState, editId: string | null) => {
     const patch: Partial<Vehicle> = {
       plate: form.plate.toUpperCase().trim(),
       brand: form.brand,
@@ -308,10 +309,9 @@ export function VehicleManagement() {
     }
 
     if (editId) {
-      db.update<Vehicle>('vehicles', editId, patch)
+      await updateVehicle.mutateAsync({ id: editId, patch })
     } else {
-      db.add<Vehicle>('vehicles', {
-        id: uid('veh'),
+      await insertVehicle.mutateAsync({
         plate: patch.plate!,
         brand: patch.brand!,
         type: patch.type!,
@@ -332,7 +332,6 @@ export function VehicleManagement() {
     }
 
     setModal(null)
-    setTick(t => t + 1)
   }
 
   const existingPlates = vehicles.map(v => v.plate)

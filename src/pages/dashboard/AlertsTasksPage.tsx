@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db } from '../../lib/db'
+import { useList, useUpdate } from '../../hooks/useTable'
 import { Icon } from '../../components/ui'
 import { can } from '../../lib/permissions'
 import type { Vehicle, Maintenance, TaskCompletion, EditApprovalRequest, User } from '../../types'
@@ -139,7 +140,12 @@ interface CompleteModalProps {
   onError: (msg: string) => void
 }
 
-function saveNextRound(alert: AlertItem, form: NextRoundForm): void {
+async function saveNextRound(
+  alert: AlertItem,
+  form: NextRoundForm,
+  updateVehicle: (args: { id: string; patch: Partial<Vehicle> }) => Promise<unknown>,
+  vehicles: Vehicle[],
+): Promise<void> {
   const patch: Partial<Vehicle> = {}
 
   if (alert.kind === 'tax' && form.nextDate) patch.tax = form.nextDate
@@ -173,9 +179,9 @@ function saveNextRound(alert: AlertItem, form: NextRoundForm): void {
   }
 
   if (Object.keys(patch).length > 0) {
-    const existing = db.get<Vehicle>('vehicles', alert.vehicleId)
+    const existing = vehicles.find(v => v.id === alert.vehicleId)
     if (!existing) throw new Error('ไม่พบรถในระบบ')
-    db.update<Vehicle>('vehicles', alert.vehicleId, patch)
+    await updateVehicle({ id: alert.vehicleId, patch })
   }
 
   db.add<Partial<TaskCompletion>>('taskCompletions', {
@@ -192,6 +198,8 @@ function saveNextRound(alert: AlertItem, form: NextRoundForm): void {
 }
 
 function CompleteModal({ alert, onClose, onSuccess, onError }: CompleteModalProps) {
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
   const [form, setForm] = useState<NextRoundForm>({
     nextDate: '',
     nextMileage: alert.kind === 'mileage' && alert.targetKm
@@ -203,11 +211,11 @@ function CompleteModal({ alert, onClose, onSuccess, onError }: CompleteModalProp
 
   const set = (k: keyof NextRoundForm, v: string) => setForm(f => ({ ...f, [k]: v }))
 
-  const save = () => {
+  const save = async () => {
     if (saving) return
     setSaving(true)
     try {
-      saveNextRound(alert, form)
+      await saveNextRound(alert, form, args => updateVehicle.mutateAsync(args), vehicles)
       onSuccess()
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'
@@ -667,6 +675,9 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
 
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const updateVehicleMut = useUpdate<Vehicle>('vehicles')
+
   const pendingApprovals = useMemo(() => {
     if (!can.reviewApprovals(user.role)) return []
     return db.getAll<EditApprovalRequest>('editApprovals')
@@ -674,16 +685,16 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
       .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
   }, [tick, user.role])
 
-  const reviewRequest = (req: EditApprovalRequest, decision: 'approved' | 'rejected') => {
+  const reviewRequest = async (req: EditApprovalRequest, decision: 'approved' | 'rejected') => {
     try {
       const fresh = db.get<EditApprovalRequest>('editApprovals', req.id)
       if (!fresh) throw new Error('ไม่พบคำขอในระบบ')
       if (fresh.status !== 'pending') throw new Error('คำขอนี้ถูกพิจารณาแล้ว')
 
       if (decision === 'approved') {
-        const vehicle = db.get<Vehicle>('vehicles', req.vehicleId)
+        const vehicle = allVehicles.find(v => v.id === req.vehicleId)
         if (!vehicle) throw new Error('ไม่พบรถในระบบ')
-        db.update<Vehicle>('vehicles', req.vehicleId, req.changes)
+        await updateVehicleMut.mutateAsync({ id: req.vehicleId, patch: req.changes })
       }
 
       db.update<EditApprovalRequest>('editApprovals', req.id, {
@@ -707,10 +718,9 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
   }
 
   const alerts = useMemo(() => {
-    const vehicles = db.getAll<Vehicle>('vehicles')
     const maintenance = db.getAll<Maintenance>('maintenance')
-    return buildAlerts(vehicles, maintenance)
-  }, [tick])
+    return buildAlerts(allVehicles, maintenance)
+  }, [tick, allVehicles])
 
   const grouped = useMemo(() => {
     const map: Record<AlertKind, AlertItem[]> = {

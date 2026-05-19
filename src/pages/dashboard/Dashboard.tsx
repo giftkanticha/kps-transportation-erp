@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import type { User, Vehicle, Employee, Dispatch, Tire, Expense, ActivityLog, StockItem, Customer, SubJob } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
 
@@ -277,10 +278,10 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const [approvalModal, setApprovalModal] = useState<ReqItem | null>(null)
   const [dismissedReqs, setDismissedReqs] = useState<Set<number>>(new Set())
 
-  const vehicles  = db.getAll<Vehicle>('vehicles')
-  const employees = db.getAll<Employee>('employees')
+  const { data: vehicles = [] }  = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
   const dispatch  = db.getAll<Dispatch>('dispatch')
-  const customers = db.getAll<Customer>('customers')
+  const { data: customers = [] } = useList<Customer>('customers')
   const tires     = db.getAll<Tire>('tires')
   const expenses  = db.getAll<Expense>('expenses')
   const activity  = db.getAll<ActivityLog>('activity')

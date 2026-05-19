@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
+import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info } from '../../components/ui'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
@@ -24,8 +25,8 @@ const inlineInput: React.CSSProperties = {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-const isKPSPartner = (partnerId: string): boolean => {
-  const p = db.get<Partner>('partners', partnerId)
+const isKPSPartner = (partnerId: string, partners: Partner[]): boolean => {
+  const p = partners.find((x) => x.id === partnerId)
   return !!p && p.name.replace(/\s+/g, '') === KPS_WAREHOUSE_NAME.replace(/\s+/g, '')
 }
 
@@ -180,7 +181,7 @@ function ExpenseFormBody({
   const addLine = () => setLines([...lines, emptyLine()])
   const removeLine = (i: number) => setLines(lines.filter((_, idx) => idx !== i))
 
-  const isKPS = isKPSPartner(hdr.partnerId)
+  const isKPS = isKPSPartner(hdr.partnerId, partners)
   const totals = lines.map((l) => (l.qty || 0) * (l.unitPrice || 0))
   const netTotal = totals.reduce((s, t) => s + t, 0)
 
@@ -457,8 +458,8 @@ function ExpenseFormBody({
 }
 
 function ExpRecord() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const partners = db.getAll<Partner>('partners')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: partners = [] } = useList<Partner>('partners')
   const stocks = db.getAll<StockItem>('stock')
 
   const [tick, setTick] = useState(0)
@@ -505,7 +506,7 @@ function ExpRecord() {
       }),
     )
     // Apply stock deduction for KPS warehouse
-    if (isKPSPartner(hdr.partnerId)) {
+    if (isKPSPartner(hdr.partnerId, partners)) {
       applyStockDelta(lines, -1)
     }
     alert('บันทึกเรียบร้อย')
@@ -565,10 +566,10 @@ function ExpRecord() {
                   <td className="num muted">{db.thaiDate(h.date)}</td>
                   <td>
                     <span style={{ color: 'var(--primary)', fontWeight: 600 }} className="mono">
-                      {db.nameOf('vehicles', h.vehicleId)}
+                      {vehicles.find(v => v.id === h.vehicleId)?.plate ?? '—'}
                     </span>
                   </td>
-                  <td>{db.nameOf('partners', h.partnerId)}</td>
+                  <td>{partners.find(p => p.id === h.partnerId)?.name ?? '—'}</td>
                   <td className="num right" style={{ fontWeight: 600 }}>
                     {db.fmt(h.total)} บาท
                   </td>
@@ -636,7 +637,7 @@ function ExpenseEditModal({
     () => db.getAll<ExpenseLine>('expenseLines').filter((l) => l.headerId === header.id),
     [header.id],
   )
-  const wasKPS = isKPSPartner(header.partnerId)
+  const wasKPS = isKPSPartner(header.partnerId, partners)
 
   const [hdr, setHdr] = useState<HeaderForm>({
     vehicleId: header.vehicleId,
@@ -693,7 +694,7 @@ function ExpenseEditModal({
     )
 
     // Apply new stock impact
-    if (isKPSPartner(hdr.partnerId)) applyStockDelta(lines, -1)
+    if (isKPSPartner(hdr.partnerId, partners)) applyStockDelta(lines, -1)
 
     alert('บันทึกการแก้ไขเรียบร้อย')
     onSaved()
@@ -830,7 +831,7 @@ function PayConfirmModal({
 function ExpFinance() {
   const [tick, setTick] = useState(0)
   const headers = useMemo(() => { void tick; return db.getAll<ExpenseHeader>('expenseHeaders') }, [tick])
-  const partners = db.getAll<Partner>('partners')
+  const { data: partners = [] } = useList<Partner>('partners')
 
   const today = new Date('2026-05-17')
   const unpaidHeaders = headers.filter((h) => !h.paid)
@@ -1037,7 +1038,8 @@ function ExpStock() {
   const refresh = () => setTick((n) => n + 1)
   const stock = useMemo(() => { void tick; return db.getAll<StockItem>('stock') }, [tick])
   const receipts = useMemo(() => { void tick; return db.getAll<StockReceipt>('stockReceipts') }, [tick])
-  const partners = db.getAll<Partner>('partners').filter((p) => p.name !== KPS_WAREHOUSE_NAME)
+  const { data: allPartners = [] } = useList<Partner>('partners')
+  const partners = allPartners.filter((p) => p.name !== KPS_WAREHOUSE_NAME)
 
   const total = stock.reduce((s, r) => s + r.qty * r.unitCost, 0)
   const low = stock.filter((s) => s.qty <= s.reorderAt)
@@ -1048,7 +1050,7 @@ function ExpStock() {
     const now = new Date()
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
     const headers = db.getAll<ExpenseHeader>('expenseHeaders').filter(h => {
-      if (!isKPSPartner(h.partnerId)) return false
+      if (!isKPSPartner(h.partnerId, allPartners)) return false
       return h.date?.slice(0, 7) === ym
     })
     const headerIds = new Set(headers.map(h => h.id))
@@ -1059,7 +1061,7 @@ function ExpStock() {
         if (!s || s.sellPrice == null) return sum
         return sum + l.qty * (s.sellPrice - s.unitCost)
       }, 0)
-  }, [tick, stock])
+  }, [tick, stock, allPartners])
 
   // Receive form state
   const today = new Date().toISOString().slice(0, 10)
@@ -1313,7 +1315,7 @@ function ExpStock() {
                   return (
                     <tr key={r.id}>
                       <td className="num muted">{db.thaiDate(r.date)}</td>
-                      <td>{db.nameOf('partners', r.partnerId)}</td>
+                      <td>{allPartners.find(p => p.id === r.partnerId)?.name ?? '—'}</td>
                       <td>{it?.name ?? '—'}</td>
                       <td className="num right">{r.qty}</td>
                       <td className="num right">{db.fmt(r.unitPrice)} ฿</td>
@@ -1363,12 +1365,13 @@ function PivotTab() {
     [dateFrom, dateTo],
   )
 
+  const { data: allPartners = [] } = useList<Partner>('partners')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const activeVendorIds = useMemo(() => Array.from(new Set(headers.map(h => h.partnerId))), [headers])
   const activeVendors   = useMemo(
-    () => activeVendorIds.map(id => db.get<Partner>('partners', id)).filter(Boolean) as Partner[],
-    [activeVendorIds],
+    () => activeVendorIds.map(id => allPartners.find(p => p.id === id)).filter(Boolean) as Partner[],
+    [activeVendorIds, allPartners],
   )
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
 
   const matrix = useMemo(() => {
     const m: Record<string, Record<string, number>> = {}
@@ -1533,7 +1536,8 @@ function PivotTab() {
 // ─── Tab 4: รายงานสรุป (Unchanged) ───────────────────────────────────────────
 
 function ExpReport() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: partners = [] } = useList<Partner>('partners')
   const [innerTab, setInnerTab] = useState('repair')
   const headers = db.getAll<ExpenseHeader>('expenseHeaders')
   const allLines = db.getAll<ExpenseLine>('expenseLines')
@@ -1609,8 +1613,8 @@ function ExpReport() {
               </thead>
               <tbody>
                 {filteredHeaders.map((h) => {
-                  const v = db.get<Vehicle>('vehicles', h.vehicleId)
-                  const p = db.get<Partner>('partners', h.partnerId)
+                  const v = vehicles.find(x => x.id === h.vehicleId)
+                  const p = partners.find(x => x.id === h.partnerId)
                   return (
                     <tr key={h.id}>
                       <td>
@@ -1670,7 +1674,7 @@ function ExpReport() {
                   <div>
                     <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>รายละเอียดการซ่อม</h3>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                      {toBeCode(detailHeader.code)} · {db.thaiDate(detailHeader.date)} · {db.nameOf('vehicles', detailHeader.vehicleId)} · {db.nameOf('partners', detailHeader.partnerId)}
+                      {toBeCode(detailHeader.code)} · {db.thaiDate(detailHeader.date)} · {vehicles.find(v => v.id === detailHeader.vehicleId)?.plate ?? '—'} · {partners.find(p => p.id === detailHeader.partnerId)?.name ?? '—'}
                     </div>
                   </div>
                   <button className="btn ghost icon sm" onClick={() => setDetailHeader(null)}><Icon name="close" size={16} /></button>
@@ -1744,7 +1748,9 @@ function VendorEditModal({
   onSaved: () => void
 }) {
   const isNew = !partner
-  const partners = db.getAll<Partner>('partners')
+  const { data: partners = [] } = useList<Partner>('partners')
+  const insertPartner = useInsert<Partner>('partners')
+  const updatePartner = useUpdate<Partner>('partners')
   const nextCode = isNew
     ? 'VND-' + String(
         partners.reduce((max, p) => {
@@ -1769,12 +1775,12 @@ function VendorEditModal({
   })
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim()) { alert('กรุณากรอกชื่อร้านค้า/ช่าง'); return }
     if (isNew) {
-      db.add<Partner>('partners', { ...form, id: uid('pa'), balance: 0 })
+      await insertPartner.mutateAsync({ ...form, balance: 0 } as Partial<Partner>)
     } else {
-      db.update<Partner>('partners', partner!.id, form)
+      await updatePartner.mutateAsync({ id: partner!.id, patch: form as Partial<Partner> })
     }
     onSaved()
     onClose()
@@ -1816,7 +1822,7 @@ function VendorEditModal({
               <datalist id="partner-type-options">
                 {[...new Set([
                   ...PARTNER_TYPES,
-                  ...db.getAll<Partner>('partners').map((p) => p.type).filter(Boolean),
+                  ...partners.map((p) => p.type).filter(Boolean),
                 ])].map((t) => <option key={t} value={t} />)}
               </datalist>
             </Field>
@@ -1885,9 +1891,9 @@ function VendorEditModal({
 }
 
 function ExpVendors() {
-  const [tick, setTick] = useState(0)
-  const refresh = () => setTick((n) => n + 1)
-  const partners = useMemo(() => { void tick; return db.getAll<Partner>('partners') }, [tick])
+  const { data: partners = [] } = useList<Partner>('partners')
+  const deletePartner = useDelete('partners')
+  const refresh = () => { /* no-op: TanStack Query refetches on invalidate */ }
   const [q, setQ] = useState('')
   const [editing, setEditing] = useState<Partner | null>(null)
   const [addNew, setAddNew] = useState(false)
@@ -1901,10 +1907,9 @@ function ExpVendors() {
       (p.account && p.account.includes(q)),
   )
 
-  const handleDelete = (p: Partner) => {
+  const handleDelete = async (p: Partner) => {
     if (!confirm(`ต้องการลบ "${p.name}" หรือไม่?`)) return
-    db.remove('partners', p.id)
-    refresh()
+    await deletePartner.mutateAsync(p.id)
   }
 
   return (

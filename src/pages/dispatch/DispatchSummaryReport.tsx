@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import type { Vehicle, Employee, Dispatch, FuelRound } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -38,8 +39,8 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   const [driverId, setDriverId] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
 
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const employees = db.getAll<Employee>('employees')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
   const drivers = employees.filter(e => e.position === 'คนขับ')
 
   const rows = useMemo<Row[]>(() => {

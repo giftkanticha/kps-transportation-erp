@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import { Icon } from '../../components/ui'
 import type { Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance, Expense, Employee } from '../../types'
 
@@ -439,7 +440,8 @@ export function FinancePL() {
   const [viewMode, setViewMode] = useState<ViewMode>('monthly')
   const [tick, setTick]       = useState(0)
 
-  const allVehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allEmployees = [] } = useList<Employee>('employees')
   const [picked, setPicked] = useState<Set<string>>(
     () => new Set(db.getAll<Vehicle>('vehicles').map(v => v.id)),
   )
@@ -450,13 +452,13 @@ export function FinancePL() {
   /* ── Data computation ── */
   const { allRows, allYearlyRows, allMonthlyData } = useMemo(() => {
     try {
-      const vehicles   = db.getAll<Vehicle>('vehicles')
+      const vehicles   = allVehicles
       const dispatches = db.getAll<Dispatch>('dispatch')
       const fuel       = db.getAll<FuelRecord>('fuel')
       const fuelRounds = db.getAll<FuelRound>('fuelRounds')
       const maint      = db.getAll<Maintenance>('maintenance')
       const expenses   = db.getAll<Expense>('expenses')
-      const employees  = db.getAll<Employee>('employees')
+      const employees  = allEmployees
 
       const allRows = computeRows(vehicles, dispatches, fuel, fuelRounds, maint, expenses, employees, ym)
 
@@ -490,7 +492,7 @@ export function FinancePL() {
       console.error('FinancePL aggregation failed', err)
       return { allRows: [], allYearlyRows: [], allMonthlyData: [] }
     }
-  }, [ym, year, tick])
+  }, [ym, year, tick, allVehicles, allEmployees])
 
   // Filter by picked vehicles
   const rows        = useMemo(() => allRows.filter(r => picked.has(r.v.id)), [allRows, picked])

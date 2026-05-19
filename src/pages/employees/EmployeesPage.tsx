@@ -1,11 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
+import { useList, useUpdate, useDelete } from '../../hooks/useTable'
 import type { Employee, Vehicle } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
-
-function vehiclesOfDriver(employeeId: string): Vehicle[] {
-  return db.getAll<Vehicle>('vehicles').filter(v => v.driverId === employeeId)
-}
 
 function isDriverPosition(pos: string): boolean {
   return pos === 'คนขับ'
@@ -221,7 +218,10 @@ interface EmployeeEditModalProps {
 }
 
 function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProps) {
-  const allVehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allEmployees = [] } = useList<Employee>('employees')
+  const updateEmployee = useUpdate<Employee>('employees')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
   const initialVehicleIds = useMemo(
     () => allVehicles.filter(v => v.driverId === employee.id).map(v => v.id),
     [allVehicles, employee.id],
@@ -243,19 +243,22 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
 
   const isDriver = isDriverPosition(form.position)
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim() || !form.phone.trim()) {
       alert('กรุณากรอกชื่อและเบอร์โทร')
       return
     }
-    db.update<Employee>('employees', employee.id, {
-      name: form.name.trim(),
-      position: form.position,
-      phone: form.phone.trim(),
-      lineId: form.lineId,
-      joined: form.joined,
-      address: form.address,
-      vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
+    await updateEmployee.mutateAsync({
+      id: employee.id,
+      patch: {
+        name: form.name.trim(),
+        position: form.position,
+        phone: form.phone.trim(),
+        lineId: form.lineId,
+        joined: form.joined,
+        address: form.address,
+        vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
+      },
     })
 
     // Sync Vehicle.driverId for the selected set:
@@ -268,15 +271,15 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
         const wasAssigned = prevSet.has(v.id)
         const nowAssigned = finalSet.has(v.id)
         if (nowAssigned && v.driverId !== employee.id) {
-          db.update<Vehicle>('vehicles', v.id, { driverId: employee.id })
+          await updateVehicle.mutateAsync({ id: v.id, patch: { driverId: employee.id } })
         } else if (!nowAssigned && wasAssigned) {
-          db.update<Vehicle>('vehicles', v.id, { driverId: null })
+          await updateVehicle.mutateAsync({ id: v.id, patch: { driverId: null } })
         }
       }
     } else {
       // Position changed away from คนขับ → clear all previously assigned vehicles
       for (const vId of initialVehicleIds) {
-        db.update<Vehicle>('vehicles', vId, { driverId: null })
+        await updateVehicle.mutateAsync({ id: vId, patch: { driverId: null } })
       }
     }
     onClose()
@@ -355,7 +358,7 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
                   {allVehicles.map(v => {
                     const checked = vehicleIds.includes(v.id)
                     const otherDriver = !checked && v.driverId && v.driverId !== employee.id
-                      ? db.nameOf('employees', v.driverId)
+                      ? (allEmployees.find(em => em.id === v.driverId)?.name ?? '—')
                       : null
                     return (
                       <label
@@ -415,8 +418,9 @@ interface StatusChangeDialogProps {
 }
 
 function StatusChangeDialog({ employee, onClose, onChanged }: StatusChangeDialogProps) {
-  const changeStatus = (status: Employee['status']) => {
-    db.update<Employee>('employees', employee.id, { status })
+  const updateEmployee = useUpdate<Employee>('employees')
+  const changeStatus = async (status: Employee['status']) => {
+    await updateEmployee.mutateAsync({ id: employee.id, patch: { status } })
     onClose()
     onChanged()
   }
@@ -463,17 +467,21 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
   const [statusChangingId, setStatusChangingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
-  const [tick, setTick] = useState(0)
   const [q, setQ] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>({ active: true, leave: false })
 
-  const refresh = () => setTick(t => t + 1)
+  const { data: allEmployees = [] } = useList<Employee>('employees')
+  const { data: allVehiclesList = [] } = useList<Vehicle>('vehicles')
+  const deleteEmployee = useDelete('employees')
+
+  const vehiclesOfDriver = (employeeId: string): Vehicle[] =>
+    allVehiclesList.filter(v => v.driverId === employeeId)
+
+  const refresh = () => { /* no-op: TanStack Query refetches on invalidate */ }
 
   const inBucket = (e: Employee): boolean =>
     (filterStatus.active && (e.status === 'active' || e.status === 'training')) ||
     (filterStatus.leave && e.status === 'leave')
-
-  const allEmployees = useMemo(() => db.getAll<Employee>('employees'), [tick])
 
   const filtered = useMemo(() => {
     return allEmployees.filter(e => {
@@ -491,11 +499,10 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
 
   const deletingEmployee = deletingId ? allEmployees.find(e => e.id === deletingId) : null
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deletingId) return
-    db.remove('employees', deletingId)
+    await deleteEmployee.mutateAsync(deletingId)
     setDeletingId(null)
-    refresh()
     setToast({ kind: 'success', msg: 'ลบพนักงานเรียบร้อยแล้ว' })
   }
 
