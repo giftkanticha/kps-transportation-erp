@@ -361,4 +361,6 @@ export const SEED: AppState = {
       reviewNote: '',
     },
   ],
+  vehicleRegistrations: [],
+  requestApprovals: [],
 }

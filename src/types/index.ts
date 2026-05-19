@@ -463,4 +463,6 @@ export interface AppState {
   activity: ActivityLog[]
   taskCompletions: TaskCompletion[]
   editApprovals: EditApprovalRequest[]
+  vehicleRegistrations: Record<string, unknown>[]
+  requestApprovals: Record<string, unknown>[]
 }
