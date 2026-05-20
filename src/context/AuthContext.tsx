@@ -3,6 +3,34 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase, type UserProfile, type UserRole } from '../lib/supabase'
 import type { User, KPSRole } from '../types'
 
+// ─── DEV BYPASS ─────────────────────────────────────────────────────────────
+// When true, skip Supabase auth entirely and use a hardcoded admin user.
+// Survives page refresh, no login required.
+// Flip back to false (or remove this block) when re-enabling auth.
+const BYPASS_AUTH = true
+
+const BYPASS_USER: User = {
+  id: 'dev-admin',
+  email: 'dev@kps.local',
+  name: 'KPS Admin (Dev)',
+  role: 'admin',
+  avatar: '👑',
+  phone: '',
+  title: 'Super Admin',
+}
+const BYPASS_PROFILE: UserProfile = {
+  id: 'dev-admin',
+  display_name: 'KPS Admin (Dev)',
+  phone: '',
+  role: 'SUPER_ADMIN',
+  status: 'ACTIVE',
+  approved_by: null,
+  approved_at: null,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+}
+// ────────────────────────────────────────────────────────────────────────────
+
 interface AuthContextValue {
   session:    Session | null
   profile:    UserProfile | null
@@ -51,10 +79,11 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession]   = useState<Session | null>(null)
-  const [profile, setProfile]   = useState<UserProfile | null>(null)
-  const [loading, setLoading]   = useState(true)
+  const [profile, setProfile]   = useState<UserProfile | null>(BYPASS_AUTH ? BYPASS_PROFILE : null)
+  const [loading, setLoading]   = useState(!BYPASS_AUTH)
 
   useEffect(() => {
+    if (BYPASS_AUTH) return
     supabase.auth.getSession().then(async ({ data: { session: s } }) => {
       setSession(s)
       if (s) setProfile(await fetchProfile(s.user.id))
@@ -68,6 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = useCallback(async (email: string, password: string) => {
+    if (BYPASS_AUTH) return
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Email หรือ password ไม่ถูกต้อง' : error.message)
     const p = await fetchProfile(data.user.id)
@@ -83,18 +113,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
+    if (BYPASS_AUTH) {
+      // eslint-disable-next-line no-alert
+      alert('Auth bypass อยู่ — ปิด BYPASS_AUTH ใน AuthContext.tsx เพื่อ logout ได้จริง')
+      return
+    }
     await supabase.auth.signOut()
   }, [])
 
-  const legacyUser = session && profile && profile.status === 'ACTIVE'
-    ? toLegacy(profile, session.user.email ?? '')
-    : null
+  const legacyUser = BYPASS_AUTH
+    ? BYPASS_USER
+    : (session && profile && profile.status === 'ACTIVE'
+        ? toLegacy(profile, session.user.email ?? '')
+        : null)
 
   return (
     <AuthContext.Provider value={{
       session, profile, legacyUser, loading, login, logout,
-      isAdmin:      profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN',
-      isSuperAdmin: profile?.role === 'SUPER_ADMIN',
+      isAdmin:      BYPASS_AUTH || profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN',
+      isSuperAdmin: BYPASS_AUTH || profile?.role === 'SUPER_ADMIN',
     }}>
       {children}
     </AuthContext.Provider>

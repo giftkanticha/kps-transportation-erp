@@ -1,12 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
 
-const url  = import.meta.env.VITE_SUPABASE_URL  as string
-const key  = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+const url  = (import.meta.env.VITE_SUPABASE_URL  as string) || 'https://placeholder.supabase.co'
+const key  = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || 'placeholder-anon-key'
 
-if (!url || !key) {
-  throw new Error('VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY must be set in .env.local')
-}
-
+// Real Supabase client is still constructed (so non-bypass code paths work
+// when env vars ARE provided). The DEV BYPASS in AuthContext short-circuits
+// before any Supabase call happens, so placeholder values are never hit.
 export const supabase = createClient(url, key)
 
 export type UserRole   = 'SUPER_ADMIN' | 'ADMIN' | 'MANAGER' | 'EMPLOYEE'
