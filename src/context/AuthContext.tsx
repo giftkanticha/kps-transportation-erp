@@ -60,24 +60,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false
+    // Safety net: never leave the user staring at a disabled login button.
+    // If anything in the init path hangs (network, Supabase outage, etc.),
+    // force the loading state off after 6s so they can at least attempt a login.
+    const timeout = setTimeout(() => {
+      if (!cancelled) {
+        console.warn('[auth] init timed out after 6s — releasing loading state')
+        setLoading(false)
+      }
+    }, 6000)
+
     ;(async () => {
+      console.log('[auth] init: calling getSession')
       try {
-        const { data: { session: s } } = await supabase.auth.getSession()
+        const { data: { session: s }, error } = await supabase.auth.getSession()
+        if (error) console.error('[auth] getSession error:', error)
+        console.log('[auth] init: getSession resolved, session?', !!s)
         if (cancelled) return
         setSession(s)
-        if (s) setProfile(await fetchProfile(s.user.id))
+        if (s) {
+          const p = await fetchProfile(s.user.id)
+          console.log('[auth] init: fetchProfile resolved, profile?', !!p, 'status:', p?.status)
+          if (!cancelled) setProfile(p)
+        }
       } catch (e) {
-        console.error('[auth] getSession failed:', e)
+        console.error('[auth] init flow threw:', e)
       } finally {
+        clearTimeout(timeout)
         if (!cancelled) setLoading(false)
       }
     })()
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, s) => {
+      console.log('[auth] onAuthStateChange:', event, 'session?', !!s)
       if (cancelled) return
       setSession(s)
       setProfile(s ? await fetchProfile(s.user.id) : null)
     })
-    return () => { cancelled = true; subscription.unsubscribe() }
+    return () => { cancelled = true; clearTimeout(timeout); subscription.unsubscribe() }
   }, [])
 
   const login = useCallback(async (email: string, password: string) => {
