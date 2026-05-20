@@ -55,9 +55,10 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
       return
     }
     try {
+      const { customType, ...rest } = form
       await insertVehicle.mutateAsync({
-        ...form,
-        type: form.type === 'อื่นๆ' ? (form.customType.trim() || 'อื่นๆ') : form.type,
+        ...rest,
+        type: form.type === 'อื่นๆ' ? (customType.trim() || 'อื่นๆ') : form.type,
         groupKind: form.groupKind,
         status: form.status as Vehicle['status'],
         odometer: +form.odometer || 0,
