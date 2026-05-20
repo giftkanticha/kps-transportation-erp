@@ -10,12 +10,13 @@ const DEMO = [
 ]
 
 export function LoginScreen() {
-  const { login, loading } = useAuth()
-  const [email,    setEmail]    = useState('')
-  const [password, setPassword] = useState('')
-  const [err,      setErr]      = useState('')
-  const [picked,   setPicked]   = useState<string | null>(null)
-  const [showReg,  setShowReg]  = useState(false)
+  const { login } = useAuth()
+  const [email,      setEmail]      = useState('')
+  const [password,   setPassword]   = useState('')
+  const [err,        setErr]        = useState('')
+  const [picked,     setPicked]     = useState<string | null>(null)
+  const [showReg,    setShowReg]    = useState(false)
+  const [submitting, setSubmitting] = useState(false)
 
   if (showReg) return <RegisterPage onBack={() => setShowReg(false)} />
 
@@ -24,8 +25,10 @@ export function LoginScreen() {
     if (!email)    { setErr('กรุณากรอก Email');    return }
     if (!password) { setErr('กรุณากรอก Password'); return }
     setErr('')
+    setSubmitting(true)
     try { await login(email, password) }
     catch (ex) { setErr((ex as Error).message) }
+    finally { setSubmitting(false) }
   }
 
   return (
@@ -70,8 +73,8 @@ export function LoginScreen() {
             </div>
           )}
 
-          <button type="submit" className="btn primary" style={{ height: 38, justifyContent: 'center', marginTop: 6 }} disabled={loading}>
-            {loading ? 'กำลังเข้าสู่ระบบ...' : <> เข้าสู่ระบบ <Icon name="arrow-right" size={15} /></>}
+          <button type="submit" className="btn primary" style={{ height: 38, justifyContent: 'center', marginTop: 6 }} disabled={submitting}>
+            {submitting ? 'กำลังเข้าสู่ระบบ...' : <> เข้าสู่ระบบ <Icon name="arrow-right" size={15} /></>}
           </button>
         </form>
 

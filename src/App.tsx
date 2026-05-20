@@ -81,7 +81,7 @@ const crumbMap: Record<string, string> = {
 }
 
 export default function App() {
-  const { legacyUser, logout, isAdmin } = useAuth()
+  const { legacyUser, logout, isAdmin, loading } = useAuth()
   const [active, setActive] = useState('dashboard')
   const [subject, setSubject] = useState<unknown>(null)
   const [collapsed, setCollapsed] = useState(false)
@@ -89,6 +89,13 @@ export default function App() {
   useEffect(() => {
     if (legacyUser?.role === 'driver') setActive('dispatch')
   }, [legacyUser?.id])
+
+  if (loading) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', flexDirection: 'column', gap: 12 }}>
+      <div style={{ width: 32, height: 32, border: '3px solid var(--line)', borderTopColor: 'var(--primary)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+      <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>กำลังโหลดระบบ...</span>
+    </div>
+  )
 
   if (!legacyUser) return <LoginScreen />
 
