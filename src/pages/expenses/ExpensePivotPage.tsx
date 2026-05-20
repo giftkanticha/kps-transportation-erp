@@ -1,15 +1,24 @@
 import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
-import { Icon, Field } from '../../components/ui'
+import { Icon, Field, VehiclePickerSidebar } from '../../components/ui'
+import { usePrint } from '../../hooks/usePrint'
 import type { ExpenseHeader, Partner, Vehicle } from '../../types'
 
 export function ExpensePivotPage() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { print } = usePrint()
+  const allVehicles = db.getAll<Vehicle>('vehicles')
   const partners = db.getAll<Partner>('partners')
   const headers = db.getAll<ExpenseHeader>('expenseHeaders')
 
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [pickedVehicles, setPickedVehicles] = useState<Set<string>>(
+    () => new Set(allVehicles.map(v => v.id)),
+  )
+  const vehicles = useMemo(
+    () => allVehicles.filter(v => pickedVehicles.has(v.id)),
+    [allVehicles, pickedVehicles],
+  )
 
   // Filter headers by date range
   const filteredHeaders = useMemo(
@@ -65,7 +74,7 @@ export function ExpensePivotPage() {
   }
 
   const handlePrint = () => {
-    window.print()
+    print('landscape')
   }
 
   return (
@@ -155,7 +164,7 @@ export function ExpensePivotPage() {
             style={{ gap: 16, fontSize: 12.5, color: 'var(--text-2)' }}
           >
             <span>
-              รถในระบบ: <strong>{vehicles.length} คัน</strong>
+              เลือกแล้ว: <strong>{vehicles.length}/{allVehicles.length} คัน</strong>
             </span>
             <span>
               คู่ค้าที่มียอด: <strong>{activeVendors.length} ราย</strong>
@@ -168,8 +177,15 @@ export function ExpensePivotPage() {
         </div>
       </div>
 
-      {/* Print area: the pivot table */}
-      <div className="print-area">
+      {/* Sidebar + Print area */}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <VehiclePickerSidebar
+          vehicles={allVehicles}
+          picked={pickedVehicles}
+          onChange={setPickedVehicles}
+        />
+
+        <div style={{ flex: 1, minWidth: 0 }} className="print-area">
         <div className="card" style={{ overflow: 'hidden' }}>
           <div className="head">
             <h3>ตารางสรุป — ค่าใช้จ่ายรวม ({dateRangeLabel()})</h3>
@@ -332,6 +348,7 @@ export function ExpensePivotPage() {
           }}
         >
           KPS Transportation ERP — สรุปค่าใช้จ่ายรวมรายคัน × คู่ค้า · ตัวเลขในหน่วยบาท
+        </div>
         </div>
       </div>
     </div>

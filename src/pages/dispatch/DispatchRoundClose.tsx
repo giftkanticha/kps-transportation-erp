@@ -283,6 +283,13 @@ function CloseForm({
     if (round.startOdometer != null && em <= round.startOdometer)
       return 'เลขไมล์ปลายต้องมากกว่าต้นรอบ'
     if (!returnAt) return 'กรุณาระบุเวลาถึงฐาน'
+    // ปิดงานต้องมีค่า KM/L (ต้องมีระยะทาง + ปริมาณน้ำมันรวม)
+    if (kmPerL == null || !isFinite(kmPerL) || kmPerL <= 0) {
+      const dist = round.startOdometer != null ? Math.max(0, em - round.startOdometer) : 0
+      if (dist <= 0) return 'ระยะทางต้อง > 0 (ไมล์ปลายมากกว่าไมล์ต้น) จึงคำนวณ KM/L ได้'
+      if (totalFuelForKmpl <= 0) return 'กรุณากรอก "น้ำมันที่เติมตอนปิดงาน (ลิตร)" เพื่อคำนวณ KM/L'
+      return 'ปิดงานไม่ได้: คำนวณ KM/L ไม่สำเร็จ — โปรดตรวจสอบไมล์/ลิตร'
+    }
     for (let i = 0; i < legsToCheck.length; i++) {
       const l = legsToCheck[i]
       if (l.legType === 'return') continue

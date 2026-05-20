@@ -634,14 +634,15 @@ function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () =>
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-      <div className="card" style={{ width: 460, maxWidth: '95vw' }}>
-        <div className="row" style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>ยืนยันการชำระเงิน</h3>
-          <button className="btn ghost icon sm" onClick={onClose}><Icon name="close" size={16} /></button>
+      <div className="card" style={{ width: 540, maxWidth: '95vw' }}>
+        <div className="row" style={{ padding: '16px 22px', borderBottom: '1px solid var(--line)', gap: 12, whiteSpace: 'nowrap' }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, flex: 1, minWidth: 0 }}>ยืนยันการชำระเงิน</h3>
+          <button className="btn ghost icon sm" onClick={onClose} style={{ flexShrink: 0 }}><Icon name="close" size={16} /></button>
         </div>
         <div style={{ padding: 22 }}>
-          <p style={{ margin: '0 0 16px', fontSize: 13.5, color: 'var(--text-2)' }}>
-            ตรวจสอบยอดก่อนปิดงาน — เมื่อยืนยันแล้วสถานะจะเปลี่ยนเป็น <strong style={{ color: 'var(--green)' }}>ชำระแล้ว</strong>
+          <p style={{ margin: '0 0 16px', fontSize: 13.5, color: 'var(--text-2)', lineHeight: 1.55, wordBreak: 'break-word' }}>
+            ตรวจสอบยอดก่อนปิดงาน — เมื่อยืนยันแล้วสถานะจะเปลี่ยนเป็น{' '}
+            <strong style={{ color: 'var(--green)', whiteSpace: 'nowrap' }}>ชำระแล้ว</strong>
           </p>
           <div style={{ padding: 16, background: 'var(--bg-sunk)', borderRadius: 10 }}>
             <div className="grid-2" style={{ gap: 10 }}>
@@ -660,9 +661,9 @@ function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () =>
             </div>
           </div>
         </div>
-        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
+        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" onClick={onClose}>ยกเลิก</button>
-          <button className="btn primary" onClick={pay}>
+          <button className="btn primary" onClick={pay} style={{ whiteSpace: 'nowrap' }}>
             <Icon name="check" size={15} /> ยืนยันชำระเงิน
           </button>
         </div>

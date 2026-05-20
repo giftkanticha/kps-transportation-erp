@@ -98,7 +98,55 @@
   /* ── Misc ─────────────────────────────────────────────────────  */
   .print-row-hide { display: none !important; }
   a { color: inherit !important; text-decoration: none !important; }
+
+  /* ── Tire Layout print (landscape A4, 2-column) ─────────────── */
+  .tire-layout-print { display: block !important; }
+  .tire-print-grid {
+    display: grid;
+    grid-template-columns: 38% 62%;
+    gap: 10mm;
+    align-items: start;
+  }
+  .tire-print-section-title {
+    font-size: 9pt;
+    font-weight: 700;
+    color: #1D4ED8;
+    border-bottom: 1px solid #1D4ED8;
+    padding-bottom: 2px;
+    margin-bottom: 6px;
+  }
+  .tire-print-left { text-align: center; }
+  .tire-print-left svg { display: block; margin: 0 auto; }
+  .tire-print-spares { text-align: left; }
+  .tire-print-tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8.5pt;
+  }
+  .tire-print-tbl th,
+  .tire-print-tbl td {
+    border: 1px solid #94a3b8 !important;
+    padding: 3px 5px !important;
+    vertical-align: middle;
+  }
+  .tire-print-tbl thead th {
+    background: #EFF6FF !important;
+    color: #1D4ED8 !important;
+    font-weight: 700;
+    font-size: 8pt;
+  }
+
+  /* ── Fuel report compact mode (#9) — fit 31 rows per A4 ─────── */
+  .fuel-report-compact { font-size: 6.5pt !important; }
+  .fuel-report-compact th,
+  .fuel-report-compact td {
+    font-size: 6.5pt !important;
+    padding: 1px 4px !important;
+    line-height: 1.15 !important;
+  }
 }
+
+.tire-layout-print { display: none; }
 
 /* ── Screen: hide hist-print-all ──────────────────────────────── */
 .hist-print-all { display: none; }
