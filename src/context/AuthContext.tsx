@@ -41,11 +41,15 @@ function toLegacy(profile: UserProfile, email: string): User {
 }
 
 async function fetchProfile(userId: string): Promise<UserProfile | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('user_profiles')
     .select('*')
     .eq('id', userId)
-    .single()
+    .maybeSingle()
+  if (error) {
+    console.error('[auth] fetchProfile failed:', error.message)
+    return null
+  }
   return data as UserProfile | null
 }
 
@@ -55,16 +59,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading]   = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
-      setSession(s)
-      if (s) setProfile(await fetchProfile(s.user.id))
-      setLoading(false)
-    })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
+    let cancelled = false
+    // Safety net: never leave the user staring at a disabled login button.
+    // If anything in the init path hangs (network, Supabase outage, etc.),
+    // force the loading state off after 6s so they can at least attempt a login.
+    const timeout = setTimeout(() => {
+      if (!cancelled) {
+        console.warn('[auth] init timed out after 6s — releasing loading state')
+        setLoading(false)
+      }
+    }, 6000)
+
+    ;(async () => {
+      console.log('[auth] init: calling getSession')
+      try {
+        const { data: { session: s }, error } = await supabase.auth.getSession()
+        if (error) console.error('[auth] getSession error:', error)
+        console.log('[auth] init: getSession resolved, session?', !!s)
+        if (cancelled) return
+        setSession(s)
+        if (s) {
+          const p = await fetchProfile(s.user.id)
+          console.log('[auth] init: fetchProfile resolved, profile?', !!p, 'status:', p?.status)
+          if (!cancelled) setProfile(p)
+        }
+      } catch (e) {
+        console.error('[auth] init flow threw:', e)
+      } finally {
+        clearTimeout(timeout)
+        if (!cancelled) setLoading(false)
+      }
+    })()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, s) => {
+      console.log('[auth] onAuthStateChange:', event, 'session?', !!s)
+      if (cancelled) return
       setSession(s)
       setProfile(s ? await fetchProfile(s.user.id) : null)
     })
-    return () => subscription.unsubscribe()
+    return () => { cancelled = true; clearTimeout(timeout); subscription.unsubscribe() }
   }, [])
 
   const login = useCallback(async (email: string, password: string) => {

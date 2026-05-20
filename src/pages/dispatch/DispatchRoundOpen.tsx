@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import type { Vehicle, Employee, Dispatch, User } from '../../types'
 import { Icon, StatusBadge, Field } from '../../components/ui'
 
@@ -39,8 +40,8 @@ function nowLocal(): string {
 
 export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
   const [tick, setTick] = useState(0)
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
-  const employees = useMemo(() => db.getAll<Employee>('employees'), [])
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
   const drafts = useMemo(
     () => db.getAll<Dispatch>('dispatch').filter(d => d.roundStatus === 'draft'),
     [tick],
@@ -206,7 +207,15 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
           </div>
           <div className="grid-2" style={{ gap: 14, marginBottom: 14 }}>
             <Field label="เลือกรถ *">
-              <select value={vehicleId} onChange={e => setVehicleId(e.target.value)}>
+              <select
+                value={vehicleId}
+                onChange={e => {
+                  const newVid = e.target.value
+                  setVehicleId(newVid)
+                  const v = vehicles.find(x => x.id === newVid)
+                  if (v?.driverId) setDriverId(v.driverId)
+                }}
+              >
                 <option value="">-- เลือก --</option>
                 {vehicles.map(v => (
                   <option key={v.id} value={v.id}>{v.plate} ({v.brand} · {v.type})</option>

@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
+import { useList, useUpdate, useDelete } from '../../hooks/useTable'
 import type { Vehicle, Employee, User } from '../../types'
 import { Icon, StatusBadge, Field } from '../../components/ui'
 
@@ -81,7 +82,7 @@ interface VehicleEditForm {
   year: string
   type: string
   customType: string
-  group: VehicleGroup
+  groupKind: VehicleGroup
   status: Vehicle['status']
   driverId: string
   odometer: string
@@ -106,7 +107,8 @@ function VehicleEditModal({
   onSuccess: (msg: string) => void
   onError: (msg: string) => void
 }) {
-  const employees = db.getAll<Employee>('employees')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
   const isCustomType = !VEHICLE_TYPES.includes(vehicle.type)
   const [form, setForm] = useState<VehicleEditForm>({
     plate: vehicle.plate,
@@ -114,7 +116,7 @@ function VehicleEditModal({
     year: String(vehicle.year),
     type: isCustomType ? 'อื่นๆ' : vehicle.type,
     customType: isCustomType ? vehicle.type : '',
-    group: (vehicle.group ?? 'TRANSPORT') as VehicleGroup,
+    groupKind: (vehicle.groupKind ?? 'TRANSPORT') as VehicleGroup,
     status: vehicle.status,
     driverId: vehicle.driverId ?? '',
     odometer: String(vehicle.odometer),
@@ -136,30 +138,33 @@ function VehicleEditModal({
     e => e.position === 'คนขับ' && (!e.vehicleId || e.vehicleId === vehicle.id),
   )
 
-  const submit = () => {
+  const submit = async () => {
     if (saving) return
     if (!form.plate.trim()) { onError('กรุณากรอกทะเบียนรถ'); return }
     if (!form.brand.trim()) { onError('กรุณากรอกยี่ห้อรถ'); return }
     setSaving(true)
     try {
       const effectiveType = form.type === 'อื่นๆ' ? (form.customType.trim() || 'อื่นๆ') : form.type
-      db.update<Vehicle>('vehicles', vehicle.id, {
-        plate: form.plate.trim(),
-        brand: form.brand.trim(),
-        year: Number(form.year) || vehicle.year,
-        type: effectiveType,
-        group: form.group,
-        status: form.status,
-        driverId: form.driverId || null,
-        odometer: Number(form.odometer) || 0,
-        nextServiceKm: Number(form.nextServiceKm) || 0,
-        fuel: Math.min(100, Math.max(0, Number(form.fuel) || 0)),
-        purchaseDate: form.purchaseDate,
-        lastService: form.lastService,
-        nextService: form.nextService,
-        tax: form.tax,
-        insurance: form.insurance,
-        dispatchPermit: form.dispatchPermit,
+      await updateVehicle.mutateAsync({
+        id: vehicle.id,
+        patch: {
+          plate: form.plate.trim(),
+          brand: form.brand.trim(),
+          year: Number(form.year) || vehicle.year,
+          type: effectiveType,
+          groupKind: form.groupKind,
+          status: form.status,
+          driverId: form.driverId || null,
+          odometer: Number(form.odometer) || 0,
+          nextServiceKm: Number(form.nextServiceKm) || 0,
+          fuel: Math.min(100, Math.max(0, Number(form.fuel) || 0)),
+          purchaseDate: form.purchaseDate,
+          lastService: form.lastService,
+          nextService: form.nextService,
+          tax: form.tax,
+          insurance: form.insurance,
+          dispatchPermit: form.dispatchPermit,
+        },
       })
       onSuccess('✅ บันทึกข้อมูลเรียบร้อย')
     } catch (err) {
@@ -253,12 +258,12 @@ function VehicleEditModal({
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
-                const active = form.group === g
+                const active = form.groupKind === g
                 return (
                   <button
                     key={g}
                     type="button"
-                    onClick={() => set('group', g)}
+                    onClick={() => set('groupKind', g)}
                     style={{
                       flex: 1, padding: '10px 0', fontSize: 13, fontWeight: 600,
                       fontFamily: 'inherit', cursor: 'pointer', transition: 'all .12s',
@@ -274,7 +279,7 @@ function VehicleEditModal({
               })}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
-              {form.group === 'INTERNAL'
+              {form.groupKind === 'INTERNAL'
                 ? 'น้ำมันถูกตัดสต็อคทันที — ไม่ต้องผูกรอบงาน'
                 : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
             </div>
@@ -479,9 +484,9 @@ function RowActionMenu({
 }
 
 export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
-  const [tick, setTick] = useState(0)
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
-  const employees = useMemo(() => db.getAll<Employee>('employees'), [tick])
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const deleteVehicle = useDelete('vehicles')
   const vehicleTypes = useMemo(() => {
     const types = [...new Set(vehicles.map(v => v.type))].sort()
     return ['ทั้งหมด', ...types]
@@ -510,11 +515,10 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
     })
   }, [vehicles, q, filterStatus, filterType])
 
-  const confirmDelete = (v: Vehicle) => {
+  const confirmDelete = async (v: Vehicle) => {
     try {
-      db.remove('vehicles', v.id)
+      await deleteVehicle.mutateAsync(v.id)
       setDeletingVehicle(null)
-      setTick(t => t + 1)
       setToast({ kind: 'success', msg: `✅ ลบรถ ${v.plate} เรียบร้อย` })
     } catch (err) {
       setToast({ kind: 'error', msg: err instanceof Error ? err.message : 'ลบไม่สำเร็จ' })
@@ -609,9 +613,9 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
                     <td>{v.brand}</td>
                     <td>{v.type}</td>
                     <td>
-                      {v.group === 'INTERNAL' ? (
+                      {v.groupKind === 'INTERNAL' ? (
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#F0FDF4', color: '#166534' }}>🏭 โรงงาน</span>
-                      ) : v.group === 'TRANSPORT' ? (
+                      ) : v.groupKind === 'TRANSPORT' ? (
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#EFF6FF', color: '#1D4ED8' }}>🚛 ขนส่ง</span>
                       ) : (
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>
@@ -681,7 +685,6 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
           onClose={() => setEditingVehicle(null)}
           onSuccess={msg => {
             setEditingVehicle(null)
-            setTick(t => t + 1)
             setToast({ kind: 'success', msg })
           }}
           onError={msg => setToast({ kind: 'error', msg })}

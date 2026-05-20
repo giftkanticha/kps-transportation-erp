@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { db, uid } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import type { Vehicle, Employee, Dispatch as DispatchJob, FuelTransaction } from '../../types'
 
 interface Props {
@@ -31,11 +32,10 @@ export function QuickOpenTripModal({ vehicleId, date, floatingTxId, onClose, onS
   const [destination, setDestination] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const vehicle = useMemo(() => db.get<Vehicle>('vehicles', vehicleId), [vehicleId])
-  const driver = useMemo(
-    () => vehicle?.driverId ? db.get<Employee>('employees', vehicle.driverId) : null,
-    [vehicle],
-  )
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const vehicle = vehicles.find(v => v.id === vehicleId)
+  const driver = vehicle?.driverId ? (employees.find(e => e.id === vehicle.driverId) ?? null) : null
 
   const handleConfirm = () => {
     if (saving) return

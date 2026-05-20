@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import type { Vehicle, Employee, Dispatch, DispatchLeg, Customer, FuelRound } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -489,9 +490,9 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
     () => (subj?.id ? db.get<Dispatch>('dispatch', subj.id) : undefined),
     [subj?.id, tick],
   )
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const employees = db.getAll<Employee>('employees')
-  const customers = db.getAll<Customer>('customers')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: customers = [] } = useList<Customer>('customers')
 
   const [editingLeg, setEditingLeg] = useState<{ index: number; data: LegFormState } | null>(null)
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null)
@@ -692,7 +693,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                       <div style={{ fontSize: 13 }}>{l.origin}</div>
                       <div className="muted" style={{ fontSize: 11.5 }}>→ {l.destination}</div>
                     </td>
-                    <td>{l.customerId ? db.nameOf('customers', l.customerId) : <span className="muted">—</span>}</td>
+                    <td>{l.customerId ? (customers.find(c => c.id === l.customerId)?.name ?? '—') : <span className="muted">—</span>}</td>
                     <td>{l.cargoType || <span className="muted">—</span>}</td>
                     <td><span className="badge" style={{ fontSize: 11 }}>{legTypeLabel(l.legType)}</span></td>
                     <td className="num">{(l.weight || 0).toFixed(2)}</td>
