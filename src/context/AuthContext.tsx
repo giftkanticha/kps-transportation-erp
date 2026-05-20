@@ -60,42 +60,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false
-    // Safety net: never leave the user staring at a disabled login button.
-    // If anything in the init path hangs (network, Supabase outage, etc.),
-    // force the loading state off after 6s so they can at least attempt a login.
+    // Safety net: if onAuthStateChange never fires (extreme edge case),
+    // release loading after 3s so the user can see the login form.
     const timeout = setTimeout(() => {
       if (!cancelled) {
-        console.warn('[auth] init timed out after 6s — releasing loading state')
+        console.warn('[auth] init timed out after 3s — releasing loading state')
         setLoading(false)
       }
-    }, 6000)
+    }, 3000)
 
-    ;(async () => {
-      console.log('[auth] init: calling getSession')
-      try {
-        const { data: { session: s }, error } = await supabase.auth.getSession()
-        if (error) console.error('[auth] getSession error:', error)
-        console.log('[auth] init: getSession resolved, session?', !!s)
-        if (cancelled) return
-        setSession(s)
-        if (s) {
-          const p = await fetchProfile(s.user.id)
-          console.log('[auth] init: fetchProfile resolved, profile?', !!p, 'status:', p?.status)
-          if (!cancelled) setProfile(p)
-        }
-      } catch (e) {
-        console.error('[auth] init flow threw:', e)
-      } finally {
-        clearTimeout(timeout)
-        if (!cancelled) setLoading(false)
-      }
-    })()
-
+    // NOTE: we deliberately do NOT call supabase.auth.getSession() — it has a
+    // known hang issue in supabase-js v2 where it deadlocks waiting for a
+    // refresh-token request that never completes. onAuthStateChange fires
+    // INITIAL_SESSION / SIGNED_IN reliably with the same session data, so we
+    // use it as the single source of truth.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, s) => {
       console.log('[auth] onAuthStateChange:', event, 'session?', !!s)
       if (cancelled) return
       setSession(s)
-      setProfile(s ? await fetchProfile(s.user.id) : null)
+      try {
+        if (s) {
+          console.log('[auth] fetching profile for', s.user.id)
+          const p = await fetchProfile(s.user.id)
+          console.log('[auth] fetchProfile resolved, profile?', !!p, 'status:', p?.status)
+          if (!cancelled) setProfile(p)
+        } else {
+          setProfile(null)
+        }
+      } catch (e) {
+        console.error('[auth] profile fetch threw:', e)
+      } finally {
+        clearTimeout(timeout)
+        if (!cancelled) setLoading(false)
+      }
     })
     return () => { cancelled = true; clearTimeout(timeout); subscription.unsubscribe() }
   }, [])
