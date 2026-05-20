@@ -41,11 +41,15 @@ function toLegacy(profile: UserProfile, email: string): User {
 }
 
 async function fetchProfile(userId: string): Promise<UserProfile | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('user_profiles')
     .select('*')
     .eq('id', userId)
-    .single()
+    .maybeSingle()
+  if (error) {
+    console.error('[auth] fetchProfile failed:', error.message)
+    return null
+  }
   return data as UserProfile | null
 }
 
@@ -55,16 +59,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading]   = useState(true)
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
-      setSession(s)
-      if (s) setProfile(await fetchProfile(s.user.id))
-      setLoading(false)
-    })
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data: { session: s } } = await supabase.auth.getSession()
+        if (cancelled) return
+        setSession(s)
+        if (s) setProfile(await fetchProfile(s.user.id))
+      } catch (e) {
+        console.error('[auth] getSession failed:', e)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
+      if (cancelled) return
       setSession(s)
       setProfile(s ? await fetchProfile(s.user.id) : null)
     })
-    return () => subscription.unsubscribe()
+    return () => { cancelled = true; subscription.unsubscribe() }
   }, [])
 
   const login = useCallback(async (email: string, password: string) => {
