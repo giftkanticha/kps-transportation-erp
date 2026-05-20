@@ -308,30 +308,34 @@ export function VehicleManagement() {
       status: form.isActive ? form.status : 'maintenance',
     }
 
-    if (editId) {
-      await updateVehicle.mutateAsync({ id: editId, patch })
-    } else {
-      await insertVehicle.mutateAsync({
-        plate: patch.plate!,
-        brand: patch.brand!,
-        type: patch.type!,
-        groupKind: patch.groupKind!,
-        fuel: patch.fuel!,
-        status: patch.status!,
-        year: new Date().getFullYear(),
-        driverId: null,
-        odometer: 0,
-        nextServiceKm: 0,
-        lastService: '',
-        nextService: '',
-        purchaseDate: '',
-        tax: '',
-        insurance: '',
-        dispatchPermit: '',
-      })
+    try {
+      if (editId) {
+        await updateVehicle.mutateAsync({ id: editId, patch })
+      } else {
+        await insertVehicle.mutateAsync({
+          plate: patch.plate!,
+          brand: patch.brand!,
+          type: patch.type!,
+          groupKind: patch.groupKind!,
+          fuel: patch.fuel!,
+          status: patch.status!,
+          year: new Date().getFullYear(),
+          driverId: null,
+          odometer: 0,
+          nextServiceKm: 0,
+          lastService: '',
+          nextService: '',
+          purchaseDate: '',
+          tax: '',
+          insurance: '',
+          dispatchPermit: '',
+        })
+      }
+      setModal(null)
+    } catch (e) {
+      console.error('[VehicleManagement] save failed:', e)
+      alert('บันทึกไม่สำเร็จ: ' + (e as Error).message)
     }
-
-    setModal(null)
   }
 
   const existingPlates = vehicles.map(v => v.plate)
