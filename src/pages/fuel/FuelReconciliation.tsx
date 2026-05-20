@@ -81,7 +81,7 @@ export function FuelReconciliation() {
       const vehicle = vehicles.find(v => v.id === lr.vehicleId)
       const isFactoryFuel = isFactory(lr)
       const source = isFactoryFuel ? 'FACTORY_TANK' : 'EXTERNAL_PUMP'
-      const group = vehicle?.group ?? 'TRANSPORT'
+      const group = vehicle?.groupKind ?? 'TRANSPORT'
       let status: FuelTransaction['status'] = 'FLOATING'
 
       if (group === 'INTERNAL') {
@@ -222,7 +222,7 @@ export function FuelReconciliation() {
                     <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 6 }}>{r.vehicle.brand}</span>
                   </td>
                   <td style={{ padding: '9px 14px' }}>
-                    {r.vehicle.group === 'INTERNAL' ? (
+                    {r.vehicle.groupKind === 'INTERNAL' ? (
                       <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: '#F0FDF4', color: '#166534' }}>🏭 โรงงาน</span>
                     ) : (
                       <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: '#EFF6FF', color: '#1D4ED8' }}>🚛 ขนส่ง</span>

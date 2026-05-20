@@ -15,7 +15,7 @@ interface VehicleForm {
   year: string
   type: string
   customType: string
-  group: VehicleGroup
+  groupKind: VehicleGroup
   status: string
   driverId: string
   odometer: number
@@ -35,7 +35,7 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
     year: '',
     type: '10ล้อ',
     customType: '',
-    group: 'TRANSPORT',
+    groupKind: 'TRANSPORT',
     status: 'available',
     driverId: '',
     odometer: 0,
@@ -54,20 +54,25 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
       alert('กรุณากรอกทะเบียนและยี่ห้อ')
       return
     }
-    await insertVehicle.mutateAsync({
-      ...form,
-      type: form.type === 'อื่นๆ' ? (form.customType.trim() || 'อื่นๆ') : form.type,
-      group: form.group,
-      status: form.status as Vehicle['status'],
-      odometer: +form.odometer || 0,
-      nextServiceKm: +form.nextServiceKm || 0,
-      year: +form.year || new Date().getFullYear(),
-      driverId: form.driverId || null,
-      fuel: 100,
-      lastService: '',
-      nextService: '',
-    })
-    setActive('vehicles')
+    try {
+      await insertVehicle.mutateAsync({
+        ...form,
+        type: form.type === 'อื่นๆ' ? (form.customType.trim() || 'อื่นๆ') : form.type,
+        groupKind: form.groupKind,
+        status: form.status as Vehicle['status'],
+        odometer: +form.odometer || 0,
+        nextServiceKm: +form.nextServiceKm || 0,
+        year: +form.year || new Date().getFullYear(),
+        driverId: form.driverId || null,
+        fuel: 100,
+        lastService: '',
+        nextService: '',
+      })
+      setActive('vehicles')
+    } catch (e) {
+      console.error('[VehicleAdd] insert failed:', e)
+      alert('บันทึกไม่สำเร็จ: ' + (e as Error).message)
+    }
   }
 
   const availableDrivers = employees.filter(
@@ -179,12 +184,12 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
             {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
-              const active = form.group === g
+              const active = form.groupKind === g
               return (
                 <button
                   key={g}
                   type="button"
-                  onClick={() => set('group', g)}
+                  onClick={() => set('groupKind', g)}
                   style={{
                     flex: 1, padding: '12px 0', fontSize: 14, fontWeight: 600,
                     fontFamily: 'inherit', cursor: 'pointer', transition: 'all .12s',
@@ -200,7 +205,7 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
             })}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
-            {form.group === 'INTERNAL'
+            {form.groupKind === 'INTERNAL'
               ? 'น้ำมันถูกตัดสต็อคทันที — ไม่ต้องผูกรอบงาน'
               : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
           </div>

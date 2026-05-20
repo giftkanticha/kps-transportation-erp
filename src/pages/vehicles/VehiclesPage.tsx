@@ -82,7 +82,7 @@ interface VehicleEditForm {
   year: string
   type: string
   customType: string
-  group: VehicleGroup
+  groupKind: VehicleGroup
   status: Vehicle['status']
   driverId: string
   odometer: string
@@ -116,7 +116,7 @@ function VehicleEditModal({
     year: String(vehicle.year),
     type: isCustomType ? 'อื่นๆ' : vehicle.type,
     customType: isCustomType ? vehicle.type : '',
-    group: (vehicle.group ?? 'TRANSPORT') as VehicleGroup,
+    groupKind: (vehicle.groupKind ?? 'TRANSPORT') as VehicleGroup,
     status: vehicle.status,
     driverId: vehicle.driverId ?? '',
     odometer: String(vehicle.odometer),
@@ -152,7 +152,7 @@ function VehicleEditModal({
           brand: form.brand.trim(),
           year: Number(form.year) || vehicle.year,
           type: effectiveType,
-          group: form.group,
+          groupKind: form.groupKind,
           status: form.status,
           driverId: form.driverId || null,
           odometer: Number(form.odometer) || 0,
@@ -258,12 +258,12 @@ function VehicleEditModal({
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
               {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
-                const active = form.group === g
+                const active = form.groupKind === g
                 return (
                   <button
                     key={g}
                     type="button"
-                    onClick={() => set('group', g)}
+                    onClick={() => set('groupKind', g)}
                     style={{
                       flex: 1, padding: '10px 0', fontSize: 13, fontWeight: 600,
                       fontFamily: 'inherit', cursor: 'pointer', transition: 'all .12s',
@@ -279,7 +279,7 @@ function VehicleEditModal({
               })}
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
-              {form.group === 'INTERNAL'
+              {form.groupKind === 'INTERNAL'
                 ? 'น้ำมันถูกตัดสต็อคทันที — ไม่ต้องผูกรอบงาน'
                 : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
             </div>
@@ -613,9 +613,9 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
                     <td>{v.brand}</td>
                     <td>{v.type}</td>
                     <td>
-                      {v.group === 'INTERNAL' ? (
+                      {v.groupKind === 'INTERNAL' ? (
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#F0FDF4', color: '#166534' }}>🏭 โรงงาน</span>
-                      ) : v.group === 'TRANSPORT' ? (
+                      ) : v.groupKind === 'TRANSPORT' ? (
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#EFF6FF', color: '#1D4ED8' }}>🚛 ขนส่ง</span>
                       ) : (
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>
