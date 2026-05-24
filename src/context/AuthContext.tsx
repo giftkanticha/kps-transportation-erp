@@ -7,7 +7,7 @@ import type { User, KPSRole } from '../types'
 // When true, skip Supabase auth entirely and use a hardcoded admin user.
 // Survives page refresh, no login required.
 // Flip back to false (or remove this block) when re-enabling auth.
-const BYPASS_AUTH = true
+const BYPASS_AUTH = false
 
 const BYPASS_USER: User = {
   id: 'dev-admin',

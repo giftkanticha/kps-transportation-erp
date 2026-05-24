@@ -82,7 +82,7 @@ function autoRoute(
     }
   }
 
-  const group = vehicle.group ?? 'TRANSPORT'
+  const group = vehicle.groupKind ?? 'TRANSPORT'
   if (group === 'INTERNAL') {
     return { status: 'INTERNAL_DEDUCTED', statusLabel: '🟢 ตัดสต็อค (รถโรงงาน)', tripId: null, error: '' }
   }

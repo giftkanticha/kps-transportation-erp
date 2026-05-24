@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { db } from '../../lib/db'
+import { useList, useInsert } from '../../hooks/useTable'
 import type { Employee, Vehicle } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -15,7 +15,7 @@ interface VehicleForm {
   year: string
   type: string
   customType: string
-  group: VehicleGroup
+  groupKind: VehicleGroup
   status: string
   driverId: string
   odometer: number
@@ -27,14 +27,15 @@ interface VehicleForm {
 }
 
 export function VehicleAdd({ setActive }: VehicleAddProps) {
-  const employees = db.getAll<Employee>('employees')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const insertVehicle = useInsert<Vehicle>('vehicles')
   const [form, setForm] = useState<VehicleForm>({
     plate: '',
     brand: '',
     year: '',
     type: '10ล้อ',
     customType: '',
-    group: 'TRANSPORT',
+    groupKind: 'TRANSPORT',
     status: 'available',
     driverId: '',
     odometer: 0,
@@ -53,20 +54,31 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
       alert('กรุณากรอกทะเบียนและยี่ห้อ')
       return
     }
-    db.add<Partial<Vehicle>>('vehicles', {
-      ...form,
-      type: form.type === 'อื่นๆ' ? (form.customType.trim() || 'อื่นๆ') : form.type,
-      group: form.group,
-      status: form.status as Vehicle['status'],
-      odometer: +form.odometer || 0,
-      nextServiceKm: +form.nextServiceKm || 0,
-      year: +form.year || new Date().getFullYear(),
-      driverId: form.driverId || null,
-      fuel: 100,
-      lastService: '',
-      nextService: '',
-    })
-    setActive('vehicles')
+    if (insertVehicle.isPending) return
+    insertVehicle.mutate(
+      {
+        plate: form.plate.trim(),
+        brand: form.brand.trim(),
+        type: form.type === 'อื่นๆ' ? (form.customType.trim() || 'อื่นๆ') : form.type,
+        groupKind: form.groupKind,
+        status: form.status as Vehicle['status'],
+        odometer: +form.odometer || 0,
+        nextServiceKm: +form.nextServiceKm || 0,
+        year: +form.year || new Date().getFullYear(),
+        driverId: form.driverId || null,
+        fuel: 100,
+        lastService: '',
+        nextService: '',
+        purchaseDate: form.purchaseDate,
+        tax: form.tax,
+        insurance: form.insurance,
+        dispatchPermit: form.dispatchPermit,
+      },
+      {
+        onSuccess: () => setActive('vehicles'),
+        onError: (err) => alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'),
+      },
+    )
   }
 
   const availableDrivers = employees.filter(
@@ -178,12 +190,12 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
             {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
-              const active = form.group === g
+              const active = form.groupKind === g
               return (
                 <button
                   key={g}
                   type="button"
-                  onClick={() => set('group', g)}
+                  onClick={() => set('groupKind', g)}
                   style={{
                     flex: 1, padding: '12px 0', fontSize: 14, fontWeight: 600,
                     fontFamily: 'inherit', cursor: 'pointer', transition: 'all .12s',
@@ -199,7 +211,7 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
             })}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
-            {form.group === 'INTERNAL'
+            {form.groupKind === 'INTERNAL'
               ? 'น้ำมันถูกตัดสต็อคทันที — ไม่ต้องผูกรอบงาน'
               : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
           </div>
