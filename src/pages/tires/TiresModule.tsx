@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { Icon } from '../../components/ui/Icon'
@@ -322,9 +322,87 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverT
 
 // ── Tab 1: All Tires ─────────────────────────────────────────────
 
+function InstallTireModal({ tire, onClose, onDone }: { tire: Tire; onClose: () => void; onDone: () => void }) {
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const updateTire = useUpdate<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
+  const [vehicleId, setVehicleId] = useState('')
+  const [position, setPosition] = useState('')
+
+  const vehicle = vehicles.find((v) => v.id === vehicleId)
+  const wc = wcFrom(vehicle?.type ?? '')
+  const layout = TL[wc] ?? TL[10]
+  const allPos = layout.pos.map((p) => p.pos).concat(['spare_1', 'spare_2'])
+  const occupied: Record<string, Tire> = {}
+  tires
+    .filter((t) => t.vehicleId === vehicleId && t.position && t.id !== tire.id)
+    .forEach((t) => { occupied[t.position as string] = t })
+
+  const confirm = async () => {
+    if (!vehicleId) { alert('กรุณาเลือกรถ'); return }
+    if (!position) { alert('กรุณาเลือกตำแหน่ง'); return }
+    if (occupied[position]) { alert('ตำแหน่งนี้มียางอยู่แล้ว — เลือกตำแหน่งว่าง หรือใช้ "สลับยาง"'); return }
+    const odo = vehicle?.odometer ?? 0
+    const today = new Date().toISOString().slice(0, 10)
+    await updateTire.mutateAsync({
+      id: tire.id,
+      patch: { status: 'in-use', vehicleId, position, installedDate: today, installedOdometer: odo },
+    })
+    await insertEvent.mutateAsync({
+      tireId: tire.id, vehicleId, eventType: 'install', date: today,
+      odometer: odo, fromPos: null, toPos: position, note: 'ติดตั้งจากคลัง', userId: 'e10',
+    })
+    onDone()
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100 }}
+      onClick={onClose}
+    >
+      <div className="card" style={{ width: 480, maxWidth: '95vw', background: '#fff', borderRadius: 14 }} onClick={(e) => e.stopPropagation()}>
+        <div className="row" style={{ padding: '16px 22px', borderBottom: '1px solid var(--line)' }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>ใส่ยางลงล้อ</h3>
+          <button className="btn ghost icon sm" onClick={onClose} style={{ marginLeft: 'auto' }}><Icon name="close" size={16} /></button>
+        </div>
+        <div style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ padding: 14, background: 'var(--bg-sunk)', borderRadius: 10 }}>
+            <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>{tire.serial}</span>
+            <span className="muted" style={{ marginLeft: 8 }}>{tire.brand} {tire.model} · {tire.size}</span>
+          </div>
+          <Field label="เลือกรถ *">
+            <select value={vehicleId} onChange={(e) => { setVehicleId(e.target.value); setPosition('') }}>
+              <option value="">-- เลือกรถ --</option>
+              {vehicles.map((v) => <option key={v.id} value={v.id}>{v.plate} ({v.type})</option>)}
+            </select>
+          </Field>
+          <Field label="ตำแหน่ง *">
+            <select value={position} onChange={(e) => setPosition(e.target.value)} disabled={!vehicleId}>
+              <option value="">-- เลือกตำแหน่ง --</option>
+              {allPos.map((p) => {
+                const t = occupied[p]
+                return <option key={p} value={p} disabled={!!t}>{p} {t ? `(มียาง ${t.serial})` : '(ว่าง)'}</option>
+              })}
+            </select>
+          </Field>
+        </div>
+        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn" onClick={onClose}>ยกเลิก</button>
+          <button className="btn primary" onClick={confirm} disabled={!vehicleId || !position}>
+            <Icon name="check" size={15} /> ยืนยันติดตั้ง
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void }) {
   const [open, setOpen] = useState(false)
-  const [modal, setModal] = useState<'history' | 'swap' | null>(null)
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
+  const [modal, setModal] = useState<'history' | 'swap' | 'install' | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: allTires = [] } = useList<Tire>('tires')
   const updateTire = useUpdate<Tire>('tires')
@@ -332,6 +410,7 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
 
   const vehicle = tire.vehicleId ? vehicles.find((v) => v.id === tire.vehicleId) : undefined
   const onVehicle = tire.status === 'in-use' && !!vehicle
+  const canInstall = tire.status === 'stock' || tire.status === 'spare'
 
   const tireMap = useMemo(() => {
     const m: Record<string, Tire> = {}
@@ -389,27 +468,44 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
     { icon: 'dashboard', label: 'ดูประวัติ', action: () => { setOpen(false); setModal('history') } },
     ...(onVehicle ? [{ icon: 'arrow-right', label: 'สลับยาง', action: () => { setOpen(false); setModal('swap') } }] : []),
     ...(onVehicle ? [{ icon: 'package', label: 'ถอดเข้าคลัง', action: moveToStock }] : []),
+    ...(canInstall ? [{ icon: 'tire', label: 'ใส่ลงล้อ', action: () => { setOpen(false); setModal('install') } }] : []),
     { icon: 'trash', label: 'หมดสภาพ', danger: true, action: markScrapped },
   ]
+
+  const MENU_W = 160
+  const toggle = () => {
+    if (open) { setOpen(false); return }
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) {
+      const menuH = actions.length * 38 + 12
+      const openUp = r.bottom + menuH > window.innerHeight && r.top - menuH > 0
+      setCoords({
+        top: openUp ? r.top - menuH - 4 : r.bottom + 4,
+        left: Math.max(8, r.right - MENU_W),
+      })
+    }
+    setOpen(true)
+  }
+
   return (
     <div style={{ position: 'relative' }}>
-      <button className="btn ghost icon sm" onClick={() => setOpen((o) => !o)}>
+      <button ref={btnRef} className="btn ghost icon sm" onClick={toggle}>
         <Icon name="more" size={16} />
       </button>
-      {open && (
+      {open && coords && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 90 }} onClick={() => setOpen(false)} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1090 }} onClick={() => setOpen(false)} />
           <div
             style={{
-              position: 'absolute',
-              right: 0,
-              top: 28,
-              zIndex: 100,
+              position: 'fixed',
+              top: coords.top,
+              left: coords.left,
+              zIndex: 1100,
               background: '#fff',
               border: '1px solid var(--line)',
               borderRadius: 10,
-              boxShadow: '0 4px 16px rgba(0,0,0,.1)',
-              minWidth: 150,
+              boxShadow: '0 4px 16px rgba(0,0,0,.15)',
+              width: MENU_W,
               padding: 6,
             }}
           >
@@ -440,6 +536,13 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
           tire={tire}
           vehicle={vehicle}
           tireMap={tireMap}
+          onClose={() => setModal(null)}
+          onDone={() => { setModal(null); onRefresh() }}
+        />
+      )}
+      {modal === 'install' && (
+        <InstallTireModal
+          tire={tire}
           onClose={() => setModal(null)}
           onDone={() => { setModal(null); onRefresh() }}
         />
@@ -695,8 +798,7 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
                           background: 'none', border: 'none', padding: 0,
                           fontWeight: 700, color: 'var(--primary)',
                           fontFamily: 'var(--font-mono)', fontSize: 'inherit',
-                          cursor: 'pointer', textDecoration: 'underline',
-                          textDecorationStyle: 'dotted', textUnderlineOffset: 3,
+                          cursor: 'pointer', textDecoration: 'none',
                         }}
                       >
                         {t.serial}
