@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import type { SubDriver, SubJob, User, Subcontractor, Vehicle } from '../../types'
-import { db, uid } from '../../lib/db'
+import { db } from '../../lib/db'
+import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info, PrintButton } from '../../components/ui'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -67,8 +68,10 @@ interface DriverEditModalProps {
 
 function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
   const isNew = !driver
-  const subs = db.getAll<Subcontractor>('subcontractors')
-  const allDrivers = db.getAll<SubDriver>('subDrivers')
+  const { data: subs = [] } = useList<Subcontractor>('subcontractors')
+  const { data: allDrivers = [] } = useList<SubDriver>('sub_drivers')
+  const insertDriver = useInsert<SubDriver>('sub_drivers')
+  const updateDriver = useUpdate<SubDriver>('sub_drivers')
   const nextCode = isNew
     ? 'D' + String(
         allDrivers.reduce((max, d) => {
@@ -99,16 +102,16 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
   const set = <K extends keyof typeof form>(k: K, v: typeof form[K]) =>
     setForm(f => ({ ...f, [k]: v }))
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim() || !form.plate.trim() || !form.phone.trim()) {
       alert('กรุณากรอก ชื่อ, ทะเบียนรถ และเบอร์โทร')
       return
     }
     const payload = { ...form, vehicleTypes: driver?.vehicleTypes ?? [] }
     if (isNew) {
-      db.add<SubDriver>('subDrivers', { ...payload, id: uid('sd') })
+      await insertDriver.mutateAsync(payload)
     } else {
-      db.update<SubDriver>('subDrivers', driver!.id, payload)
+      await updateDriver.mutateAsync({ id: driver!.id, patch: payload })
     }
     onSaved()
     onClose()
@@ -248,8 +251,10 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
 
 function SubOpenForm() {
   const today = new Date().toISOString().slice(0, 10)
-  const subDrivers = db.getAll<SubDriver>('subDrivers').filter(d => d.status === 'active')
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: allSubDrivers = [] } = useList<SubDriver>('sub_drivers')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const insertJob = useInsert<SubJob>('sub_jobs')
+  const subDrivers = allSubDrivers.filter(d => d.status === 'active')
 
   const blank = {
     date: today,
@@ -299,13 +304,12 @@ function SubOpenForm() {
     form.mode === 'per_kg' ? 'บาท / กก.' :
     'บาทเหมา'
 
-  const save = () => {
+  const save = async () => {
     if (!form.driverId) { alert('กรุณาเลือกทะเบียนรถรับจ้าง'); return }
     if (!form.destination.trim()) { alert('กรุณาระบุปลายทาง'); return }
     if (!form.price) { alert('กรุณากรอกค่าบรรทุก'); return }
     if (!picked) return
-    db.add<SubJob>('subJobs', {
-      id: uid('sj'),
+    await insertJob.mutateAsync({
       code: 'SUB-' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + String(Math.floor(Math.random() * 100)).padStart(2, '0'),
       date: form.date,
       subId: picked.subId,
@@ -455,9 +459,10 @@ function SubOpenForm() {
 // ─── Tab 2: ปิดงาน ───────────────────────────────────────────────────────────
 
 function SubCloseForm() {
-  const [tick, setTick] = useState(0)
-  const openJobs = useMemo(() => { void tick; return db.getAll<SubJob>('subJobs').filter(j => j.status === 'open') }, [tick])
-  const subDrivers = db.getAll<SubDriver>('subDrivers')
+  const { data: allJobs = [] } = useList<SubJob>('sub_jobs')
+  const { data: subDrivers = [] } = useList<SubDriver>('sub_drivers')
+  const updateJob = useUpdate<SubJob>('sub_jobs')
+  const openJobs = allJobs.filter(j => j.status === 'open')
 
   const [pickedId, setPickedId] = useState('')
   const [finalWeight, setFinalWeight] = useState('')
@@ -474,21 +479,23 @@ function SubCloseForm() {
     : finalTons * picked.price
     : 0
 
-  const closeJob = () => {
+  const closeJob = async () => {
     if (!picked) return
     if ((picked.mode === 'per_ton' || picked.mode === 'per_kg') && !finalWeight) {
       alert('กรุณากรอกน้ำหนักปลายทาง')
       return
     }
-    db.update<SubJob>('subJobs', picked.id, {
-      status: 'unpaid',
-      finalWeight: fw,
-      total: finalTotal,
+    await updateJob.mutateAsync({
+      id: picked.id,
+      patch: {
+        status: 'unpaid',
+        finalWeight: fw,
+        total: finalTotal,
+      },
     })
     alert('ส่งข้อมูลเรียบร้อย — งานนี้รอชำระเงิน')
     setPickedId('')
     setFinalWeight('')
-    setTick(n => n + 1)
   }
 
   const cancel = () => {
@@ -624,10 +631,12 @@ function SubCloseForm() {
 // ─── Pay Modal ───────────────────────────────────────────────────────────────
 
 function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () => void; onPaid: () => void }) {
-  const driver = db.getAll<SubDriver>('subDrivers').find(d => d.id === job.driverId)
+  const { data: subDrivers = [] } = useList<SubDriver>('sub_drivers')
+  const updateJob = useUpdate<SubJob>('sub_jobs')
+  const driver = subDrivers.find(d => d.id === job.driverId)
 
-  const pay = () => {
-    db.update<SubJob>('subJobs', job.id, { status: 'paid' })
+  const pay = async () => {
+    await updateJob.mutateAsync({ id: job.id, patch: { status: 'paid' } })
     onPaid()
     onClose()
   }
@@ -675,7 +684,8 @@ function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () =>
 // ─── Job Detail Drawer ───────────────────────────────────────────────────────
 
 function JobDetailDrawer({ job, onClose }: { job: SubJob; onClose: () => void }) {
-  const driver = db.getAll<SubDriver>('subDrivers').find(d => d.id === job.driverId)
+  const { data: subDrivers = [] } = useList<SubDriver>('sub_drivers')
+  const driver = subDrivers.find(d => d.id === job.driverId)
   const modeLabel = job.mode === 'per_ton' ? 'ต่อตัน' : job.mode === 'per_kg' ? 'ต่อกิโลกรัม' : 'เหมา'
   const s = STATUS_LABEL[job.status]
   const fmt2 = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -775,8 +785,7 @@ function JobDetailDrawer({ job, onClose }: { job: SubJob; onClose: () => void })
 // ─── Tab 3: ประวัติการจ้าง ────────────────────────────────────────────────────
 
 function SubHistoryTab() {
-  const [tick, setTick] = useState(0)
-  const all = useMemo(() => { void tick; return db.getAll<SubJob>('subJobs') }, [tick])
+  const { data: all = [] } = useList<SubJob>('sub_jobs')
   const [plateF, setPlateF] = useState('all')
   const [monthF, setMonthF] = useState('')
   const [statusF, setStatusF] = useState('all')
@@ -916,7 +925,7 @@ function SubHistoryTab() {
         <PayConfirmModal
           job={payJob}
           onClose={() => setPayJob(null)}
-          onPaid={() => setTick(n => n + 1)}
+          onPaid={() => {}}
         />
       )}
     </div>
@@ -935,10 +944,12 @@ interface DriverActionProps {
 
 function DriverActionMenu({ driver, isAdmin, onEdit, onDelete, onChanged }: DriverActionProps) {
   const [open, setOpen] = useState(false)
+  const updateDriver = useUpdate<SubDriver>('sub_drivers')
 
-  const toggleStatus = () => {
-    db.update<SubDriver>('subDrivers', driver.id, {
-      status: driver.status === 'active' ? 'inactive' : 'active',
+  const toggleStatus = async () => {
+    await updateDriver.mutateAsync({
+      id: driver.id,
+      patch: { status: driver.status === 'active' ? 'inactive' : 'active' },
     })
     setOpen(false)
     onChanged()
@@ -1005,8 +1016,9 @@ function DriverActionMenu({ driver, isAdmin, onEdit, onDelete, onChanged }: Driv
 
 function SubDriversList({ user }: { user?: User }) {
   const isAdmin = user?.role === 'admin'
-  const [tick, setTick] = useState(0)
-  const drivers = useMemo(() => { void tick; return db.getAll<SubDriver>('subDrivers') }, [tick])
+  const { data: drivers = [] } = useList<SubDriver>('sub_drivers')
+  const { data: allJobs = [] } = useList<SubJob>('sub_jobs')
+  const deleteDriver = useDelete('sub_drivers')
   const [q, setQ] = useState('')
   const [editing, setEditing] = useState<SubDriver | null>(null)
   const [addNew, setAddNew] = useState(false)
@@ -1015,17 +1027,16 @@ function SubDriversList({ user }: { user?: User }) {
   const filtered = drivers.filter(d => !q || d.name.toLowerCase().includes(q.toLowerCase()) || d.phone.includes(q) || d.plate.toLowerCase().includes(q.toLowerCase()))
   const today = new Date()
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleting) return
-    const openJobs = db.getAll<SubJob>('subJobs').filter(j => j.driverId === deleting.id && j.status !== 'paid')
+    const openJobs = allJobs.filter(j => j.driverId === deleting.id && j.status !== 'paid')
     if (openJobs.length > 0) {
       alert(`ไม่สามารถลบได้ — คนขับมีงานค้างอยู่ ${openJobs.length} งาน`)
       setDeleting(null)
       return
     }
-    db.remove('subDrivers', deleting.id)
+    await deleteDriver.mutateAsync(deleting.id)
     setDeleting(null)
-    setTick(n => n + 1)
   }
 
   return (
@@ -1126,7 +1137,7 @@ function SubDriversList({ user }: { user?: User }) {
                       isAdmin={isAdmin}
                       onEdit={() => setEditing(d)}
                       onDelete={() => setDeleting(d)}
-                      onChanged={() => setTick(n => n + 1)}
+                      onChanged={() => {}}
                     />
                   </td>
                 </tr>
@@ -1147,14 +1158,14 @@ function SubDriversList({ user }: { user?: User }) {
         <DriverEditModal
           driver={editing}
           onClose={() => setEditing(null)}
-          onSaved={() => setTick(n => n + 1)}
+          onSaved={() => {}}
         />
       )}
       {addNew && (
         <DriverEditModal
           driver={null}
           onClose={() => setAddNew(false)}
-          onSaved={() => setTick(n => n + 1)}
+          onSaved={() => {}}
         />
       )}
       {deleting && (
