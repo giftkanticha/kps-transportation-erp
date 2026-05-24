@@ -310,14 +310,14 @@ function SubOpenForm() {
   }
 
   const picked = subDrivers.find(d => d.id === form.driverId)
-  const weightNum = parseFloat(form.weight) || 0
-  const weightTons = weightNum / 1000
+  const weightInput = parseFloat(form.weight) || 0
+  const weightKg = form.mode === 'per_ton' ? weightInput * 1000 : weightInput
   const priceNum = parseFloat(form.price) || 0
   const total =
     form.mode === 'lump' ? priceNum :
-    form.mode === 'per_kg' ? weightNum * priceNum :
-    weightTons * priceNum
+    weightInput * priceNum
 
+  const weightUnit = form.mode === 'per_ton' ? 'ตัน' : 'กก.'
   const priceLabel =
     form.mode === 'per_ton' ? 'บาท / ตัน' :
     form.mode === 'per_kg' ? 'บาท / กก.' :
@@ -338,7 +338,7 @@ function SubOpenForm() {
       category: form.category,
       destination: form.destination.trim(),
       origin: 'กรุงเทพ',
-      weight: weightNum,
+      weight: weightKg,
       finalWeight: 0,
       mode: form.mode,
       price: priceNum,
@@ -411,8 +411,14 @@ function SubOpenForm() {
 
         {/* Right */}
         <div className="col" style={{ gap: 14 }}>
-          <Field label="น้ำหนักต้นทาง (กก.)">
-            <input type="number" value={form.weight} onChange={e => set('weight', e.target.value)} placeholder="เช่น 15000" />
+          <Field label={`น้ำหนักต้นทาง (${weightUnit})`}>
+            <input
+              type="number"
+              value={form.weight}
+              onChange={e => set('weight', e.target.value)}
+              placeholder={form.mode === 'per_ton' ? 'เช่น 15' : 'เช่น 15000'}
+              disabled={form.mode === 'lump'}
+            />
           </Field>
           <Field label="ประเภทการคำนวณ *">
             <div className="row" style={{ gap: 18, paddingTop: 4 }}>
@@ -448,12 +454,12 @@ function SubOpenForm() {
           </div>
           {form.mode === 'per_ton' && form.weight && form.price && (
             <div className="faint" style={{ fontSize: 11 }}>
-              คำนวณจาก: {weightTons.toFixed(2)} ตัน × {form.price} บาท/ตัน
+              คำนวณจาก: {weightInput.toLocaleString()} ตัน × {form.price} บาท/ตัน
             </div>
           )}
           {form.mode === 'per_kg' && form.weight && form.price && (
             <div className="faint" style={{ fontSize: 11 }}>
-              คำนวณจาก: {weightNum.toLocaleString()} กก. × {form.price} บาท/กก.
+              คำนวณจาก: {weightInput.toLocaleString()} กก. × {form.price} บาท/กก.
             </div>
           )}
           {form.mode === 'lump' && (
@@ -487,12 +493,12 @@ function SubCloseForm() {
   const driver = picked ? subDrivers.find(d => d.id === picked.driverId) : null
 
   // Compute final total based on destination weight
-  const fw = parseFloat(finalWeight) || 0
-  const finalTons = fw / 1000
+  const finalInput = parseFloat(finalWeight) || 0
+  const finalKg = picked && picked.mode === 'per_ton' ? finalInput * 1000 : finalInput
+  const closeUnit = picked && picked.mode === 'per_ton' ? 'ตัน' : 'กก.'
   const finalTotal = picked
     ? picked.mode === 'lump' ? picked.total
-    : picked.mode === 'per_kg' ? fw * picked.price
-    : finalTons * picked.price
+    : finalInput * picked.price
     : 0
 
   const closeJob = async () => {
@@ -505,7 +511,7 @@ function SubCloseForm() {
       id: picked.id,
       patch: {
         status: 'unpaid',
-        finalWeight: fw,
+        finalWeight: finalKg,
         total: finalTotal,
       },
     })
@@ -550,7 +556,7 @@ function SubCloseForm() {
               <Info label="คนขับ" value={picked.driverName} />
               <Info label="ประเภทรถ" value={picked.category || '—'} />
               <Info label="ปลายทาง" value={picked.destination} />
-              <Info label="น้ำหนักต้นทาง" value={picked.weight ? `${db.fmt(picked.weight)} กก.` : '—'} />
+              <Info label="น้ำหนักต้นทาง" value={picked.weight ? (picked.mode === 'per_ton' ? `${db.fmt(picked.weight / 1000)} ตัน` : `${db.fmt(picked.weight)} กก.`) : '—'} />
               <Info label="ประเภทคำนวณ" value={picked.mode === 'per_ton' ? 'ต่อตัน' : picked.mode === 'per_kg' ? 'ต่อกิโลกรัม' : 'เหมา'} />
               <Info label="ค่าบรรทุก" value={picked.mode === 'per_ton' ? `${db.fmt(picked.price)} บาท/ตัน` : picked.mode === 'per_kg' ? `${db.fmt(picked.price)} บาท/กก.` : db.thb(picked.price)} />
             </div>
@@ -561,12 +567,12 @@ function SubCloseForm() {
             <div className="card" style={{ padding: 18, marginBottom: 16, border: '2px solid var(--primary)' }}>
               <h3 className="section-title" style={{ color: 'var(--primary)' }}>คำนวณค่าขนส่ง</h3>
               <div className="grid-2" style={{ gap: 14 }}>
-                <Field label="น้ำหนักปลายทาง (กก.) *">
+                <Field label={`น้ำหนักปลายทาง (${closeUnit}) *`}>
                   <input
                     type="number"
                     value={finalWeight}
                     onChange={e => setFinalWeight(e.target.value)}
-                    placeholder="กรอกน้ำหนัก ณ ปลายทาง"
+                    placeholder={picked.mode === 'per_ton' ? 'เช่น 15' : 'กรอกน้ำหนัก ณ ปลายทาง'}
                   />
                 </Field>
                 <div>
@@ -578,8 +584,8 @@ function SubCloseForm() {
                   </div>
                   <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>
                     {picked.mode === 'per_kg'
-                      ? `${fw.toLocaleString()} กก. × ${db.fmt(picked.price)} บาท/กก.`
-                      : `${finalTons.toFixed(2)} ตัน × ${db.fmt(picked.price)} บาท/ตัน`}
+                      ? `${finalInput.toLocaleString()} กก. × ${db.fmt(picked.price)} บาท/กก.`
+                      : `${finalInput.toLocaleString()} ตัน × ${db.fmt(picked.price)} บาท/ตัน`}
                   </div>
                 </div>
               </div>
