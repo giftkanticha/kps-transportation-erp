@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { SubDriver, SubJob, User, Subcontractor, Vehicle } from '../../types'
+import type { SubDriver, SubJob, User, Vehicle } from '../../types'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info, PrintButton } from '../../components/ui'
@@ -68,7 +68,6 @@ interface DriverEditModalProps {
 
 function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
   const isNew = !driver
-  const { data: subs = [] } = useList<Subcontractor>('subcontractors')
   const { data: allDrivers = [] } = useList<SubDriver>('sub_drivers')
   const insertDriver = useInsert<SubDriver>('sub_drivers')
   const updateDriver = useUpdate<SubDriver>('sub_drivers')
@@ -93,7 +92,6 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
     accountBank: driver?.accountBank ?? 'KBANK',
     accountNo: driver?.accountNo ?? '',
     status: driver?.status ?? 'active',
-    subId: driver?.subId ?? (subs[0]?.id ?? ''),
     address: driver?.address ?? '',
     truckDump: driver?.truckDump ?? 'no-dump' as 'dump' | 'no-dump',
     cpAccess: driver?.cpAccess ?? 'no' as 'yes' | 'no',
@@ -108,13 +106,17 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
       return
     }
     const payload = { ...form, vehicleTypes: driver?.vehicleTypes ?? [] }
-    if (isNew) {
-      await insertDriver.mutateAsync(payload)
-    } else {
-      await updateDriver.mutateAsync({ id: driver!.id, patch: payload })
+    try {
+      if (isNew) {
+        await insertDriver.mutateAsync(payload)
+      } else {
+        await updateDriver.mutateAsync({ id: driver!.id, patch: payload })
+      }
+      onSaved()
+      onClose()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ')
     }
-    onSaved()
-    onClose()
   }
 
   const radioRow: React.CSSProperties = {
@@ -175,12 +177,6 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
             </Field>
             <Field label="เลขที่บัญชี">
               <input value={form.accountNo} onChange={e => set('accountNo', e.target.value)} placeholder="123-4-56789-0" />
-            </Field>
-            <Field label="ผู้รับเหมา (Subcontractor)">
-              <select value={form.subId} onChange={e => set('subId', e.target.value)}>
-                <option value="">-- ไม่ระบุ --</option>
-                {subs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
             </Field>
             <Field label="สถานะ">
               <select value={form.status} onChange={e => set('status', e.target.value)}>
