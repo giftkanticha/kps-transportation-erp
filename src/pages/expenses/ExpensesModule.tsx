@@ -1070,6 +1070,7 @@ function ExpStock() {
   const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: allExpLines = [] } = useList<ExpenseLine>('expense_lines')
   const updateStock = useUpdate<StockItem>('stock_items')
+  const insertStock = useInsert<StockItem>('stock_items')
   const insertReceipt = useInsert<StockReceipt>('stock_receipts')
   const partners = allPartners.filter((p) => p.name !== KPS_WAREHOUSE_NAME)
 
@@ -1096,18 +1097,24 @@ function ExpStock() {
 
   // Receive form state
   const today = new Date().toISOString().slice(0, 10)
-  const [form, setForm] = useState({
+  const emptyReceive = {
     date: today,
     partnerId: '',
     stockItemId: '',
     qty: '',
     unitPrice: '',
-  })
+    newName: '',
+    newUnit: '',
+    newCategory: 'อะไหล่',
+  }
+  const [form, setForm] = useState(emptyReceive)
   const set = <K extends keyof typeof form>(k: K, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   const formTotal = (parseFloat(form.qty) || 0) * (parseFloat(form.unitPrice) || 0)
+  const isNewItem = form.stockItemId === '__new__'
 
   const onPickItem = (id: string) => {
+    if (id === '__new__') { setForm((f) => ({ ...f, stockItemId: '__new__' })); return }
     const s = stock.find((x) => x.id === id)
     setForm((f) => ({ ...f, stockItemId: id, unitPrice: f.unitPrice || (s ? String(s.unitCost) : '') }))
   }
@@ -1119,6 +1126,26 @@ function ExpStock() {
     const p = parseFloat(form.unitPrice) || 0
     if (q <= 0) { alert('กรุณากรอกจำนวน'); return }
     if (p <= 0) { alert('กรุณากรอกราคาต่อหน่วย'); return }
+
+    // New stock item: create it first, then receive into it.
+    if (isNewItem) {
+      if (!form.newName.trim()) { alert('กรุณากรอกชื่อสินค้าใหม่'); return }
+      const created = await insertStock.mutateAsync({
+        code: 'ST-' + Date.now().toString().slice(-6),
+        name: form.newName.trim(),
+        category: form.newCategory,
+        unit: form.newUnit.trim() || 'ชิ้น',
+        qtyIn: q, qtyOut: 0, qty: q,
+        unitCost: p, reorderAt: 0,
+      })
+      await insertReceipt.mutateAsync({
+        date: form.date, partnerId: form.partnerId, stockItemId: created.id,
+        qty: q, unitPrice: p, total: q * p,
+      })
+      alert('เพิ่มสินค้าใหม่และรับเข้าคลังเรียบร้อย')
+      setForm(emptyReceive)
+      return
+    }
 
     const s = stock.find((x) => x.id === form.stockItemId)
     if (!s) return
@@ -1148,7 +1175,7 @@ function ExpStock() {
     })
 
     alert('รับสินค้าเข้าคลังเรียบร้อย')
-    setForm({ date: today, partnerId: '', stockItemId: '', qty: '', unitPrice: '' })
+    setForm(emptyReceive)
   }
 
   return (
@@ -1216,9 +1243,25 @@ function ExpStock() {
                     {s.name} (คงเหลือ {s.qty} {s.unit})
                   </option>
                 ))}
+                <option value="__new__">➕ เพิ่มสินค้าใหม่...</option>
               </select>
             </Field>
           </div>
+          {isNewItem && (
+            <div className="grid-3" style={{ gap: 14, marginBottom: 14, padding: 12, background: 'var(--bg-sunk)', borderRadius: 8 }}>
+              <Field label="ชื่อสินค้าใหม่ *">
+                <input value={form.newName} onChange={(e) => set('newName', e.target.value)} placeholder="เช่น ไส้กรองอากาศ" />
+              </Field>
+              <Field label="หน่วย">
+                <input value={form.newUnit} onChange={(e) => set('newUnit', e.target.value)} placeholder="เช่น ชิ้น / ลิตร" />
+              </Field>
+              <Field label="หมวดหมู่">
+                <select value={form.newCategory} onChange={(e) => set('newCategory', e.target.value)}>
+                  {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </Field>
+            </div>
+          )}
           <div className="grid-3" style={{ gap: 14, marginBottom: 14 }}>
             <Field label="จำนวน *">
               <input
@@ -1259,7 +1302,7 @@ function ExpStock() {
           <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
             <button
               className="btn"
-              onClick={() => setForm({ date: today, partnerId: '', stockItemId: '', qty: '', unitPrice: '' })}
+              onClick={() => setForm(emptyReceive)}
             >
               <Icon name="close" size={14} /> ล้างฟอร์ม
             </button>
@@ -1808,6 +1851,7 @@ function VendorEditModal({
     status: partner?.status ?? 'active',
   })
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
+  const knownTypes = [...new Set([...PARTNER_TYPES.filter(t => t !== 'อื่นๆ'), ...partners.map(p => p.type).filter(Boolean)])]
 
   const save = async () => {
     if (!form.name.trim()) { alert('กรุณากรอกชื่อร้านค้า/ช่าง'); return }
@@ -1847,18 +1891,21 @@ function VendorEditModal({
               <input value={form.code} readOnly style={{ background: 'var(--bg-2)', color: 'var(--text-muted)' }} />
             </Field>
             <Field label="ประเภท">
-              <input
-                list="partner-type-options"
-                value={form.type}
-                onChange={(e) => set('type', e.target.value)}
-                placeholder="เลือกหรือพิมพ์ประเภทใหม่..."
-              />
-              <datalist id="partner-type-options">
-                {[...new Set([
-                  ...PARTNER_TYPES,
-                  ...partners.map((p) => p.type).filter(Boolean),
-                ])].map((t) => <option key={t} value={t} />)}
-              </datalist>
+              <select
+                value={knownTypes.includes(form.type) ? form.type : 'อื่นๆ'}
+                onChange={(e) => set('type', e.target.value === 'อื่นๆ' ? '' : e.target.value)}
+              >
+                {knownTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                <option value="อื่นๆ">อื่นๆ (พิมพ์เอง)</option>
+              </select>
+              {!knownTypes.includes(form.type) && (
+                <input
+                  value={form.type}
+                  onChange={(e) => set('type', e.target.value)}
+                  placeholder="ระบุประเภทใหม่..."
+                  style={{ marginTop: 8 }}
+                />
+              )}
             </Field>
             <Field label="ชื่อร้านค้า / ช่าง *">
               <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="เช่น ศูนย์ซ่อม ABC" />

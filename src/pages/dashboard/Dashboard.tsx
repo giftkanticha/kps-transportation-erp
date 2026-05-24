@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
-import type { User, Vehicle, Employee, Dispatch, Tire, Expense, ActivityLog, StockItem, Customer, SubJob } from '../../types'
+import type { User, Vehicle, Employee, Dispatch, Tire, Expense, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
 
 // ─── Mock data ─────────────────────────────────────────────────────────────────
@@ -292,6 +292,14 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const subUnpaid      = useMemo(() => subJobs.filter(j => j.status === 'unpaid'), [subJobs])
   const subUnpaidTotal = useMemo(() => subUnpaid.reduce((s, j) => s + netOf(j), 0), [subUnpaid])
 
+  const { data: expHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: sbVehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: sbPartners = [] } = useList<Partner>('partners')
+  const expUnpaid      = useMemo(() => expHeaders.filter(h => !h.paid), [expHeaders])
+  const expUnpaidTotal = useMemo(() => expUnpaid.reduce((s, h) => s + (h.total || 0), 0), [expUnpaid])
+  const plateOf   = (id: string) => sbVehicles.find(v => v.id === id)?.plate ?? '—'
+  const vendorOf  = (id: string) => sbPartners.find(p => p.id === id)?.name ?? '—'
+
   const onTrip    = useMemo(() => dispatch.filter(t => t.status === 'in-progress'), [dispatch])
   const scheduled = useMemo(() => dispatch.filter(t => t.status === 'scheduled'), [dispatch])
   const delivered = useMemo(() => dispatch.filter(t => t.status === 'completed'), [dispatch])
@@ -430,6 +438,47 @@ export function Dashboard({ user, setActive }: DashboardProps) {
               </div>
               <div style={{ padding: '0 18px 14px' }}>
                 <button className="btn sm primary" style={{ width: '100%' }} onClick={() => setActive('subcontractors.history')}>
+                  ไปชำระเงิน
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Expenses pending payment (to-do) */}
+          {expUnpaid.length > 0 && (
+            <div className="card">
+              <div className="head">
+                <h3>🧾 ค่าใช้จ่ายค้างชำระ</h3>
+                <span className="badge amber mono">{expUnpaid.length}</span>
+              </div>
+              <div>
+                {expUnpaid.slice(0, 6).map(h => (
+                  <div
+                    key={h.id}
+                    onClick={() => setActive('expenses.finance')}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 18px', cursor: 'pointer', borderTop: '1px solid var(--line)' }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>
+                        <span className="mono">{plateOf(h.vehicleId)}</span> · {vendorOf(h.partnerId)}
+                      </div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>
+                        {h.code}{h.dueDate ? ` · ครบกำหนด ${db.thaiDate(h.dueDate)}` : ''}
+                      </div>
+                    </div>
+                    <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)', flexShrink: 0 }}>
+                      {db.thb(h.total)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: '11px 18px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="muted" style={{ fontSize: 12.5 }}>ยอดค้างชำระรวม</span>
+                <div className="spacer" />
+                <span className="mono" style={{ fontWeight: 800, color: 'var(--primary)' }}>{db.thb(expUnpaidTotal)}</span>
+              </div>
+              <div style={{ padding: '0 18px 14px' }}>
+                <button className="btn sm primary" style={{ width: '100%' }} onClick={() => setActive('expenses.finance')}>
                   ไปชำระเงิน
                 </button>
               </div>
