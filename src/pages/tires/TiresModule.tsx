@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
-import { db, uid } from '../../lib/db'
+import { db } from '../../lib/db'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import { Info } from '../../components/ui/Info'
@@ -322,18 +323,23 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverT
 
 function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void }) {
   const [open, setOpen] = useState(false)
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const updateTire = useUpdate<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
 
-  const markScrapped = () => {
+  const markScrapped = async () => {
     const km = computeAccumKm(tire, vehicles)
-    db.update<Tire>('tires', tire.id, {
-      status: 'scrapped',
-      vehicleId: null,
-      position: null,
-      accumulatedKm: km,
+    await updateTire.mutateAsync({
+      id: tire.id,
+      patch: {
+        status: 'scrapped',
+        vehicleId: null,
+        position: null,
+        accumulatedKm: km,
+      },
     })
-    db.add<TireEvent>('tire_events', {
-      id: uid('te'), tireId: tire.id, vehicleId: tire.vehicleId ?? '',
+    await insertEvent.mutateAsync({
+      tireId: tire.id, vehicleId: tire.vehicleId ?? '',
       eventType: 'scrap', date: new Date().toISOString().slice(0, 10),
       odometer: 0, fromPos: tire.position, toPos: null,
       note: 'หมดสภาพ', userId: 'e10',
@@ -394,15 +400,14 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
 }
 
 function TiresAll({ setActive }: { setActive: (id: string) => void }) {
-  const [tick, setTick] = useState(0)
-  const allTires = useMemo(() => { void tick; return db.getAll<Tire>('tires') }, [tick])
+  const { data: allTires = [] } = useList<Tire>('tires')
 
   const openHistory = (serial: string) => {
     sessionStorage.setItem('kps_tire_history_serial', serial)
     setActive('tires.history')
   }
-  const events = db.getAll<TireEvent>('tire_events')
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: events = [] } = useList<TireEvent>('tire_events')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const brands = [...new Set(allTires.map((t) => t.brand))]
 
   const [q, setQ] = useState('')
@@ -620,7 +625,7 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
             </thead>
             <tbody>
               {filtered.map((t) => {
-                const v = db.get<Vehicle>('vehicles', t.vehicleId ?? '')
+                const v = vehicles.find((vv) => vv.id === t.vehicleId)
                 const km = t.accumulatedKm ?? 0
                 const ks = kmStatus(km)
                 const isActive = t.status === 'in-use'
@@ -713,7 +718,7 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
                       )}
                     </td>
                     <td>
-                      <TireActionMenu tire={t} onRefresh={() => setTick(n => n + 1)} />
+                      <TireActionMenu tire={t} onRefresh={() => {}} />
                     </td>
                   </tr>
                 )
@@ -738,7 +743,10 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
 
 // ── Add Tire Modal ────────────────────────────────────────────────
 function AddTireModal({ onClose }: { onClose: () => void }) {
-  const tires = db.getAll<Tire>('tires')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const insertTire = useInsert<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
   const nextSerial = 'TIR' + String(tires.length + 1).padStart(4, '0')
   const [form, setForm] = useState({
     serial: nextSerial,
@@ -754,12 +762,11 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
     accumulatedKm: 0,
   })
   const set = (k: string, v: string | number) => setForm((f) => ({ ...f, [k]: v }))
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const wc = wcFrom(db.get<Vehicle>('vehicles', form.vehicleId)?.type ?? '')
+  const wc = wcFrom(vehicles.find((v) => v.id === form.vehicleId)?.type ?? '')
   const layout = TL[wc] ?? TL[10]
   const allPos = layout.pos.map((p) => p.pos).concat(['spare_1', 'spare_2'])
 
-  const save = () => {
+  const save = async () => {
     if (!form.serial || !form.brand) {
       alert('กรุณากรอกเลขซีเรียลและยี่ห้อ')
       return
@@ -770,10 +777,12 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
     }
     const finalVehicleId = (form.status === 'in-use' || form.status === 'spare') ? (form.vehicleId || null) : null
     const finalPosition = form.status === 'in-use' ? (form.position || null) : null
-    const newTire = db.add<Tire>('tires', {
-      ...form,
+    const newTire = await insertTire.mutateAsync({
+      serial: form.serial,
       brand: form.brand === 'อื่นๆ' ? (form.customBrand.trim() || 'อื่นๆ') : form.brand,
-      id: uid('t'),
+      model: form.model,
+      size: form.size,
+      installedDate: form.installedDate,
       installedOdometer: +(form.installedOdometer) || 0,
       accumulatedKm: 0,
       status: form.status as Tire['status'],
@@ -781,8 +790,7 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
       position: finalPosition,
     })
     if (form.status === 'in-use' && finalVehicleId) {
-      db.add<TireEvent>('tire_events', {
-        id: uid('te'),
+      await insertEvent.mutateAsync({
         tireId: newTire.id,
         vehicleId: finalVehicleId,
         eventType: 'install',
@@ -969,18 +977,19 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
 
 // ── Tab 2: Layout ─────────────────────────────────────────────────
 function TiresLayout() {
-  const [tick, setTick] = useState(0)
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const [picked, setPicked] = useState(vehicles[0]?.id ?? '')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const [picked, setPicked] = useState('')
   const [popup, setPopup] = useState<{ pos: string; tire: Tire | undefined } | null>(null)
   const [historyTire, setHistoryTire] = useState<Tire | null>(null)
   const [swapTire, setSwapTire] = useState<Tire | null>(null)
   const { print } = usePrint()
-  const refresh = () => { setTick(n => n + 1); setPopup(null) }
+  const refresh = () => { setPopup(null) }
 
-  const v = db.get<Vehicle>('vehicles', picked)
+  const effectivePicked = picked || vehicles[0]?.id || ''
+  const v = vehicles.find((vv) => vv.id === effectivePicked)
   const wc = wcFrom(v?.type ?? '')
-  const allTires = useMemo(() => { void tick; return db.getAll<Tire>('tires').filter((t) => t.vehicleId === picked) }, [picked, tick])
+  const allTires = useMemo(() => tires.filter((t) => t.vehicleId === effectivePicked), [tires, effectivePicked])
   const tireMap: Record<string, Tire> = {}
   allTires.forEach((t) => {
     if (t.position) tireMap[t.position] = t
@@ -994,7 +1003,7 @@ function TiresLayout() {
         <div className="row" style={{ gap: 20, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <Field label="เลือกรถ">
             <select
-              value={picked}
+              value={effectivePicked}
               onChange={(e) => {
                 setPicked(e.target.value)
                 setPopup(null)
@@ -1056,7 +1065,7 @@ function TiresLayout() {
               ผังยาง {wc} ล้อ
             </div>
             <TireMapSVG
-              key={`${picked}-${wc}`}
+              key={`${effectivePicked}-${wc}`}
               wc={wc}
               tireMap={tireMap}
               selectedPos={popup?.pos ?? null}
@@ -1383,12 +1392,14 @@ function TireLayoutPrintView({ vehicle, wc, tireMap, allTires, spares }: {
 
 // ── Tire History Modal ──────────────────────────────────────────
 function TireHistoryModal({ tire, onClose }: { tire: Tire; onClose: () => void }) {
-  const vehicle = tire.vehicleId ? db.get<Vehicle>('vehicles', tire.vehicleId) : null
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allEvents = [] } = useList<TireEvent>('tire_events')
+  const vehicle = tire.vehicleId ? vehicles.find((v) => v.id === tire.vehicleId) : null
   const events = useMemo(
-    () => db.getAll<TireEvent>('tire_events')
+    () => allEvents
       .filter(e => e.tireId === tire.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
-    [tire.id],
+    [allEvents, tire.id],
   )
   const EVT: Record<string, { label: string; icon: string; color: string; bg: string }> = {
     install: { label: 'ติดตั้งใหม่', icon: '🛒', color: '#16a34a', bg: '#dcfce7' },
@@ -1490,6 +1501,9 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
   onClose: () => void
   onDone: () => void
 }) {
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const updateTire = useUpdate<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
   const wc = wcFrom(vehicle.type ?? '')
   const layout = TL[wc] ?? TL[10]
   const allPos = layout.pos.map(p => p.pos).concat(['spare_1', 'spare_2'])
@@ -1498,18 +1512,16 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
   const [note, setNote] = useState('')
   const toTire = toPos ? tireMap[toPos] : undefined
 
-  const confirm = () => {
+  const confirm = async () => {
     if (!toPos || toPos === fromPos) return
     const odometer = vehicle.odometer ?? 0
-    const allVehicles = db.getAll<Vehicle>('vehicles')
     const km1 = computeAccumKm(tire, allVehicles)
-    db.update<Tire>('tires', tire.id, { position: toPos, accumulatedKm: km1, installedOdometer: odometer })
+    await updateTire.mutateAsync({ id: tire.id, patch: { position: toPos, accumulatedKm: km1, installedOdometer: odometer } })
     if (toTire) {
       const km2 = computeAccumKm(toTire, allVehicles)
-      db.update<Tire>('tires', toTire.id, { position: fromPos, accumulatedKm: km2, installedOdometer: odometer })
+      await updateTire.mutateAsync({ id: toTire.id, patch: { position: fromPos, accumulatedKm: km2, installedOdometer: odometer } })
     }
-    db.add<TireEvent>('tire_events', {
-      id: uid('te'),
+    await insertEvent.mutateAsync({
       tireId: tire.id,
       vehicleId: vehicle.id,
       eventType: 'swap',
@@ -1599,28 +1611,31 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
 
 // ── Move to Stock Panel ───────────────────────────────────────────
 function MoveToStockPanel() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const updateTire = useUpdate<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
   const [vehicleId, setVehicleId] = useState('')
   const [pos, setPos] = useState('')
   const [done, setDone] = useState(false)
 
-  const vTires = vehicleId ? db.getAll<Tire>('tires').filter((t) => t.vehicleId === vehicleId && t.status === 'in-use') : []
-  const wc = wcFrom(db.get<Vehicle>('vehicles', vehicleId)?.type ?? '')
+  const vTires = vehicleId ? tires.filter((t) => t.vehicleId === vehicleId && t.status === 'in-use') : []
+  const wc = wcFrom(vehicles.find((v) => v.id === vehicleId)?.type ?? '')
   const layout = TL[wc] ?? TL[10]
   const allPos = layout.pos.map((p) => p.pos)
   const tireAtPos = vTires.find((t) => t.position === pos)
 
-  const doMove = () => {
+  const doMove = async () => {
     if (!tireAtPos) return
-    const allVehicles = db.getAll<Vehicle>('vehicles')
-    const km = computeAccumKm(tireAtPos, allVehicles)
-    db.update<Tire>('tires', tireAtPos.id, {
-      status: 'stock', vehicleId: null, position: null, accumulatedKm: km,
+    const km = computeAccumKm(tireAtPos, vehicles)
+    await updateTire.mutateAsync({
+      id: tireAtPos.id,
+      patch: { status: 'stock', vehicleId: null, position: null, accumulatedKm: km },
     })
-    db.add<TireEvent>('tire_events', {
-      id: uid('te'), tireId: tireAtPos.id, vehicleId,
+    await insertEvent.mutateAsync({
+      tireId: tireAtPos.id, vehicleId,
       eventType: 'remove', date: new Date().toISOString().slice(0, 10),
-      odometer: db.get<Vehicle>('vehicles', vehicleId)?.odometer ?? 0,
+      odometer: vehicles.find((v) => v.id === vehicleId)?.odometer ?? 0,
       fromPos: pos, toPos: null, note: 'ย้ายเข้าคลัง', userId: 'e10',
     })
     setDone(true)
@@ -1674,15 +1689,19 @@ function MoveToStockPanel() {
 
 // ── Tab 3: Manage & Swap ──────────────────────────────────────────
 function TiresManageFull() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const { data: tireEvents = [] } = useList<TireEvent>('tire_events')
+  const updateTire = useUpdate<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
   const [step, setStep] = useState(1)
   const [sw, setSw] = useState({ vehicleId: '', fromPos: '', toPos: '', note: '' })
   const set = (k: string, v: string) => setSw((s) => ({ ...s, [k]: v }))
 
-  const veh = db.get<Vehicle>('vehicles', sw.vehicleId)
+  const veh = vehicles.find((v) => v.id === sw.vehicleId)
   const wc = wcFrom(veh?.type ?? '')
   const vTires = sw.vehicleId
-    ? db.getAll<Tire>('tires').filter((t) => t.vehicleId === sw.vehicleId)
+    ? tires.filter((t) => t.vehicleId === sw.vehicleId)
     : []
   const tireMap: Record<string, Tire> = {}
   vTires.forEach((t) => {
@@ -1694,22 +1713,20 @@ function TiresManageFull() {
   const fromTire = vTires.find((t) => t.position === sw.fromPos)
   const toTire = vTires.find((t) => t.position === sw.toPos)
 
-  const doSwap = () => {
+  const doSwap = async () => {
     if (!sw.vehicleId || !sw.fromPos || !sw.toPos) return
     const odometer = veh?.odometer ?? 0
     const userId = 'e10'
-    const allVehicles = db.getAll<Vehicle>('vehicles')
     // Snapshot accumulated km for both tires before swapping
     if (fromTire) {
-      const km = computeAccumKm(fromTire, allVehicles)
-      db.update<Tire>('tires', fromTire.id, { position: sw.toPos, accumulatedKm: km, installedOdometer: odometer })
+      const km = computeAccumKm(fromTire, vehicles)
+      await updateTire.mutateAsync({ id: fromTire.id, patch: { position: sw.toPos, accumulatedKm: km, installedOdometer: odometer } })
     }
     if (toTire) {
-      const km = computeAccumKm(toTire, allVehicles)
-      db.update<Tire>('tires', toTire.id, { position: sw.fromPos, accumulatedKm: km, installedOdometer: odometer })
+      const km = computeAccumKm(toTire, vehicles)
+      await updateTire.mutateAsync({ id: toTire.id, patch: { position: sw.fromPos, accumulatedKm: km, installedOdometer: odometer } })
     }
-    db.add<TireEvent>('tire_events', {
-      id: uid('te'),
+    await insertEvent.mutateAsync({
       tireId: fromTire?.id ?? '',
       vehicleId: sw.vehicleId,
       eventType: 'swap',
@@ -1823,7 +1840,7 @@ function TiresManageFull() {
                 <tbody>
                   {vehicles.map((vv) => {
                     const wcc = wcFrom(vv.type ?? '')
-                    const cnt = db.getAll<Tire>('tires').filter((t) => t.vehicleId === vv.id).length
+                    const cnt = tires.filter((t) => t.vehicleId === vv.id).length
                     const sel = sw.vehicleId === vv.id
                     return (
                       <tr
@@ -2188,13 +2205,12 @@ function TiresManageFull() {
               </tr>
             </thead>
             <tbody>
-              {db
-                .getAll<TireEvent>('tire_events')
+              {tireEvents
                 .filter((e) => e.eventType === 'swap')
                 .slice(0, 10)
                 .map((e) => {
-                  const vv = db.get<Vehicle>('vehicles', e.vehicleId)
-                  const t = db.get<Tire>('tires', e.tireId)
+                  const vv = vehicles.find((v) => v.id === e.vehicleId)
+                  const t = tires.find((tt) => tt.id === e.tireId)
                   return (
                     <tr key={e.id}>
                       <td className="num muted">{db.thaiDate(e.date)}</td>
@@ -2229,7 +2245,9 @@ function TiresManageFull() {
 
 // ── Tab 4: History Timeline ───────────────────────────────────────
 function TiresHistoryFull() {
-  const tires = db.getAll<Tire>('tires')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allEvents = [] } = useList<TireEvent>('tire_events')
   const initial = (typeof window !== 'undefined' && sessionStorage.getItem('kps_tire_history_serial')) || ''
   const [q, setQ] = useState(initial)
   const [searched, setSearched] = useState(initial)
@@ -2241,15 +2259,14 @@ function TiresHistoryFull() {
   const tire = searched
     ? tires.find((t) => t.serial.toLowerCase().includes(searched.toLowerCase()))
     : null
-  const vehicle = tire?.vehicleId ? db.get<Vehicle>('vehicles', tire.vehicleId) : null
+  const vehicle = tire?.vehicleId ? vehicles.find((v) => v.id === tire.vehicleId) : null
 
   const events = useMemo(() => {
     if (!tire) return []
-    return db
-      .getAll<TireEvent>('tire_events')
+    return allEvents
       .filter((e) => e.tireId === tire.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-  }, [tire?.id])
+  }, [allEvents, tire?.id, tire])
 
   const handleSearch = () => setSearched(q.trim())
 
@@ -2378,7 +2395,7 @@ function TiresHistoryFull() {
                 ประวัติการใช้งาน ({events.length} รายการ)
               </div>
               {events.map((e, i) => {
-                const v = db.get<Vehicle>('vehicles', e.vehicleId)
+                const v = vehicles.find((vv) => vv.id === e.vehicleId)
                 const cfg = EVT_CFG[e.eventType] ?? EVT_CFG.install
                 const isLast = i === events.length - 1
                 return (
@@ -2521,17 +2538,19 @@ function TiresHistoryFull() {
 
 // ── Tab 5: Scrapped Tires ─────────────────────────────────────────
 function SellScrapModal({ tire, onClose, onSaved }: { tire: Tire; onClose: () => void; onSaved: () => void }) {
+  const insertSale = useInsert<TireScrapSale>('tire_scrap_sales')
+  const updateTire = useUpdate<Tire>('tires')
   const [buyer, setBuyer] = useState('')
   const [price, setPrice] = useState('')
 
-  const save = () => {
+  const save = async () => {
     if (!buyer || !price) { alert('กรุณากรอกผู้ซื้อและราคา'); return }
-    db.add<TireScrapSale>('tire_scrap_sales', {
-      id: uid('tss'), tireId: tire.id, serial: tire.serial,
+    await insertSale.mutateAsync({
+      tireId: tire.id, serial: tire.serial,
       buyer: buyer.trim(), price: +price || 0,
       date: new Date().toISOString().slice(0, 10), userId: 'e10',
     })
-    db.update<Tire>('tires', tire.id, { status: 'sold' })
+    await updateTire.mutateAsync({ id: tire.id, patch: { status: 'sold' } })
     onSaved()
     onClose()
   }
@@ -2565,9 +2584,9 @@ function SellScrapModal({ tire, onClose, onSaved }: { tire: Tire; onClose: () =>
 }
 
 function TiresScrapped() {
-  const [tick, setTick] = useState(0)
-  const scrapped = useMemo(() => { void tick; return db.getAll<Tire>('tires').filter((t) => t.status === 'scrapped') }, [tick])
-  const sales = useMemo(() => { void tick; return db.getAll<TireScrapSale>('tire_scrap_sales') }, [tick])
+  const { data: allTires = [] } = useList<Tire>('tires')
+  const { data: sales = [] } = useList<TireScrapSale>('tire_scrap_sales')
+  const scrapped = useMemo(() => allTires.filter((t) => t.status === 'scrapped'), [allTires])
   const [sellTire, setSellTire] = useState<Tire | null>(null)
 
   const saleByTireId = useMemo(() => {
@@ -2664,7 +2683,7 @@ function TiresScrapped() {
         <SellScrapModal
           tire={sellTire}
           onClose={() => setSellTire(null)}
-          onSaved={() => setTick((n) => n + 1)}
+          onSaved={() => {}}
         />
       )}
     </div>
