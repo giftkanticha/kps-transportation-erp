@@ -176,14 +176,14 @@ interface TireMapSVGProps {
 
 function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverTip }: TireMapSVGProps) {
   const layout = TL[wc] ?? TL[10]
-  const [hoverTip, setHoverTip] = useState<{ pos: string; tire: Tire | undefined; x: number; y: number } | null>(null)
+  const [hoverTip, setHoverTip] = useState<{ pos: string; tire: Tire | undefined; x: number; y: number; cw: number } | null>(null)
   return (
     <div style={{ position: 'relative' }}>
       {showHoverTip && hoverTip && (
         <div style={{
           position: 'absolute',
-          left: hoverTip.x + 12,
-          top: hoverTip.y - 10,
+          left: Math.max(4, Math.min(hoverTip.x + 12, hoverTip.cw - 164)),
+          top: Math.max(4, hoverTip.y - 10),
           zIndex: 50,
           background: 'var(--card)',
           border: '1px solid var(--line)',
@@ -192,8 +192,9 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverT
           boxShadow: '0 4px 12px rgba(0,0,0,.15)',
           fontSize: 12.5,
           pointerEvents: 'none',
-          whiteSpace: 'nowrap',
-          minWidth: 140,
+          whiteSpace: 'normal',
+          width: 150,
+          maxWidth: 160,
         }}>
           {hoverTip.tire ? (
             <>
@@ -279,7 +280,7 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverT
               style={{ cursor: selectable ? 'pointer' : 'default' }}
               onMouseEnter={showHoverTip ? (e) => {
                 const rect = (e.currentTarget.closest('svg')!.parentElement as HTMLElement).getBoundingClientRect()
-                setHoverTip({ pos: p.pos, tire: t, x: e.clientX - rect.left, y: e.clientY - rect.top })
+                setHoverTip({ pos: p.pos, tire: t, x: e.clientX - rect.left, y: e.clientY - rect.top, cw: rect.width })
               } : undefined}
               onMouseLeave={showHoverTip ? () => setHoverTip(null) : undefined}
             >
@@ -323,9 +324,24 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverT
 
 function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void }) {
   const [open, setOpen] = useState(false)
+  const [modal, setModal] = useState<'history' | 'swap' | null>(null)
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allTires = [] } = useList<Tire>('tires')
   const updateTire = useUpdate<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
+
+  const vehicle = tire.vehicleId ? vehicles.find((v) => v.id === tire.vehicleId) : undefined
+  const onVehicle = tire.status === 'in-use' && !!vehicle
+
+  const tireMap = useMemo(() => {
+    const m: Record<string, Tire> = {}
+    if (tire.vehicleId) {
+      allTires
+        .filter((t) => t.vehicleId === tire.vehicleId && t.position)
+        .forEach((t) => { m[t.position as string] = t })
+    }
+    return m
+  }, [allTires, tire.vehicleId])
 
   const markScrapped = async () => {
     const km = computeAccumKm(tire, vehicles)
@@ -341,17 +357,38 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
     await insertEvent.mutateAsync({
       tireId: tire.id, vehicleId: tire.vehicleId ?? '',
       eventType: 'scrap', date: new Date().toISOString().slice(0, 10),
-      odometer: 0, fromPos: tire.position, toPos: null,
+      odometer: vehicle?.odometer ?? 0, fromPos: tire.position, toPos: null,
       note: 'หมดสภาพ', userId: 'e10',
     })
     setOpen(false)
     onRefresh()
   }
 
-  const actions = [
-    { icon: 'dashboard', label: 'ดูประวัติ', action: () => setOpen(false) },
-    { icon: 'arrow-right', label: 'สลับยาง', action: () => setOpen(false) },
-    { icon: 'edit', label: 'แก้ไข', action: () => setOpen(false) },
+  const moveToStock = async () => {
+    const km = computeAccumKm(tire, vehicles)
+    await updateTire.mutateAsync({
+      id: tire.id,
+      patch: {
+        status: 'stock',
+        vehicleId: null,
+        position: null,
+        accumulatedKm: km,
+      },
+    })
+    await insertEvent.mutateAsync({
+      tireId: tire.id, vehicleId: tire.vehicleId ?? '',
+      eventType: 'remove', date: new Date().toISOString().slice(0, 10),
+      odometer: vehicle?.odometer ?? 0, fromPos: tire.position, toPos: null,
+      note: 'ย้ายเข้าคลัง', userId: 'e10',
+    })
+    setOpen(false)
+    onRefresh()
+  }
+
+  const actions: { icon: string; label: string; danger?: boolean; action: () => void }[] = [
+    { icon: 'dashboard', label: 'ดูประวัติ', action: () => { setOpen(false); setModal('history') } },
+    ...(onVehicle ? [{ icon: 'arrow-right', label: 'สลับยาง', action: () => { setOpen(false); setModal('swap') } }] : []),
+    ...(onVehicle ? [{ icon: 'package', label: 'ถอดเข้าคลัง', action: moveToStock }] : []),
     { icon: 'trash', label: 'หมดสภาพ', danger: true, action: markScrapped },
   ]
   return (
@@ -372,7 +409,7 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
               border: '1px solid var(--line)',
               borderRadius: 10,
               boxShadow: '0 4px 16px rgba(0,0,0,.1)',
-              minWidth: 140,
+              minWidth: 150,
               padding: 6,
             }}
           >
@@ -394,6 +431,18 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
             ))}
           </div>
         </>
+      )}
+      {modal === 'history' && (
+        <TireHistoryModal tire={tire} onClose={() => setModal(null)} />
+      )}
+      {modal === 'swap' && vehicle && (
+        <TireSwapModal
+          tire={tire}
+          vehicle={vehicle}
+          tireMap={tireMap}
+          onClose={() => setModal(null)}
+          onDone={() => { setModal(null); onRefresh() }}
+        />
       )}
     </div>
   )
