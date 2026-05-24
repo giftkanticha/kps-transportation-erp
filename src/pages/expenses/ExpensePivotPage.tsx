@@ -1,14 +1,15 @@
 import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import { Icon, Field, VehiclePickerSidebar } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
 import type { ExpenseHeader, Partner, Vehicle } from '../../types'
 
 export function ExpensePivotPage() {
   const { print } = usePrint()
-  const allVehicles = db.getAll<Vehicle>('vehicles')
-  const partners = db.getAll<Partner>('partners')
-  const headers = db.getAll<ExpenseHeader>('expenseHeaders')
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: partners = [] } = useList<Partner>('partners')
+  const { data: headers = [] } = useList<ExpenseHeader>('expense_headers')
 
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')

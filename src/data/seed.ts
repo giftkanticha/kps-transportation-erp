@@ -249,11 +249,11 @@ const expenseLines: ExpenseLine[] = [
 ]
 
 const stock: StockItem[] = [
-  { id: 'st1', code: 'BAT-12V',    name: 'แบตเตอรี่ 12V',                    category: 'อะไหล่',        in: 10,  out: 2,  qty: 8,  unit: 'ลูก',  unitCost: 2500, reorderAt: 3 },
-  { id: 'st2', code: 'TIRE-11R',   name: 'ยางรถ 11R22.5',                    category: 'ยาง',           in: 20,  out: 0,  qty: 20, unit: 'เส้น', unitCost: 3500, reorderAt: 8 },
-  { id: 'st3', code: 'OIL-15W',    name: 'น้ำมันเครื่อง 15W-40 (ลิตร)',      category: 'น้ำมันเครื่อง', in: 100, out: 20, qty: 80, unit: 'ลิตร', unitCost: 350,  reorderAt: 30 },
-  { id: 'st4', code: 'FILTER-OIL', name: 'ไส้กรองน้ำมัน',                    category: 'อะไหล่',        in: 30,  out: 0,  qty: 30, unit: 'ชิ้น', unitCost: 450,  reorderAt: 10 },
-  { id: 'st5', code: 'BRAKE-PAD',  name: 'ผ้าเบรก',                          category: 'อะไหล่',        in: 15,  out: 0,  qty: 15, unit: 'ชุด',  unitCost: 1200, reorderAt: 6 },
+  { id: 'st1', code: 'BAT-12V',    name: 'แบตเตอรี่ 12V',                    category: 'อะไหล่',        qtyIn: 10,  qtyOut: 2,  qty: 8,  unit: 'ลูก',  unitCost: 2500, reorderAt: 3 },
+  { id: 'st2', code: 'TIRE-11R',   name: 'ยางรถ 11R22.5',                    category: 'ยาง',           qtyIn: 20,  qtyOut: 0,  qty: 20, unit: 'เส้น', unitCost: 3500, reorderAt: 8 },
+  { id: 'st3', code: 'OIL-15W',    name: 'น้ำมันเครื่อง 15W-40 (ลิตร)',      category: 'น้ำมันเครื่อง', qtyIn: 100, qtyOut: 20, qty: 80, unit: 'ลิตร', unitCost: 350,  reorderAt: 30 },
+  { id: 'st4', code: 'FILTER-OIL', name: 'ไส้กรองน้ำมัน',                    category: 'อะไหล่',        qtyIn: 30,  qtyOut: 0,  qty: 30, unit: 'ชิ้น', unitCost: 450,  reorderAt: 10 },
+  { id: 'st5', code: 'BRAKE-PAD',  name: 'ผ้าเบรก',                          category: 'อะไหล่',        qtyIn: 15,  qtyOut: 0,  qty: 15, unit: 'ชุด',  unitCost: 1200, reorderAt: 6 },
 ]
 
 const fixedCosts: FixedCost[] = [

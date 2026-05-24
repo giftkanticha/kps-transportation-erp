@@ -314,8 +314,8 @@ export interface StockItem {
   code: string
   name: string
   category: string
-  in: number
-  out: number
+  qtyIn: number
+  qtyOut: number
   qty: number
   unit: string
   unitCost: number

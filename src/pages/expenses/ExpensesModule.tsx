@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
-import { db, uid } from '../../lib/db'
+import { db } from '../../lib/db'
+import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info } from '../../components/ui'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
@@ -24,33 +25,43 @@ const inlineInput: React.CSSProperties = {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-const isKPSPartner = (partnerId: string): boolean => {
-  const p = db.get<Partner>('partners', partnerId)
+const isKPSPartner = (partnerId: string, partners: Partner[]): boolean => {
+  const p = partners.find((x) => x.id === partnerId)
   return !!p && p.name.replace(/\s+/g, '') === KPS_WAREHOUSE_NAME.replace(/\s+/g, '')
 }
 
-// Apply stock movement for KPS warehouse expense lines.
+// Build stock movement patches for KPS warehouse expense lines.
 // sign = -1 to deduct (when adding/editing an expense), +1 to revert (when removing/editing)
-const applyStockDelta = (lines: { stockItemId?: string; qty: number }[], sign: 1 | -1) => {
+// Returns [{ id, patch }] to be applied via useUpdate.mutateAsync in the calling handler.
+const buildStockDeltas = (
+  lines: { stockItemId?: string; qty: number }[],
+  sign: 1 | -1,
+  stocks: StockItem[],
+): { id: string; patch: Partial<StockItem> }[] => {
+  const patches: { id: string; patch: Partial<StockItem> }[] = []
   lines.forEach((l) => {
     if (!l.stockItemId) return
-    const s = db.get<StockItem>('stock', l.stockItemId)
+    const s = stocks.find((x) => x.id === l.stockItemId)
     if (!s) return
     const q = +l.qty || 0
-    db.update<StockItem>('stock', s.id, {
-      qty: s.qty + sign * q,
-      out: s.out - sign * q,
+    patches.push({
+      id: s.id,
+      patch: {
+        qty: s.qty + sign * q,
+        qtyOut: s.qtyOut - sign * q,
+      },
     })
   })
+  return patches
 }
 
-function genExpCode(): string {
+function genExpCode(headers: ExpenseHeader[]): string {
   const now = new Date()
   const yyyymmdd = String(now.getFullYear()) +
     String(now.getMonth() + 1).padStart(2, '0') +
     String(now.getDate()).padStart(2, '0')
   const prefix = `EXP-${yyyymmdd}-`
-  const existing = db.getAll<ExpenseHeader>('expenseHeaders').filter(h => h.code.startsWith(prefix))
+  const existing = headers.filter(h => h.code.startsWith(prefix))
   return prefix + String(existing.length + 1).padStart(3, '0')
 }
 function toBeCode(code: string): string {
@@ -180,7 +191,7 @@ function ExpenseFormBody({
   const addLine = () => setLines([...lines, emptyLine()])
   const removeLine = (i: number) => setLines(lines.filter((_, idx) => idx !== i))
 
-  const isKPS = isKPSPartner(hdr.partnerId)
+  const isKPS = isKPSPartner(hdr.partnerId, partners)
   const totals = lines.map((l) => (l.qty || 0) * (l.unitPrice || 0))
   const netTotal = totals.reduce((s, t) => s + t, 0)
 
@@ -457,23 +468,22 @@ function ExpenseFormBody({
 }
 
 function ExpRecord() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const partners = db.getAll<Partner>('partners')
-  const stocks = db.getAll<StockItem>('stock')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: partners = [] } = useList<Partner>('partners')
+  const { data: stocks = [] } = useList<StockItem>('stock_items')
+  const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const insertHeader = useInsert<ExpenseHeader>('expense_headers')
+  const insertLine = useInsert<ExpenseLine>('expense_lines')
+  const updateStock = useUpdate<StockItem>('stock_items')
 
-  const [tick, setTick] = useState(0)
-  const refresh = () => setTick((n) => n + 1)
-  const recent = useMemo(() => {
-    void tick
-    return db.getAll<ExpenseHeader>('expenseHeaders').slice(0, 8)
-  }, [tick])
+  const recent = useMemo(() => allHeaders.slice(0, 8), [allHeaders])
 
   const [hdr, setHdr] = useState<HeaderForm>(emptyHeader())
   const [lines, setLines] = useState<LineItem[]>([emptyLine()])
   const [editing, setEditing] = useState<ExpenseHeader | null>(null)
-  const [docCode] = useState(() => genExpCode())
+  const [docCode] = useState(() => genExpCode(allHeaders))
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!hdr.vehicleId || !hdr.partnerId) {
       alert('กรุณาเลือกรถและช่าง/ร้านค้า')
       return
@@ -483,9 +493,8 @@ function ExpRecord() {
       return
     }
     const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
-    const h = db.add<ExpenseHeader>('expenseHeaders', {
-      id: uid('eh'),
-      code: genExpCode(),
+    const h = await insertHeader.mutateAsync({
+      code: genExpCode(allHeaders),
       date: hdr.date,
       vehicleId: hdr.vehicleId,
       partnerId: hdr.partnerId,
@@ -496,22 +505,24 @@ function ExpRecord() {
       lineCount: lines.length,
       note: lines.map((l) => l.item).filter(Boolean).join(', '),
     })
-    lines.forEach((l) =>
-      db.add<ExpenseLine>('expenseLines', {
-        ...l,
-        id: uid('el'),
+    for (const l of lines) {
+      const { id: _id, ...rest } = l
+      void _id
+      await insertLine.mutateAsync({
+        ...rest,
         headerId: h.id,
         amount: (l.qty || 0) * (l.unitPrice || 0),
-      }),
-    )
+      })
+    }
     // Apply stock deduction for KPS warehouse
-    if (isKPSPartner(hdr.partnerId)) {
-      applyStockDelta(lines, -1)
+    if (isKPSPartner(hdr.partnerId, partners)) {
+      for (const d of buildStockDeltas(lines, -1, stocks)) {
+        await updateStock.mutateAsync(d)
+      }
     }
     alert('บันทึกเรียบร้อย')
     setHdr(emptyHeader())
     setLines([emptyLine()])
-    refresh()
   }
 
   const handleReset = () => {
@@ -565,10 +576,10 @@ function ExpRecord() {
                   <td className="num muted">{db.thaiDate(h.date)}</td>
                   <td>
                     <span style={{ color: 'var(--primary)', fontWeight: 600 }} className="mono">
-                      {db.nameOf('vehicles', h.vehicleId)}
+                      {vehicles.find((v) => v.id === h.vehicleId)?.plate ?? '—'}
                     </span>
                   </td>
-                  <td>{db.nameOf('partners', h.partnerId)}</td>
+                  <td>{partners.find((p) => p.id === h.partnerId)?.name ?? '—'}</td>
                   <td className="num right" style={{ fontWeight: 600 }}>
                     {db.fmt(h.total)} บาท
                   </td>
@@ -605,7 +616,7 @@ function ExpRecord() {
         <ExpenseEditModal
           header={editing}
           onClose={() => setEditing(null)}
-          onSaved={refresh}
+          onSaved={() => {}}
           vehicles={vehicles}
           partners={partners}
           stocks={stocks}
@@ -632,11 +643,16 @@ function ExpenseEditModal({
   partners: Partner[]
   stocks: StockItem[]
 }) {
+  const { data: allLines = [] } = useList<ExpenseLine>('expense_lines')
+  const updateHeader = useUpdate<ExpenseHeader>('expense_headers')
+  const insertLine = useInsert<ExpenseLine>('expense_lines')
+  const deleteLine = useDelete('expense_lines')
+  const updateStock = useUpdate<StockItem>('stock_items')
   const oldLines = useMemo(
-    () => db.getAll<ExpenseLine>('expenseLines').filter((l) => l.headerId === header.id),
-    [header.id],
+    () => allLines.filter((l) => l.headerId === header.id),
+    [allLines, header.id],
   )
-  const wasKPS = isKPSPartner(header.partnerId)
+  const wasKPS = isKPSPartner(header.partnerId, partners)
 
   const [hdr, setHdr] = useState<HeaderForm>({
     vehicleId: header.vehicleId,
@@ -659,7 +675,7 @@ function ExpenseEditModal({
     })),
   )
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!hdr.vehicleId || !hdr.partnerId) {
       alert('กรุณาเลือกรถและช่าง/ร้านค้า')
       return
@@ -667,33 +683,47 @@ function ExpenseEditModal({
     const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
 
     // Revert old stock impact
-    if (wasKPS) applyStockDelta(oldLines, +1)
+    if (wasKPS) {
+      for (const d of buildStockDeltas(oldLines, +1, stocks)) {
+        await updateStock.mutateAsync(d)
+      }
+    }
 
     // Remove old lines
-    oldLines.forEach((l) => db.remove('expenseLines', l.id))
+    for (const l of oldLines) {
+      await deleteLine.mutateAsync(l.id)
+    }
 
     // Update header
-    db.update<ExpenseHeader>('expenseHeaders', header.id, {
-      ...hdr,
-      paid: hdr.paid === 'paid',
-      odometer: Number(hdr.odometer) || 0,
-      total: netTotal,
-      lineCount: lines.length,
-      note: lines.map((l) => l.item).filter(Boolean).join(', '),
+    await updateHeader.mutateAsync({
+      id: header.id,
+      patch: {
+        ...hdr,
+        paid: hdr.paid === 'paid',
+        odometer: Number(hdr.odometer) || 0,
+        total: netTotal,
+        lineCount: lines.length,
+        note: lines.map((l) => l.item).filter(Boolean).join(', '),
+      },
     })
 
     // Add new lines
-    lines.forEach((l) =>
-      db.add<ExpenseLine>('expenseLines', {
-        ...l,
-        id: uid('el'),
+    for (const l of lines) {
+      const { id: _id, ...rest } = l
+      void _id
+      await insertLine.mutateAsync({
+        ...rest,
         headerId: header.id,
         amount: (l.qty || 0) * (l.unitPrice || 0),
-      }),
-    )
+      })
+    }
 
     // Apply new stock impact
-    if (isKPSPartner(hdr.partnerId)) applyStockDelta(lines, -1)
+    if (isKPSPartner(hdr.partnerId, partners)) {
+      for (const d of buildStockDeltas(lines, -1, stocks)) {
+        await updateStock.mutateAsync(d)
+      }
+    }
 
     alert('บันทึกการแก้ไขเรียบร้อย')
     onSaved()
@@ -762,8 +792,9 @@ function PayConfirmModal({
   onClose: () => void
   onPaid: () => void
 }) {
-  const confirm = () => {
-    db.update<ExpenseHeader>('expenseHeaders', header.id, { paid: true })
+  const updateHeader = useUpdate<ExpenseHeader>('expense_headers')
+  const confirm = async () => {
+    await updateHeader.mutateAsync({ id: header.id, patch: { paid: true } })
     onPaid()
     onClose()
   }
@@ -828,9 +859,8 @@ function PayConfirmModal({
 // ─── Tab 2: สถานะการเงิน ──────────────────────────────────────────────────────
 
 function ExpFinance() {
-  const [tick, setTick] = useState(0)
-  const headers = useMemo(() => { void tick; return db.getAll<ExpenseHeader>('expenseHeaders') }, [tick])
-  const partners = db.getAll<Partner>('partners')
+  const { data: headers = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: partners = [] } = useList<Partner>('partners')
 
   const today = new Date('2026-05-17')
   const unpaidHeaders = headers.filter((h) => !h.paid)
@@ -979,7 +1009,7 @@ function ExpFinance() {
           header={payTarget}
           partner={partners.find((p) => p.id === payTarget.partnerId)}
           onClose={() => setPayTarget(null)}
-          onPaid={() => setTick((n) => n + 1)}
+          onPaid={() => {}}
         />
       )}
     </div>
@@ -989,6 +1019,7 @@ function ExpFinance() {
 // ─── Tab 3: สต๊อคคลัง KPS ────────────────────────────────────────────────────
 
 function SellPriceCell({ item, onSaved }: { item: StockItem; onSaved: () => void }) {
+  const updateStock = useUpdate<StockItem>('stock_items')
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState('')
 
@@ -996,9 +1027,9 @@ function SellPriceCell({ item, onSaved }: { item: StockItem; onSaved: () => void
     setVal(item.sellPrice != null ? String(item.sellPrice) : '')
     setEditing(true)
   }
-  const save = () => {
+  const save = async () => {
     const p = parseFloat(val)
-    db.update<StockItem>('stock', item.id, { sellPrice: isNaN(p) ? undefined : p })
+    await updateStock.mutateAsync({ id: item.id, patch: { sellPrice: isNaN(p) ? undefined : p } })
     setEditing(false)
     onSaved()
   }
@@ -1033,33 +1064,35 @@ function SellPriceCell({ item, onSaved }: { item: StockItem; onSaved: () => void
 }
 
 function ExpStock() {
-  const [tick, setTick] = useState(0)
-  const refresh = () => setTick((n) => n + 1)
-  const stock = useMemo(() => { void tick; return db.getAll<StockItem>('stock') }, [tick])
-  const receipts = useMemo(() => { void tick; return db.getAll<StockReceipt>('stockReceipts') }, [tick])
-  const partners = db.getAll<Partner>('partners').filter((p) => p.name !== KPS_WAREHOUSE_NAME)
+  const { data: stock = [] } = useList<StockItem>('stock_items')
+  const { data: receipts = [] } = useList<StockReceipt>('stock_receipts')
+  const { data: allPartners = [] } = useList<Partner>('partners')
+  const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: allExpLines = [] } = useList<ExpenseLine>('expense_lines')
+  const updateStock = useUpdate<StockItem>('stock_items')
+  const insertReceipt = useInsert<StockReceipt>('stock_receipts')
+  const partners = allPartners.filter((p) => p.name !== KPS_WAREHOUSE_NAME)
 
   const total = stock.reduce((s, r) => s + r.qty * r.unitCost, 0)
   const low = stock.filter((s) => s.qty <= s.reorderAt)
 
   // Net profit this month: sum over KPS expense lines of qty * (sellPrice - unitCost)
   const thisMonthProfit = useMemo(() => {
-    void tick
     const now = new Date()
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    const headers = db.getAll<ExpenseHeader>('expenseHeaders').filter(h => {
-      if (!isKPSPartner(h.partnerId)) return false
+    const headers = allHeaders.filter(h => {
+      if (!isKPSPartner(h.partnerId, allPartners)) return false
       return h.date?.slice(0, 7) === ym
     })
     const headerIds = new Set(headers.map(h => h.id))
-    return db.getAll<ExpenseLine>('expenseLines')
+    return allExpLines
       .filter(l => headerIds.has(l.headerId) && l.stockItemId)
       .reduce((sum, l) => {
         const s = stock.find(x => x.id === l.stockItemId)
         if (!s || s.sellPrice == null) return sum
         return sum + l.qty * (s.sellPrice - s.unitCost)
       }, 0)
-  }, [tick, stock])
+  }, [allHeaders, allExpLines, allPartners, stock])
 
   // Receive form state
   const today = new Date().toISOString().slice(0, 10)
@@ -1079,7 +1112,7 @@ function ExpStock() {
     setForm((f) => ({ ...f, stockItemId: id, unitPrice: f.unitPrice || (s ? String(s.unitCost) : '') }))
   }
 
-  const submitReceipt = () => {
+  const submitReceipt = async () => {
     if (!form.partnerId) { alert('กรุณาเลือกคู่ค้า'); return }
     if (!form.stockItemId) { alert('กรุณาเลือกรายการสินค้า'); return }
     const q = parseFloat(form.qty) || 0
@@ -1096,14 +1129,16 @@ function ExpStock() {
     const newQty = s.qty + q
     const newAvgCost = newQty > 0 ? (oldValue + newValue) / newQty : p
 
-    db.update<StockItem>('stock', s.id, {
-      qty: newQty,
-      in: s.in + q,
-      unitCost: Math.round(newAvgCost * 100) / 100,
+    await updateStock.mutateAsync({
+      id: s.id,
+      patch: {
+        qty: newQty,
+        qtyIn: s.qtyIn + q,
+        unitCost: Math.round(newAvgCost * 100) / 100,
+      },
     })
 
-    db.add<StockReceipt>('stockReceipts', {
-      id: uid('sr'),
+    await insertReceipt.mutateAsync({
       date: form.date,
       partnerId: form.partnerId,
       stockItemId: s.id,
@@ -1114,7 +1149,6 @@ function ExpStock() {
 
     alert('รับสินค้าเข้าคลังเรียบร้อย')
     setForm({ date: today, partnerId: '', stockItemId: '', qty: '', unitPrice: '' })
-    refresh()
   }
 
   return (
@@ -1269,7 +1303,7 @@ function ExpStock() {
                   </td>
                   <td className="num right">{db.fmt(s.unitCost)} ฿</td>
                   <td className="num right" style={{ color: '#0369A1' }}>
-                    <SellPriceCell item={s} onSaved={refresh} />
+                    <SellPriceCell item={s} onSaved={() => {}} />
                   </td>
                   <td className="num right" style={{ fontWeight: 600, color: 'var(--primary)' }}>
                     {db.fmt(s.qty * s.unitCost)} ฿
@@ -1313,7 +1347,7 @@ function ExpStock() {
                   return (
                     <tr key={r.id}>
                       <td className="num muted">{db.thaiDate(r.date)}</td>
-                      <td>{db.nameOf('partners', r.partnerId)}</td>
+                      <td>{allPartners.find((p) => p.id === r.partnerId)?.name ?? '—'}</td>
                       <td>{it?.name ?? '—'}</td>
                       <td className="num right">{r.qty}</td>
                       <td className="num right">{db.fmt(r.unitPrice)} ฿</td>
@@ -1341,6 +1375,9 @@ const PIVOT_MONTHS = [
 
 function PivotTab() {
   const today = new Date()
+  const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: allPartners = [] } = useList<Partner>('partners')
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
   const [pivotYear,  setPivotYear]  = useState(today.getFullYear())
   const [pivotMonth, setPivotMonth] = useState<number>(today.getMonth() + 1) // 1-12, 0 = ทุกเดือน
 
@@ -1359,16 +1396,16 @@ function PivotTab() {
     : `ทั้งปี พ.ศ. ${pivotYear + 543}`
 
   const headers = useMemo(
-    () => db.getAll<ExpenseHeader>('expenseHeaders').filter(h => h.date >= dateFrom && h.date <= dateTo),
-    [dateFrom, dateTo],
+    () => allHeaders.filter(h => h.date >= dateFrom && h.date <= dateTo),
+    [allHeaders, dateFrom, dateTo],
   )
 
   const activeVendorIds = useMemo(() => Array.from(new Set(headers.map(h => h.partnerId))), [headers])
   const activeVendors   = useMemo(
-    () => activeVendorIds.map(id => db.get<Partner>('partners', id)).filter(Boolean) as Partner[],
-    [activeVendorIds],
+    () => activeVendorIds.map(id => allPartners.find(p => p.id === id)).filter(Boolean) as Partner[],
+    [activeVendorIds, allPartners],
   )
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
+  const vehicles = allVehicles
 
   const matrix = useMemo(() => {
     const m: Record<string, Record<string, number>> = {}
@@ -1533,10 +1570,11 @@ function PivotTab() {
 // ─── Tab 4: รายงานสรุป (Unchanged) ───────────────────────────────────────────
 
 function ExpReport() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: partners = [] } = useList<Partner>('partners')
+  const { data: headers = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: allLines = [] } = useList<ExpenseLine>('expense_lines')
   const [innerTab, setInnerTab] = useState('repair')
-  const headers = db.getAll<ExpenseHeader>('expenseHeaders')
-  const allLines = db.getAll<ExpenseLine>('expenseLines')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [vehicleFilter, setVehicleFilter] = useState('')
@@ -1609,8 +1647,8 @@ function ExpReport() {
               </thead>
               <tbody>
                 {filteredHeaders.map((h) => {
-                  const v = db.get<Vehicle>('vehicles', h.vehicleId)
-                  const p = db.get<Partner>('partners', h.partnerId)
+                  const v = vehicles.find((x) => x.id === h.vehicleId)
+                  const p = partners.find((x) => x.id === h.partnerId)
                   return (
                     <tr key={h.id}>
                       <td>
@@ -1670,7 +1708,7 @@ function ExpReport() {
                   <div>
                     <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>รายละเอียดการซ่อม</h3>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                      {toBeCode(detailHeader.code)} · {db.thaiDate(detailHeader.date)} · {db.nameOf('vehicles', detailHeader.vehicleId)} · {db.nameOf('partners', detailHeader.partnerId)}
+                      {toBeCode(detailHeader.code)} · {db.thaiDate(detailHeader.date)} · {vehicles.find((v) => v.id === detailHeader.vehicleId)?.plate ?? '—'} · {partners.find((p) => p.id === detailHeader.partnerId)?.name ?? '—'}
                     </div>
                   </div>
                   <button className="btn ghost icon sm" onClick={() => setDetailHeader(null)}><Icon name="close" size={16} /></button>
@@ -1744,7 +1782,9 @@ function VendorEditModal({
   onSaved: () => void
 }) {
   const isNew = !partner
-  const partners = db.getAll<Partner>('partners')
+  const { data: partners = [] } = useList<Partner>('partners')
+  const insertPartner = useInsert<Partner>('partners')
+  const updatePartner = useUpdate<Partner>('partners')
   const nextCode = isNew
     ? 'VND-' + String(
         partners.reduce((max, p) => {
@@ -1769,12 +1809,12 @@ function VendorEditModal({
   })
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim()) { alert('กรุณากรอกชื่อร้านค้า/ช่าง'); return }
     if (isNew) {
-      db.add<Partner>('partners', { ...form, id: uid('pa'), balance: 0 })
+      await insertPartner.mutateAsync({ ...form, balance: 0 })
     } else {
-      db.update<Partner>('partners', partner!.id, form)
+      await updatePartner.mutateAsync({ id: partner!.id, patch: form })
     }
     onSaved()
     onClose()
@@ -1816,7 +1856,7 @@ function VendorEditModal({
               <datalist id="partner-type-options">
                 {[...new Set([
                   ...PARTNER_TYPES,
-                  ...db.getAll<Partner>('partners').map((p) => p.type).filter(Boolean),
+                  ...partners.map((p) => p.type).filter(Boolean),
                 ])].map((t) => <option key={t} value={t} />)}
               </datalist>
             </Field>
@@ -1885,9 +1925,8 @@ function VendorEditModal({
 }
 
 function ExpVendors() {
-  const [tick, setTick] = useState(0)
-  const refresh = () => setTick((n) => n + 1)
-  const partners = useMemo(() => { void tick; return db.getAll<Partner>('partners') }, [tick])
+  const { data: partners = [] } = useList<Partner>('partners')
+  const deletePartner = useDelete('partners')
   const [q, setQ] = useState('')
   const [editing, setEditing] = useState<Partner | null>(null)
   const [addNew, setAddNew] = useState(false)
@@ -1901,10 +1940,9 @@ function ExpVendors() {
       (p.account && p.account.includes(q)),
   )
 
-  const handleDelete = (p: Partner) => {
+  const handleDelete = async (p: Partner) => {
     if (!confirm(`ต้องการลบ "${p.name}" หรือไม่?`)) return
-    db.remove('partners', p.id)
-    refresh()
+    await deletePartner.mutateAsync(p.id)
   }
 
   return (
@@ -2003,10 +2041,10 @@ function ExpVendors() {
       </div>
 
       {editing && (
-        <VendorEditModal partner={editing} onClose={() => setEditing(null)} onSaved={refresh} />
+        <VendorEditModal partner={editing} onClose={() => setEditing(null)} onSaved={() => {}} />
       )}
       {addNew && (
-        <VendorEditModal partner={null} onClose={() => setAddNew(false)} onSaved={refresh} />
+        <VendorEditModal partner={null} onClose={() => setAddNew(false)} onSaved={() => {}} />
       )}
     </div>
   )
