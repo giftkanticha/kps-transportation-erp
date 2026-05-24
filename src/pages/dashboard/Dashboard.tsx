@@ -403,6 +403,50 @@ export function Dashboard({ user, setActive }: DashboardProps) {
         {/* Left column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
+          {/* Alerts */}
+          <div className="card">
+            <div className="head">
+              <h3>การแจ้งเตือน</h3>
+              <span className="badge red mono">{tireAlerts + lowStock + 1 + subUnpaid.length}</span>
+            </div>
+            <div style={{ padding: '8px 18px' }}>
+              <div className="feed">
+                <div className="feed-item">
+                  <div className="ic red"><Icon name="alert" size={16} /></div>
+                  <div className="body">
+                    <div className="who">ยางวิกฤติ {tireAlerts} เส้น</div>
+                    <div className="txt">รถ 70-2451 (RR2) และ 70-4029 (FR) ต่ำกว่าเกณฑ์</div>
+                    <div className="when">8 ชม.ที่แล้ว</div>
+                  </div>
+                </div>
+                <div className="feed-item">
+                  <div className="ic amber"><Icon name="wrench" size={16} /></div>
+                  <div className="body">
+                    <div className="who">ครบกำหนดบำรุงรักษา</div>
+                    <div className="txt">รถ 70-7890 ครบ 10,000 km</div>
+                    <div className="when">วันนี้</div>
+                  </div>
+                </div>
+                <div className="feed-item">
+                  <div className="ic amber"><Icon name="package" size={16} /></div>
+                  <div className="body">
+                    <div className="who">สต็อคใกล้หมด {lowStock} รายการ</div>
+                    <div className="txt">หลอดไฟหน้า H4, ผ้าเบรกหน้า</div>
+                    <div className="when">เมื่อวาน</div>
+                  </div>
+                </div>
+                <div className="feed-item">
+                  <div className="ic"><Icon name="money" size={16} /></div>
+                  <div className="body">
+                    <div className="who">ลูกหนี้เกินกำหนด</div>
+                    <div className="txt">PTT Global Chemical ฿1.24M (30+ วัน)</div>
+                    <div className="when">3 วันที่แล้ว</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Subcontractor jobs pending payment (to-do) */}
           {subUnpaid.length > 0 && (
             <div className="card">
@@ -484,50 +528,6 @@ export function Dashboard({ user, setActive }: DashboardProps) {
               </div>
             </div>
           )}
-
-          {/* Alerts */}
-          <div className="card">
-            <div className="head">
-              <h3>การแจ้งเตือน</h3>
-              <span className="badge red mono">{tireAlerts + lowStock + 1 + subUnpaid.length}</span>
-            </div>
-            <div style={{ padding: '8px 18px' }}>
-              <div className="feed">
-                <div className="feed-item">
-                  <div className="ic red"><Icon name="alert" size={16} /></div>
-                  <div className="body">
-                    <div className="who">ยางวิกฤติ {tireAlerts} เส้น</div>
-                    <div className="txt">รถ 70-2451 (RR2) และ 70-4029 (FR) ต่ำกว่าเกณฑ์</div>
-                    <div className="when">8 ชม.ที่แล้ว</div>
-                  </div>
-                </div>
-                <div className="feed-item">
-                  <div className="ic amber"><Icon name="wrench" size={16} /></div>
-                  <div className="body">
-                    <div className="who">ครบกำหนดบำรุงรักษา</div>
-                    <div className="txt">รถ 70-7890 ครบ 10,000 km</div>
-                    <div className="when">วันนี้</div>
-                  </div>
-                </div>
-                <div className="feed-item">
-                  <div className="ic amber"><Icon name="package" size={16} /></div>
-                  <div className="body">
-                    <div className="who">สต็อคใกล้หมด {lowStock} รายการ</div>
-                    <div className="txt">หลอดไฟหน้า H4, ผ้าเบรกหน้า</div>
-                    <div className="when">เมื่อวาน</div>
-                  </div>
-                </div>
-                <div className="feed-item">
-                  <div className="ic"><Icon name="money" size={16} /></div>
-                  <div className="body">
-                    <div className="who">ลูกหนี้เกินกำหนด</div>
-                    <div className="txt">PTT Global Chemical ฿1.24M (30+ วัน)</div>
-                    <div className="when">3 วันที่แล้ว</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
 
           {/* Vehicle Registrations */}
           <div className="card">

@@ -1072,6 +1072,7 @@ function ExpStock() {
   const updateStock = useUpdate<StockItem>('stock_items')
   const insertStock = useInsert<StockItem>('stock_items')
   const insertReceipt = useInsert<StockReceipt>('stock_receipts')
+  const insertPartner = useInsert<Partner>('partners')
   const partners = allPartners.filter((p) => p.name !== KPS_WAREHOUSE_NAME)
 
   const total = stock.reduce((s, r) => s + r.qty * r.unitCost, 0)
@@ -1106,12 +1107,15 @@ function ExpStock() {
     newName: '',
     newUnit: '',
     newCategory: 'อะไหล่',
+    newPartnerName: '',
+    newPartnerType: PARTNER_TYPES[0],
   }
   const [form, setForm] = useState(emptyReceive)
   const set = <K extends keyof typeof form>(k: K, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   const formTotal = (parseFloat(form.qty) || 0) * (parseFloat(form.unitPrice) || 0)
   const isNewItem = form.stockItemId === '__new__'
+  const isNewPartner = form.partnerId === '__new__'
 
   const onPickItem = (id: string) => {
     if (id === '__new__') { setForm((f) => ({ ...f, stockItemId: '__new__' })); return }
@@ -1127,6 +1131,23 @@ function ExpStock() {
     if (q <= 0) { alert('กรุณากรอกจำนวน'); return }
     if (p <= 0) { alert('กรุณากรอกราคาต่อหน่วย'); return }
 
+    // New vendor: create it in the shared partners registry first.
+    let partnerId = form.partnerId
+    if (isNewPartner) {
+      if (!form.newPartnerName.trim()) { alert('กรุณากรอกชื่อคู่ค้าใหม่'); return }
+      const nextNum = allPartners.reduce((max, x) => {
+        const n = parseInt(x.code.replace(/\D/g, ''), 10)
+        return isNaN(n) ? max : Math.max(max, n)
+      }, 0) + 1
+      const createdPartner = await insertPartner.mutateAsync({
+        code: 'VND-' + String(nextNum).padStart(3, '0'),
+        name: form.newPartnerName.trim(),
+        type: form.newPartnerType,
+        status: 'active',
+      })
+      partnerId = createdPartner.id
+    }
+
     // New stock item: create it first, then receive into it.
     if (isNewItem) {
       if (!form.newName.trim()) { alert('กรุณากรอกชื่อสินค้าใหม่'); return }
@@ -1139,7 +1160,7 @@ function ExpStock() {
         unitCost: p, reorderAt: 0,
       })
       await insertReceipt.mutateAsync({
-        date: form.date, partnerId: form.partnerId, stockItemId: created.id,
+        date: form.date, partnerId, stockItemId: created.id,
         qty: q, unitPrice: p, total: q * p,
       })
       alert('เพิ่มสินค้าใหม่และรับเข้าคลังเรียบร้อย')
@@ -1167,7 +1188,7 @@ function ExpStock() {
 
     await insertReceipt.mutateAsync({
       date: form.date,
-      partnerId: form.partnerId,
+      partnerId,
       stockItemId: s.id,
       qty: q,
       unitPrice: p,
@@ -1233,6 +1254,7 @@ function ExpStock() {
                 {partners.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
+                <option value="__new__">➕ เพิ่มคู่ค้าใหม่...</option>
               </select>
             </Field>
             <Field label="รายการสินค้า *">
@@ -1247,6 +1269,18 @@ function ExpStock() {
               </select>
             </Field>
           </div>
+          {isNewPartner && (
+            <div className="grid-2" style={{ gap: 14, marginBottom: 14, padding: 12, background: 'var(--bg-sunk)', borderRadius: 8 }}>
+              <Field label="ชื่อคู่ค้าใหม่ *">
+                <input value={form.newPartnerName} onChange={(e) => set('newPartnerName', e.target.value)} placeholder="เช่น ร้านอะไหล่ ABC" />
+              </Field>
+              <Field label="ประเภท">
+                <select value={form.newPartnerType} onChange={(e) => set('newPartnerType', e.target.value)}>
+                  {PARTNER_TYPES.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </Field>
+            </div>
+          )}
           {isNewItem && (
             <div className="grid-3" style={{ gap: 14, marginBottom: 14, padding: 12, background: 'var(--bg-sunk)', borderRadius: 8 }}>
               <Field label="ชื่อสินค้าใหม่ *">
