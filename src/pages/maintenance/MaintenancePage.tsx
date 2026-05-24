@@ -1,9 +1,12 @@
 import { db } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import { Icon, StatusBadge } from '../../components/ui'
-import type { Maintenance } from '../../types'
+import type { Maintenance, Vehicle } from '../../types'
 
 export function MaintenancePage() {
-  const all = db.getAll<Maintenance>('maintenance')
+  const { data: all = [] } = useList<Maintenance>('maintenance')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const plateOf = (id: string) => vehicles.find((v) => v.id === id)?.plate ?? '—'
   const inProgress = all.filter((m) => m.status === 'in-progress')
   const scheduled = all.filter((m) => m.status === 'scheduled')
   const thisMontCost = all
@@ -81,7 +84,7 @@ export function MaintenancePage() {
               <tr key={m.id}>
                 <td className="mono">{m.code}</td>
                 <td>
-                  <span className="mono badge gray">{db.nameOf('vehicles', m.vehicleId)}</span>
+                  <span className="mono badge gray">{plateOf(m.vehicleId)}</span>
                 </td>
                 <td>{m.type}</td>
                 <td className="muted" style={{ fontSize: 12.5 }}>
