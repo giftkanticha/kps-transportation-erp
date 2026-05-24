@@ -386,6 +386,7 @@ export interface SubJob {
   total: number
   status: string
   bank: string
+  wht?: boolean
 }
 
 export interface ActivityLog {

@@ -488,6 +488,7 @@ function SubCloseForm() {
 
   const [pickedId, setPickedId] = useState('')
   const [finalWeight, setFinalWeight] = useState('')
+  const [wht, setWht] = useState(false)
 
   const picked = openJobs.find(j => j.id === pickedId)
   const driver = picked ? subDrivers.find(d => d.id === picked.driverId) : null
@@ -500,6 +501,8 @@ function SubCloseForm() {
     ? picked.mode === 'lump' ? picked.total
     : finalInput * picked.price
     : 0
+  const whtAmount = wht ? finalTotal * 0.01 : 0
+  const netTotal = finalTotal - whtAmount
 
   const closeJob = async () => {
     if (!picked) return
@@ -513,16 +516,19 @@ function SubCloseForm() {
         status: 'unpaid',
         finalWeight: finalKg,
         total: finalTotal,
+        wht,
       },
     })
     alert('ส่งข้อมูลเรียบร้อย — งานนี้รอชำระเงิน')
     setPickedId('')
     setFinalWeight('')
+    setWht(false)
   }
 
   const cancel = () => {
     setPickedId('')
     setFinalWeight('')
+    setWht(false)
   }
 
   return (
@@ -530,7 +536,7 @@ function SubCloseForm() {
       <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, marginBottom: 18 }}>ปิดงานรถรับจ้าง</h3>
 
       <Field label="เลือกงานรับจ้าง (เฉพาะงานที่ยังเปิดอยู่) *">
-        <select value={pickedId} onChange={e => { setPickedId(e.target.value); setFinalWeight('') }}>
+        <select value={pickedId} onChange={e => { setPickedId(e.target.value); setFinalWeight(''); setWht(false) }}>
           <option value="">-- กรุณาเลือกงาน --</option>
           {openJobs.map(j => (
             <option key={j.id} value={j.id}>
@@ -604,6 +610,38 @@ function SubCloseForm() {
             </div>
           )}
 
+          {/* Withholding tax (1%) option + net payable */}
+          <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13.5, fontWeight: 500 }}>
+              <input
+                type="checkbox"
+                checked={wht}
+                onChange={e => setWht(e.target.checked)}
+                style={{ accentColor: 'var(--primary)', width: 16, height: 16 }}
+              />
+              <span>หักภาษี ณ ที่จ่าย 1%</span>
+            </label>
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <div className="row" style={{ fontSize: 13 }}>
+                <span className="muted">ค่าบรรทุก</span>
+                <div className="spacer" />
+                <span className="mono">{db.thb(finalTotal)}</span>
+              </div>
+              {wht && (
+                <div className="row" style={{ fontSize: 13, color: 'var(--red)' }}>
+                  <span>ภาษีหัก ณ ที่จ่าย 1%</span>
+                  <div className="spacer" />
+                  <span className="mono">− {db.thb(whtAmount)}</span>
+                </div>
+              )}
+              <div className="row" style={{ paddingTop: 7, borderTop: '1px solid var(--line)', alignItems: 'baseline' }}>
+                <span style={{ fontWeight: 700 }}>สุทธิจ่าย</span>
+                <div className="spacer" />
+                <span className="mono" style={{ fontSize: 20, fontWeight: 800, color: 'var(--primary)' }}>{db.thb(netTotal)}</span>
+              </div>
+            </div>
+          </div>
+
           {/* Bank Info Card */}
           <div
             style={{
@@ -626,10 +664,10 @@ function SubCloseForm() {
               />
               <Info label="ชื่อบัญชี" value={driver?.name || picked.driverName || '—'} />
               <Info
-                label="ยอดที่ต้องชำระ"
+                label={wht ? 'ยอดที่ต้องชำระ (สุทธิ)' : 'ยอดที่ต้องชำระ'}
                 value={
                   <span className="mono" style={{ fontWeight: 800, fontSize: 16, color: 'var(--red)' }}>
-                    {db.thb(picked.mode === 'lump' ? picked.total : finalTotal)}
+                    {db.thb(netTotal)}
                   </span>
                 }
               />
@@ -656,6 +694,8 @@ function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () =>
   const { data: subDrivers = [] } = useList<SubDriver>('sub_drivers')
   const updateJob = useUpdate<SubJob>('sub_jobs')
   const driver = subDrivers.find(d => d.id === job.driverId)
+  const whtAmount = job.wht ? job.total * 0.01 : 0
+  const netTotal = job.total - whtAmount
 
   const pay = async () => {
     await updateJob.mutateAsync({ id: job.id, patch: { status: 'paid' } })
@@ -685,9 +725,15 @@ function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () =>
               <Info label="ชื่อบัญชี" value={driver?.name || '—'} />
             </div>
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>ยอดที่จะชำระ</div>
+              {job.wht && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8, fontSize: 13 }}>
+                  <div className="row"><span className="muted">ค่าบรรทุก</span><div className="spacer" /><span className="mono">{db.thb(job.total)}</span></div>
+                  <div className="row" style={{ color: 'var(--red)' }}><span>ภาษีหัก ณ ที่จ่าย 1%</span><div className="spacer" /><span className="mono">− {db.thb(whtAmount)}</span></div>
+                </div>
+              )}
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>ยอดที่จะชำระ{job.wht ? ' (สุทธิ)' : ''}</div>
               <span className="mono" style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)' }}>
-                {db.thb(job.total)}
+                {db.thb(netTotal)}
               </span>
             </div>
           </div>
@@ -771,12 +817,27 @@ function JobDetailDrawer({ job, onClose }: { job: SubJob; onClose: () => void })
           <div style={{
             padding: '16px 20px', background: 'var(--primary-50)',
             borderRadius: 10, marginBottom: 22,
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
-            <span style={{ fontWeight: 500, fontSize: 14 }}>ค่าขนส่งรวม</span>
-            <span className="mono" style={{ fontSize: 26, fontWeight: 800, color: 'var(--primary)' }}>
-              {fmt2(job.total)} <span style={{ fontSize: 14, fontWeight: 500 }}>฿</span>
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontWeight: 500, fontSize: 14 }}>ค่าขนส่งรวม</span>
+              <span className="mono" style={{ fontSize: job.wht ? 18 : 26, fontWeight: 800, color: 'var(--primary)' }}>
+                {fmt2(job.total)} <span style={{ fontSize: 14, fontWeight: 500 }}>฿</span>
+              </span>
+            </div>
+            {job.wht && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, color: 'var(--red)', fontSize: 13 }}>
+                  <span>ภาษีหัก ณ ที่จ่าย 1%</span>
+                  <span className="mono">− {fmt2(job.total * 0.01)} ฿</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>สุทธิจ่าย</span>
+                  <span className="mono" style={{ fontSize: 26, fontWeight: 800, color: 'var(--primary)' }}>
+                    {fmt2(job.total * 0.99)} <span style={{ fontSize: 14, fontWeight: 500 }}>฿</span>
+                  </span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Section 3: ธนาคาร */}
