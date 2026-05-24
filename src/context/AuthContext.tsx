@@ -73,7 +73,7 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
     .from('user_profiles')
     .select('*')
     .eq('id', userId)
-    .single()
+    .maybeSingle()
   return data as UserProfile | null
 }
 
@@ -84,16 +84,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (BYPASS_AUTH) return
-    supabase.auth.getSession().then(async ({ data: { session: s } }) => {
+    let mounted = true
+
+    const loadProfile = async (s: Session | null) => {
+      if (!mounted) return
       setSession(s)
-      if (s) setProfile(await fetchProfile(s.user.id))
-      setLoading(false)
+      if (!s) { setProfile(null); return }
+      try {
+        setProfile(await fetchProfile(s.user.id))
+      } catch {
+        // Network/RLS hiccup — keep the session, don't hard-kick the user
+        setProfile(null)
+      }
+    }
+
+    supabase.auth.getSession()
+      .then(({ data: { session: s } }) => loadProfile(s))
+      .catch(() => { /* offline / auth unreachable — fall through to login */ })
+      .finally(() => { if (mounted) setLoading(false) })
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+      void loadProfile(s)
     })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
-      setSession(s)
-      setProfile(s ? await fetchProfile(s.user.id) : null)
-    })
-    return () => subscription.unsubscribe()
+    return () => { mounted = false; subscription.unsubscribe() }
   }, [])
 
   const login = useCallback(async (email: string, password: string) => {
