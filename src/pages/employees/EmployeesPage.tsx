@@ -1,11 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
+import { useList, useUpdate, useDelete } from '../../hooks/useTable'
 import type { Employee, Vehicle } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
-
-function vehiclesOfDriver(employeeId: string): Vehicle[] {
-  return db.getAll<Vehicle>('vehicles').filter(v => v.driverId === employeeId)
-}
 
 function isDriverPosition(pos: string): boolean {
   return pos === 'คนขับ'
@@ -221,7 +218,11 @@ interface EmployeeEditModalProps {
 }
 
 function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProps) {
-  const allVehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allEmployees = [] } = useList<Employee>('employees')
+  const updateEmployee = useUpdate<Employee>('employees')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
+  const empName = (id: string) => allEmployees.find(e => e.id === id)?.name ?? '—'
   const initialVehicleIds = useMemo(
     () => allVehicles.filter(v => v.driverId === employee.id).map(v => v.id),
     [allVehicles, employee.id],
@@ -243,44 +244,52 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
 
   const isDriver = isDriverPosition(form.position)
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim() || !form.phone.trim()) {
       alert('กรุณากรอกชื่อและเบอร์โทร')
       return
     }
-    db.update<Employee>('employees', employee.id, {
-      name: form.name.trim(),
-      position: form.position,
-      phone: form.phone.trim(),
-      lineId: form.lineId,
-      joined: form.joined,
-      address: form.address,
-      vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
-    })
+    if (updateEmployee.isPending) return
+    try {
+      await updateEmployee.mutateAsync({
+        id: employee.id,
+        patch: {
+          name: form.name.trim(),
+          position: form.position,
+          phone: form.phone.trim(),
+          lineId: form.lineId,
+          joined: form.joined,
+          address: form.address,
+          vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
+        },
+      })
 
-    // Sync Vehicle.driverId for the selected set:
-    //   - vehicles newly selected → set driverId to this employee
-    //   - vehicles previously assigned to this employee but now deselected → clear driverId
-    if (isDriver) {
-      const finalSet = new Set(vehicleIds)
-      const prevSet = new Set(initialVehicleIds)
-      for (const v of allVehicles) {
-        const wasAssigned = prevSet.has(v.id)
-        const nowAssigned = finalSet.has(v.id)
-        if (nowAssigned && v.driverId !== employee.id) {
-          db.update<Vehicle>('vehicles', v.id, { driverId: employee.id })
-        } else if (!nowAssigned && wasAssigned) {
-          db.update<Vehicle>('vehicles', v.id, { driverId: null })
+      // Sync Vehicle.driverId for the selected set:
+      //   - vehicles newly selected → set driverId to this employee
+      //   - vehicles previously assigned to this employee but now deselected → clear driverId
+      if (isDriver) {
+        const finalSet = new Set(vehicleIds)
+        const prevSet = new Set(initialVehicleIds)
+        for (const v of allVehicles) {
+          const wasAssigned = prevSet.has(v.id)
+          const nowAssigned = finalSet.has(v.id)
+          if (nowAssigned && v.driverId !== employee.id) {
+            await updateVehicle.mutateAsync({ id: v.id, patch: { driverId: employee.id } })
+          } else if (!nowAssigned && wasAssigned) {
+            await updateVehicle.mutateAsync({ id: v.id, patch: { driverId: null } })
+          }
+        }
+      } else {
+        // Position changed away from คนขับ → clear all previously assigned vehicles
+        for (const vId of initialVehicleIds) {
+          await updateVehicle.mutateAsync({ id: vId, patch: { driverId: null } })
         }
       }
-    } else {
-      // Position changed away from คนขับ → clear all previously assigned vehicles
-      for (const vId of initialVehicleIds) {
-        db.update<Vehicle>('vehicles', vId, { driverId: null })
-      }
+      onClose()
+      onSaved()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ')
     }
-    onClose()
-    onSaved()
   }
 
   return (
@@ -355,7 +364,7 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
                   {allVehicles.map(v => {
                     const checked = vehicleIds.includes(v.id)
                     const otherDriver = !checked && v.driverId && v.driverId !== employee.id
-                      ? db.nameOf('employees', v.driverId)
+                      ? empName(v.driverId)
                       : null
                     return (
                       <label
@@ -415,10 +424,15 @@ interface StatusChangeDialogProps {
 }
 
 function StatusChangeDialog({ employee, onClose, onChanged }: StatusChangeDialogProps) {
+  const updateEmployee = useUpdate<Employee>('employees')
   const changeStatus = (status: Employee['status']) => {
-    db.update<Employee>('employees', employee.id, { status })
-    onClose()
-    onChanged()
+    updateEmployee.mutate(
+      { id: employee.id, patch: { status } },
+      {
+        onSuccess: () => { onClose(); onChanged() },
+        onError: (err) => alert(err instanceof Error ? err.message : 'เปลี่ยนสถานะไม่สำเร็จ'),
+      },
+    )
   }
 
   return (
@@ -463,17 +477,16 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
   const [statusChangingId, setStatusChangingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
-  const [tick, setTick] = useState(0)
   const [q, setQ] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>({ active: true, leave: false })
 
-  const refresh = () => setTick(t => t + 1)
+  const { data: allEmployees = [] } = useList<Employee>('employees')
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const deleteEmployee = useDelete('employees')
 
   const inBucket = (e: Employee): boolean =>
     (filterStatus.active && (e.status === 'active' || e.status === 'training')) ||
     (filterStatus.leave && e.status === 'leave')
-
-  const allEmployees = useMemo(() => db.getAll<Employee>('employees'), [tick])
 
   const filtered = useMemo(() => {
     return allEmployees.filter(e => {
@@ -493,10 +506,13 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
 
   const handleDelete = () => {
     if (!deletingId) return
-    db.remove('employees', deletingId)
-    setDeletingId(null)
-    refresh()
-    setToast({ kind: 'success', msg: 'ลบพนักงานเรียบร้อยแล้ว' })
+    deleteEmployee.mutate(deletingId, {
+      onSuccess: () => {
+        setDeletingId(null)
+        setToast({ kind: 'success', msg: 'ลบพนักงานเรียบร้อยแล้ว' })
+      },
+      onError: (err) => setToast({ kind: 'error', msg: err instanceof Error ? err.message : 'ลบไม่สำเร็จ' }),
+    })
   }
 
   return (
@@ -592,7 +608,7 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
                   <td>
                     <div>{e.position}</div>
                     {isDriverPosition(e.position) && (() => {
-                      const vs = vehiclesOfDriver(e.id)
+                      const vs = allVehicles.filter(v => v.driverId === e.id)
                       if (vs.length === 0) return (
                         <div className="muted" style={{ fontSize: 10.5, marginTop: 2 }}>ยังไม่ได้กำหนดรถ</div>
                       )
@@ -674,7 +690,6 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
             onClose={() => setEditingId(null)}
             onSaved={() => {
               setEditingId(null)
-              refresh()
               setToast({ kind: 'success', msg: '✅ บันทึกข้อมูลเรียบร้อย' })
             }}
           />
@@ -690,7 +705,6 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
             onClose={() => setStatusChangingId(null)}
             onChanged={() => {
               setStatusChangingId(null)
-              refresh()
             }}
           />
         )
