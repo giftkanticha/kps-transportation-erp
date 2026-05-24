@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { db } from '../../lib/db'
+import { useList, useInsert } from '../../hooks/useTable'
 import { Icon, Field, StatusBadge } from '../../components/ui'
 import type { Customer } from '../../types'
 
@@ -93,7 +94,8 @@ export function CustomersPage() {
     address: '',
   })
 
-  const customers = db.getAll<Customer>('customers')
+  const { data: customers = [] } = useList<Customer>('customers')
+  const insertCustomer = useInsert<Customer>('customers')
   const list = customers.filter(
     (c) => !q || c.name.toLowerCase().includes(q.toLowerCase()) || c.code.includes(q),
   )
@@ -103,18 +105,29 @@ export function CustomersPage() {
       alert('กรุณากรอกชื่อลูกค้า')
       return
     }
-    db.add<Customer>('customers', {
-      ...form,
-      id: '',
-      code: 'CUS-' + (1000 + customers.length + 1),
-      totalJobs: 0,
-      openInvoice: 0,
-      status: 'active',
-      since: new Date().toISOString().slice(0, 10),
-      credit: +form.credit,
-    })
-    setShow(false)
-    setForm({ name: '', contact: '', phone: '', credit: 30, industry: '', address: '' })
+    if (insertCustomer.isPending) return
+    insertCustomer.mutate(
+      {
+        name: form.name,
+        contact: form.contact,
+        phone: form.phone,
+        industry: form.industry,
+        address: form.address,
+        code: 'CUS-' + (1000 + customers.length + 1),
+        totalJobs: 0,
+        openInvoice: 0,
+        status: 'active',
+        since: new Date().toISOString().slice(0, 10),
+        credit: +form.credit,
+      },
+      {
+        onSuccess: () => {
+          setShow(false)
+          setForm({ name: '', contact: '', phone: '', credit: 30, industry: '', address: '' })
+        },
+        onError: (err) => alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'),
+      },
+    )
   }
 
   const totalOpenInvoice = customers.reduce((s, c) => s + c.openInvoice, 0)

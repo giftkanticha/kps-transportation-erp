@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { Icon } from '../../components/ui'
+import { usePrint } from '../../hooks/usePrint'
 import type { Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance, Expense, Employee } from '../../types'
 
 /* ─────────────────────────────────────────────────── helpers ── */
@@ -433,6 +434,7 @@ function PLTable({
 type ViewMode = 'monthly' | 'yearly'
 
 export function FinancePL() {
+  const { print } = usePrint()
   const today = new Date()
   const [year, setYear]       = useState(today.getFullYear())
   const [month, setMonth]     = useState(today.getMonth())
@@ -632,7 +634,7 @@ export function FinancePL() {
           )}
 
           <div className="row" style={{ gap: 8, marginLeft: 'auto' }}>
-            <button className="btn" onClick={() => window.print()}>
+            <button className="btn" onClick={() => print('landscape')}>
               <Icon name="download" size={14} />
               {viewMode === 'yearly'
                 ? `พิมพ์รายปี ${year + 543}`

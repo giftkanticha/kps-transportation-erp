@@ -26,19 +26,32 @@ function nextCode(): string {
 }
 
 export function QuickOpenTripModal({ vehicleId, date, floatingTxId, onClose, onSuccess }: Props) {
-  const [odometer, setOdometer] = useState('')
-  const [origin, setOrigin] = useState('โรงงาน KPS')
-  const [destination, setDestination] = useState('')
-  const [saving, setSaving] = useState(false)
-
   const vehicle = useMemo(() => db.get<Vehicle>('vehicles', vehicleId), [vehicleId])
   const driver = useMemo(
     () => vehicle?.driverId ? db.get<Employee>('employees', vehicle.driverId) : null,
     [vehicle],
   )
+  const lastMileage = useMemo(() => db.lastClosedMileage(vehicleId), [vehicleId])
+  const minMileage = lastMileage ?? 0
+
+  const [odometer, setOdometer] = useState(lastMileage != null ? String(lastMileage) : '')
+  const [origin, setOrigin] = useState('โรงงาน KPS')
+  const [destination, setDestination] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const handleConfirm = () => {
     if (saving) return
+    const odo = odometer.trim() === '' ? NaN : Number(odometer)
+    if (!odometer || isNaN(odo) || odo < 0) {
+      setError('กรุณากรอกเลขไมล์เริ่มต้น (km)')
+      return
+    }
+    if (lastMileage != null && odo < lastMileage) {
+      setError(`เลขไมล์ต้อง ≥ ${lastMileage.toLocaleString()} (ไมล์ปิดรอบก่อนหน้า)`)
+      return
+    }
+    setError(null)
     setSaving(true)
 
     const code = nextCode()
@@ -54,7 +67,7 @@ export function QuickOpenTripModal({ vehicleId, date, floatingTxId, onClose, onS
       eta: `${date}T18:00`,
       status: 'scheduled',
       progress: 0,
-      startOdometer: odometer ? parseInt(odometer, 10) : null,
+      startOdometer: odo,
       endOdometer: null,
       distance: null,
       liters: null,
@@ -175,20 +188,31 @@ export function QuickOpenTripModal({ vehicleId, date, floatingTxId, onClose, onS
 
           <div>
             <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 5 }}>
-              เลขไมล์ <span style={{ color: '#9CA3AF', fontWeight: 400 }}>(ไม่บังคับ)</span>
+              เลขไมล์เริ่มต้น (km) <span style={{ color: '#DC2626', fontWeight: 700 }}>*</span>
             </label>
             <input
               type="number"
-              min="0"
+              min={minMileage}
+              step="1"
               value={odometer}
-              onChange={e => setOdometer(e.target.value)}
-              placeholder="km..."
+              onChange={e => { setOdometer(e.target.value); if (error) setError(null) }}
+              placeholder={lastMileage != null ? `≥ ${lastMileage.toLocaleString()}` : 'km...'}
               style={{
                 width: '100%', boxSizing: 'border-box', height: 36, padding: '0 10px',
-                border: '1px solid var(--line)', borderRadius: 7, fontSize: 13,
+                border: `1px solid ${error ? '#DC2626' : 'var(--line)'}`, borderRadius: 7, fontSize: 13,
                 fontFamily: 'inherit', outline: 'none',
               }}
             />
+            {lastMileage != null && (
+              <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>
+                ไมล์ปิดรอบก่อนหน้า: <span className="mono" style={{ fontWeight: 600, color: '#1D4ED8' }}>{lastMileage.toLocaleString()} km</span>
+              </div>
+            )}
+            {error && (
+              <div style={{ fontSize: 11.5, color: '#DC2626', marginTop: 4, fontWeight: 500 }}>
+                ⚠ {error}
+              </div>
+            )}
           </div>
 
           <div style={{

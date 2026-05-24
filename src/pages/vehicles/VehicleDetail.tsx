@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { db } from '../../lib/db'
-import type { Vehicle, Employee, Tire, FuelRecord, Maintenance, Dispatch, User } from '../../types'
+import { useOne, useList } from '../../hooks/useTable'
+import type { Vehicle, Employee, Tire, FuelRecord, Maintenance, Dispatch, Customer, User } from '../../types'
 import { Icon, StatusBadge, Info } from '../../components/ui'
 
 interface VehicleDetailProps {
@@ -63,8 +64,20 @@ function TireSummary({ tires }: { tires: Tire[] }) {
 
 export function VehicleDetail({ setActive, subject }: VehicleDetailProps) {
   const subjectObj = subject as { type?: string; id?: string } | null
-  const v = db.get<Vehicle>('vehicles', subjectObj?.id ?? '')
+  const vehicleId = subjectObj?.id ?? ''
   const [tab, setTab] = useState<TabKey>('overview')
+
+  const { data: v, isLoading } = useOne<Vehicle>('vehicles', vehicleId)
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: customers = [] } = useList<Customer>('customers')
+  const { data: allTires = [] } = useList<Tire>('tires')
+  const { data: allFuel = [] } = useList<FuelRecord>('fuel_records')
+  const { data: allMaintenance = [] } = useList<Maintenance>('maintenance')
+  const { data: allTrips = [] } = useList<Dispatch>('dispatch')
+
+  if (isLoading) {
+    return <div className="empty">กำลังโหลด…</div>
+  }
 
   if (!v) {
     return (
@@ -80,11 +93,12 @@ export function VehicleDetail({ setActive, subject }: VehicleDetailProps) {
     )
   }
 
-  const driver = db.get<Employee>('employees', v.driverId ?? '')
-  const tires = db.getAll<Tire>('tires').filter(t => t.vehicleId === v.id)
-  const fuel = db.getAll<FuelRecord>('fuel').filter(f => f.vehicleId === v.id)
-  const maintenance = db.getAll<Maintenance>('maintenance').filter(m => m.vehicleId === v.id)
-  const trips = db.getAll<Dispatch>('dispatch').filter(t => t.vehicleId === v.id)
+  const driver = employees.find(e => e.id === v.driverId)
+  const tires = allTires.filter(t => t.vehicleId === v.id)
+  const fuel = allFuel.filter(f => f.vehicleId === v.id)
+  const maintenance = allMaintenance.filter(m => m.vehicleId === v.id)
+  const trips = allTrips.filter(t => t.vehicleId === v.id)
+  const customerName = (id: string) => customers.find(c => c.id === id)?.name ?? '—'
 
   const totalFuelCost = fuel.reduce((s, f) => s + f.total, 0)
   const totalRevenue = trips.reduce((s, t) => s + (t.revenue || 0), 0)
@@ -368,7 +382,7 @@ export function VehicleDetail({ setActive, subject }: VehicleDetailProps) {
                       → {db.destOf(t)}
                     </div>
                   </td>
-                  <td>{db.nameOf('customers', t.customerId)}</td>
+                  <td>{customerName(t.customerId)}</td>
                   <td className="num muted">{t.depart.slice(0, 10)}</td>
                   <td className="num">{t.distance} km</td>
                   <td className="num">{db.thb(db.amountOf(t))}</td>

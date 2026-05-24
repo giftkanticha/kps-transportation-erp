@@ -1,9 +1,10 @@
 import { db } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import { Icon, StatusBadge } from '../../components/ui'
 import type { Partner } from '../../types'
 
 export function PartnersPage() {
-  const partners = db.getAll<Partner>('partners')
+  const { data: partners = [] } = useList<Partner>('partners')
   const totalBalance = partners.reduce((s, p) => s + p.balance, 0)
 
   return (

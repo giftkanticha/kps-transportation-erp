@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
+import { VehiclePickerSidebar } from '../../components/ui/VehiclePickerSidebar'
 import { usePrint } from '../../hooks/usePrint'
 import type { CSSProperties } from 'react'
 import type { FuelRecord, Vehicle, Employee } from '../../types'
@@ -277,9 +278,13 @@ function FuelReportV2() {
   const [source, setSource] = useState<'tank' | 'external'>('tank')
   const [viewMode, setViewMode] = useState<'monthly' | 'yearly'>('monthly')
   const [metric, setMetric] = useState<'liters' | 'amount'>('liters')
+  const [hideEmpty, setHideEmpty] = useState(true)
 
   const allFuelings = useMemo(() => db.getAll<FuelRecord>('fuel'), [])
   const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
+  const [pickedVehicles, setPickedVehicles] = useState<Set<string>>(
+    () => new Set(vehicles.map(v => v.id)),
+  )
 
   const filteredFuel = useMemo(
     () => allFuelings.filter(f => source === 'tank' ? isFactoryFuel(f) : !isFactoryFuel(f)),
@@ -317,16 +322,8 @@ function FuelReportV2() {
   }, [filteredFuel, year])
 
   const activeVehicles = useMemo(() => {
-    const usedIds = new Set<string>()
-    if (viewMode === 'monthly') {
-      for (let d = 1; d <= days; d++) {
-        Object.keys(monthlyMatrix[d] || {}).forEach(id => usedIds.add(id))
-      }
-    } else {
-      Object.keys(yearlyMatrix).forEach(id => usedIds.add(id))
-    }
-    return vehicles.filter(v => usedIds.has(v.id) || v.status === 'available' || v.status === 'on-trip')
-  }, [vehicles, monthlyMatrix, yearlyMatrix, viewMode, days])
+    return vehicles.filter(v => pickedVehicles.has(v.id))
+  }, [vehicles, pickedVehicles])
 
   const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const getVal = (v: FuelVal | undefined) => metric === 'liters' ? (v?.liters || 0) : (v?.amount || 0)
@@ -355,6 +352,18 @@ function FuelReportV2() {
   const monthColTotal = (m: number) => activeVehicles.reduce((sum, v) => sum + getVal(yearlyMatrix[v.id]?.[m]), 0)
   const grandTotalMonthly = activeVehicles.reduce((sum, v) => sum + vehicleMonthlyTotal(v.id), 0)
   const grandTotalYearly = activeVehicles.reduce((sum, v) => sum + vehicleYearlyTotal(v.id), 0)
+
+  // Row visibility filter (#9: hide rows with all-zero data)
+  const monthlyVisibleDays = useMemo(() => {
+    const all = Array.from({ length: days }, (_, i) => i + 1)
+    if (!hideEmpty) return all
+    return all.filter(d => dailyTotal(d) > 0)
+  }, [days, hideEmpty, monthlyMatrix, activeVehicles, metric])
+
+  const yearlyVisibleVehicles = useMemo(() => {
+    if (!hideEmpty) return activeVehicles
+    return activeVehicles.filter(v => vehicleYearlyTotal(v.id) > 0)
+  }, [activeVehicles, hideEmpty, yearlyMatrix, metric])
 
   const sourceLabel = source === 'tank' ? 'ถังโรงงาน' : 'ปั๊มนอก'
   const periodLabel = viewMode === 'monthly'
@@ -396,6 +405,14 @@ function FuelReportV2() {
               ))}
             </select>
           </Field>
+          <label className="row" style={{
+            gap: 6, padding: '6px 12px', border: '1px solid #E2E8F0',
+            borderRadius: 8, background: hideEmpty ? '#EFF6FF' : '#fff', cursor: 'pointer',
+            fontSize: 12.5, height: 36, alignItems: 'center',
+          }}>
+            <input type="checkbox" checked={hideEmpty} onChange={e => setHideEmpty(e.target.checked)} style={{ accentColor: 'var(--primary)' }} />
+            <span style={{ fontWeight: 600, color: hideEmpty ? '#1D4ED8' : 'var(--text-2)' }}>ซ่อนแถวที่ไม่มีข้อมูล</span>
+          </label>
           <div style={{ flex: 1 }} />
           {pillGroup('แสดงผลเป็น',
             <>
@@ -429,23 +446,38 @@ function FuelReportV2() {
         <p className="ts">พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</p>
       </div>
 
+      {/* Sidebar + main */}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <VehiclePickerSidebar
+          vehicles={vehicles}
+          picked={pickedVehicles}
+          onChange={setPickedVehicles}
+        />
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+
       {/* Monthly: per-vehicle daily matrix */}
       {viewMode === 'monthly' && (
         <div style={tblWrap}>
-          <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid #E2E8F0', gap: 10 }}>
+          <div className="no-print" style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid #E2E8F0', gap: 10 }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: 14 }}>
                 การใช้น้ำมันรายวันต่อคัน — {THAI_MONTHS_FULL[month - 1]} {year + 543} ({sourceLabel})
               </div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{activeVehicles.length} คัน · {days} วัน</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                {activeVehicles.length} คัน · แสดง {monthlyVisibleDays.length}/{days} วัน
+                {hideEmpty && days !== monthlyVisibleDays.length && <span style={{ color: '#1D4ED8' }}> · ซ่อนวันที่ไม่มีข้อมูล</span>}
+              </div>
             </div>
             <div style={{ marginLeft: 'auto' }}>{unitBadge}</div>
           </div>
           <div style={{ overflowX: 'auto' }}>
             {activeVehicles.length === 0 ? (
-              <div className="empty" style={{ padding: 40 }}>ไม่มีข้อมูลการใช้น้ำมัน</div>
+              <div className="empty" style={{ padding: 40 }}>กรุณาเลือกรถจากแผงด้านซ้าย</div>
+            ) : monthlyVisibleDays.length === 0 ? (
+              <div className="empty" style={{ padding: 40 }}>ไม่มีรายการในเดือนนี้</div>
             ) : (
-              <table className="tbl" style={{ minWidth: 'max-content' }}>
+              <table className="tbl fuel-report-compact" style={{ minWidth: 'max-content' }}>
                 <thead>
                   <tr>
                     <th style={{ position: 'sticky', left: 0, zIndex: 2, background: 'var(--bg-sunk)', minWidth: 90 }}>วันที่</th>
@@ -458,7 +490,7 @@ function FuelReportV2() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Array.from({ length: days }, (_, i) => i + 1).map(d => {
+                  {monthlyVisibleDays.map(d => {
                     const tot = dailyTotal(d)
                     return (
                       <tr key={d}>
@@ -502,17 +534,22 @@ function FuelReportV2() {
       {/* Yearly: per-vehicle 12-month summary */}
       {viewMode === 'yearly' && (
         <div style={tblWrap}>
-          <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid #E2E8F0', gap: 10 }}>
+          <div className="no-print" style={{ display: 'flex', alignItems: 'center', padding: '14px 18px', borderBottom: '1px solid #E2E8F0', gap: 10 }}>
             <div style={{ fontWeight: 600, fontSize: 14 }}>
               ภาพรวมการใช้น้ำมันรายปี พ.ศ. {year + 543} ({sourceLabel})
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 400, marginLeft: 8 }}>
+                แสดง {yearlyVisibleVehicles.length}/{activeVehicles.length} คัน
+              </span>
             </div>
             <div style={{ marginLeft: 'auto' }}>{unitBadge}</div>
           </div>
           <div style={{ overflowX: 'auto' }}>
             {activeVehicles.length === 0 ? (
-              <div className="empty" style={{ padding: 40 }}>ไม่มีข้อมูลการใช้น้ำมัน</div>
+              <div className="empty" style={{ padding: 40 }}>กรุณาเลือกรถจากแผงด้านซ้าย</div>
+            ) : yearlyVisibleVehicles.length === 0 ? (
+              <div className="empty" style={{ padding: 40 }}>ไม่มีข้อมูลการใช้น้ำมันในปีนี้</div>
             ) : (
-              <table className="tbl" style={{ minWidth: 'max-content' }}>
+              <table className="tbl fuel-report-compact" style={{ minWidth: 'max-content' }}>
                 <thead>
                   <tr>
                     <th style={{ position: 'sticky', left: 0, zIndex: 2, background: 'var(--bg-sunk)', minWidth: 100 }}>ทะเบียนรถ</th>
@@ -525,7 +562,7 @@ function FuelReportV2() {
                   </tr>
                 </thead>
                 <tbody>
-                  {activeVehicles.map(v => (
+                  {yearlyVisibleVehicles.map(v => (
                     <tr key={v.id}>
                       <td style={{ position: 'sticky', left: 0, zIndex: 1, background: 'var(--card)', fontWeight: 600 }} className="mono">
                         {v.plate}
@@ -565,6 +602,9 @@ function FuelReportV2() {
           </div>
         </div>
       )}
+
+        </div>
+      </div>
 
       {/* Signature block (print only) */}
       <div

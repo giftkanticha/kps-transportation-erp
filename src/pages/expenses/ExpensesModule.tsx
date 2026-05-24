@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react'
-import { db, uid } from '../../lib/db'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
+import { db } from '../../lib/db'
+import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info } from '../../components/ui'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
@@ -24,33 +25,43 @@ const inlineInput: React.CSSProperties = {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-const isKPSPartner = (partnerId: string): boolean => {
-  const p = db.get<Partner>('partners', partnerId)
+const isKPSPartner = (partnerId: string, partners: Partner[]): boolean => {
+  const p = partners.find((x) => x.id === partnerId)
   return !!p && p.name.replace(/\s+/g, '') === KPS_WAREHOUSE_NAME.replace(/\s+/g, '')
 }
 
-// Apply stock movement for KPS warehouse expense lines.
+// Build stock movement patches for KPS warehouse expense lines.
 // sign = -1 to deduct (when adding/editing an expense), +1 to revert (when removing/editing)
-const applyStockDelta = (lines: { stockItemId?: string; qty: number }[], sign: 1 | -1) => {
+// Returns [{ id, patch }] to be applied via useUpdate.mutateAsync in the calling handler.
+const buildStockDeltas = (
+  lines: { stockItemId?: string; qty: number }[],
+  sign: 1 | -1,
+  stocks: StockItem[],
+): { id: string; patch: Partial<StockItem> }[] => {
+  const patches: { id: string; patch: Partial<StockItem> }[] = []
   lines.forEach((l) => {
     if (!l.stockItemId) return
-    const s = db.get<StockItem>('stock', l.stockItemId)
+    const s = stocks.find((x) => x.id === l.stockItemId)
     if (!s) return
     const q = +l.qty || 0
-    db.update<StockItem>('stock', s.id, {
-      qty: s.qty + sign * q,
-      out: s.out - sign * q,
+    patches.push({
+      id: s.id,
+      patch: {
+        qty: s.qty + sign * q,
+        qtyOut: s.qtyOut - sign * q,
+      },
     })
   })
+  return patches
 }
 
-function genExpCode(): string {
+function genExpCode(headers: ExpenseHeader[]): string {
   const now = new Date()
   const yyyymmdd = String(now.getFullYear()) +
     String(now.getMonth() + 1).padStart(2, '0') +
     String(now.getDate()).padStart(2, '0')
   const prefix = `EXP-${yyyymmdd}-`
-  const existing = db.getAll<ExpenseHeader>('expenseHeaders').filter(h => h.code.startsWith(prefix))
+  const existing = headers.filter(h => h.code.startsWith(prefix))
   return prefix + String(existing.length + 1).padStart(3, '0')
 }
 function toBeCode(code: string): string {
@@ -180,7 +191,7 @@ function ExpenseFormBody({
   const addLine = () => setLines([...lines, emptyLine()])
   const removeLine = (i: number) => setLines(lines.filter((_, idx) => idx !== i))
 
-  const isKPS = isKPSPartner(hdr.partnerId)
+  const isKPS = isKPSPartner(hdr.partnerId, partners)
   const totals = lines.map((l) => (l.qty || 0) * (l.unitPrice || 0))
   const netTotal = totals.reduce((s, t) => s + t, 0)
 
@@ -457,23 +468,22 @@ function ExpenseFormBody({
 }
 
 function ExpRecord() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const partners = db.getAll<Partner>('partners')
-  const stocks = db.getAll<StockItem>('stock')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: partners = [] } = useList<Partner>('partners')
+  const { data: stocks = [] } = useList<StockItem>('stock_items')
+  const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const insertHeader = useInsert<ExpenseHeader>('expense_headers')
+  const insertLine = useInsert<ExpenseLine>('expense_lines')
+  const updateStock = useUpdate<StockItem>('stock_items')
 
-  const [tick, setTick] = useState(0)
-  const refresh = () => setTick((n) => n + 1)
-  const recent = useMemo(() => {
-    void tick
-    return db.getAll<ExpenseHeader>('expenseHeaders').slice(0, 8)
-  }, [tick])
+  const recent = useMemo(() => allHeaders.slice(0, 8), [allHeaders])
 
   const [hdr, setHdr] = useState<HeaderForm>(emptyHeader())
   const [lines, setLines] = useState<LineItem[]>([emptyLine()])
   const [editing, setEditing] = useState<ExpenseHeader | null>(null)
-  const [docCode] = useState(() => genExpCode())
+  const [docCode] = useState(() => genExpCode(allHeaders))
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!hdr.vehicleId || !hdr.partnerId) {
       alert('กรุณาเลือกรถและช่าง/ร้านค้า')
       return
@@ -483,9 +493,8 @@ function ExpRecord() {
       return
     }
     const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
-    const h = db.add<ExpenseHeader>('expenseHeaders', {
-      id: uid('eh'),
-      code: genExpCode(),
+    const h = await insertHeader.mutateAsync({
+      code: genExpCode(allHeaders),
       date: hdr.date,
       vehicleId: hdr.vehicleId,
       partnerId: hdr.partnerId,
@@ -496,22 +505,24 @@ function ExpRecord() {
       lineCount: lines.length,
       note: lines.map((l) => l.item).filter(Boolean).join(', '),
     })
-    lines.forEach((l) =>
-      db.add<ExpenseLine>('expenseLines', {
-        ...l,
-        id: uid('el'),
+    for (const l of lines) {
+      const { id: _id, ...rest } = l
+      void _id
+      await insertLine.mutateAsync({
+        ...rest,
         headerId: h.id,
         amount: (l.qty || 0) * (l.unitPrice || 0),
-      }),
-    )
+      })
+    }
     // Apply stock deduction for KPS warehouse
-    if (isKPSPartner(hdr.partnerId)) {
-      applyStockDelta(lines, -1)
+    if (isKPSPartner(hdr.partnerId, partners)) {
+      for (const d of buildStockDeltas(lines, -1, stocks)) {
+        await updateStock.mutateAsync(d)
+      }
     }
     alert('บันทึกเรียบร้อย')
     setHdr(emptyHeader())
     setLines([emptyLine()])
-    refresh()
   }
 
   const handleReset = () => {
@@ -565,10 +576,10 @@ function ExpRecord() {
                   <td className="num muted">{db.thaiDate(h.date)}</td>
                   <td>
                     <span style={{ color: 'var(--primary)', fontWeight: 600 }} className="mono">
-                      {db.nameOf('vehicles', h.vehicleId)}
+                      {vehicles.find((v) => v.id === h.vehicleId)?.plate ?? '—'}
                     </span>
                   </td>
-                  <td>{db.nameOf('partners', h.partnerId)}</td>
+                  <td>{partners.find((p) => p.id === h.partnerId)?.name ?? '—'}</td>
                   <td className="num right" style={{ fontWeight: 600 }}>
                     {db.fmt(h.total)} บาท
                   </td>
@@ -605,7 +616,7 @@ function ExpRecord() {
         <ExpenseEditModal
           header={editing}
           onClose={() => setEditing(null)}
-          onSaved={refresh}
+          onSaved={() => {}}
           vehicles={vehicles}
           partners={partners}
           stocks={stocks}
@@ -632,11 +643,16 @@ function ExpenseEditModal({
   partners: Partner[]
   stocks: StockItem[]
 }) {
+  const { data: allLines = [], isLoading } = useList<ExpenseLine>('expense_lines')
+  const updateHeader = useUpdate<ExpenseHeader>('expense_headers')
+  const insertLine = useInsert<ExpenseLine>('expense_lines')
+  const deleteLine = useDelete('expense_lines')
+  const updateStock = useUpdate<StockItem>('stock_items')
   const oldLines = useMemo(
-    () => db.getAll<ExpenseLine>('expenseLines').filter((l) => l.headerId === header.id),
-    [header.id],
+    () => allLines.filter((l) => l.headerId === header.id),
+    [allLines, header.id],
   )
-  const wasKPS = isKPSPartner(header.partnerId)
+  const wasKPS = isKPSPartner(header.partnerId, partners)
 
   const [hdr, setHdr] = useState<HeaderForm>({
     vehicleId: header.vehicleId,
@@ -646,8 +662,14 @@ function ExpenseEditModal({
     paid: header.paid ? 'paid' : 'unpaid',
     dueDate: header.dueDate,
   })
-  const [lines, setLines] = useState<LineItem[]>(
-    oldLines.map((l) => ({
+  // Existing lines load asynchronously via useList — initialise the editable
+  // rows once the query has resolved (otherwise they'd capture an empty list).
+  const [lines, setLines] = useState<LineItem[]>([])
+  const linesInited = useRef(false)
+  useEffect(() => {
+    if (linesInited.current || isLoading) return
+    linesInited.current = true
+    setLines(oldLines.map((l) => ({
       id: l.id,
       invoiceNo: l.invoiceNo,
       item: l.item,
@@ -656,10 +678,10 @@ function ExpenseEditModal({
       unitPrice: l.unitPrice,
       note: l.note,
       stockItemId: l.stockItemId,
-    })),
-  )
+    })))
+  }, [isLoading, oldLines])
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!hdr.vehicleId || !hdr.partnerId) {
       alert('กรุณาเลือกรถและช่าง/ร้านค้า')
       return
@@ -667,33 +689,47 @@ function ExpenseEditModal({
     const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
 
     // Revert old stock impact
-    if (wasKPS) applyStockDelta(oldLines, +1)
+    if (wasKPS) {
+      for (const d of buildStockDeltas(oldLines, +1, stocks)) {
+        await updateStock.mutateAsync(d)
+      }
+    }
 
     // Remove old lines
-    oldLines.forEach((l) => db.remove('expenseLines', l.id))
+    for (const l of oldLines) {
+      await deleteLine.mutateAsync(l.id)
+    }
 
     // Update header
-    db.update<ExpenseHeader>('expenseHeaders', header.id, {
-      ...hdr,
-      paid: hdr.paid === 'paid',
-      odometer: Number(hdr.odometer) || 0,
-      total: netTotal,
-      lineCount: lines.length,
-      note: lines.map((l) => l.item).filter(Boolean).join(', '),
+    await updateHeader.mutateAsync({
+      id: header.id,
+      patch: {
+        ...hdr,
+        paid: hdr.paid === 'paid',
+        odometer: Number(hdr.odometer) || 0,
+        total: netTotal,
+        lineCount: lines.length,
+        note: lines.map((l) => l.item).filter(Boolean).join(', '),
+      },
     })
 
     // Add new lines
-    lines.forEach((l) =>
-      db.add<ExpenseLine>('expenseLines', {
-        ...l,
-        id: uid('el'),
+    for (const l of lines) {
+      const { id: _id, ...rest } = l
+      void _id
+      await insertLine.mutateAsync({
+        ...rest,
         headerId: header.id,
         amount: (l.qty || 0) * (l.unitPrice || 0),
-      }),
-    )
+      })
+    }
 
     // Apply new stock impact
-    if (isKPSPartner(hdr.partnerId)) applyStockDelta(lines, -1)
+    if (isKPSPartner(hdr.partnerId, partners)) {
+      for (const d of buildStockDeltas(lines, -1, stocks)) {
+        await updateStock.mutateAsync(d)
+      }
+    }
 
     alert('บันทึกการแก้ไขเรียบร้อย')
     onSaved()
@@ -762,8 +798,9 @@ function PayConfirmModal({
   onClose: () => void
   onPaid: () => void
 }) {
-  const confirm = () => {
-    db.update<ExpenseHeader>('expenseHeaders', header.id, { paid: true })
+  const updateHeader = useUpdate<ExpenseHeader>('expense_headers')
+  const confirm = async () => {
+    await updateHeader.mutateAsync({ id: header.id, patch: { paid: true } })
     onPaid()
     onClose()
   }
@@ -828,9 +865,11 @@ function PayConfirmModal({
 // ─── Tab 2: สถานะการเงิน ──────────────────────────────────────────────────────
 
 function ExpFinance() {
-  const [tick, setTick] = useState(0)
-  const headers = useMemo(() => { void tick; return db.getAll<ExpenseHeader>('expenseHeaders') }, [tick])
-  const partners = db.getAll<Partner>('partners')
+  const { data: headers = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: partners = [] } = useList<Partner>('partners')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: stocks = [] } = useList<StockItem>('stock_items')
+  const [editing, setEditing] = useState<ExpenseHeader | null>(null)
 
   const today = new Date('2026-05-17')
   const unpaidHeaders = headers.filter((h) => !h.paid)
@@ -951,13 +990,18 @@ function ExpFinance() {
                       </span>
                     </td>
                     <td>
-                      <button
-                        className="btn sm"
-                        style={{ background: 'var(--green)', color: '#fff', borderColor: 'var(--green)' }}
-                        onClick={() => setPayTarget(h)}
-                      >
-                        <Icon name="money" size={12} /> บันทึกชำระ
-                      </button>
+                      <div className="row" style={{ gap: 6 }}>
+                        <button className="btn sm" onClick={() => setEditing(h)} title="แก้ไขรายการ/ราคา">
+                          <Icon name="edit" size={12} /> แก้ไข
+                        </button>
+                        <button
+                          className="btn sm"
+                          style={{ background: 'var(--green)', color: '#fff', borderColor: 'var(--green)' }}
+                          onClick={() => setPayTarget(h)}
+                        >
+                          <Icon name="money" size={12} /> บันทึกชำระ
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -979,7 +1023,18 @@ function ExpFinance() {
           header={payTarget}
           partner={partners.find((p) => p.id === payTarget.partnerId)}
           onClose={() => setPayTarget(null)}
-          onPaid={() => setTick((n) => n + 1)}
+          onPaid={() => {}}
+        />
+      )}
+
+      {editing && (
+        <ExpenseEditModal
+          header={editing}
+          vehicles={vehicles}
+          partners={partners}
+          stocks={stocks}
+          onClose={() => setEditing(null)}
+          onSaved={() => setEditing(null)}
         />
       )}
     </div>
@@ -989,6 +1044,7 @@ function ExpFinance() {
 // ─── Tab 3: สต๊อคคลัง KPS ────────────────────────────────────────────────────
 
 function SellPriceCell({ item, onSaved }: { item: StockItem; onSaved: () => void }) {
+  const updateStock = useUpdate<StockItem>('stock_items')
   const [editing, setEditing] = useState(false)
   const [val, setVal] = useState('')
 
@@ -996,9 +1052,9 @@ function SellPriceCell({ item, onSaved }: { item: StockItem; onSaved: () => void
     setVal(item.sellPrice != null ? String(item.sellPrice) : '')
     setEditing(true)
   }
-  const save = () => {
+  const save = async () => {
     const p = parseFloat(val)
-    db.update<StockItem>('stock', item.id, { sellPrice: isNaN(p) ? undefined : p })
+    await updateStock.mutateAsync({ id: item.id, patch: { sellPrice: isNaN(p) ? undefined : p } })
     setEditing(false)
     onSaved()
   }
@@ -1032,60 +1088,150 @@ function SellPriceCell({ item, onSaved }: { item: StockItem; onSaved: () => void
   )
 }
 
+function ReorderCell({ item, onSaved }: { item: StockItem; onSaved: () => void }) {
+  const updateStock = useUpdate<StockItem>('stock_items')
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState('')
+
+  const start = () => { setVal(String(item.reorderAt ?? 0)); setEditing(true) }
+  const save = async () => {
+    const n = parseFloat(val)
+    await updateStock.mutateAsync({ id: item.id, patch: { reorderAt: isNaN(n) ? 0 : n } })
+    setEditing(false)
+    onSaved()
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+        style={{ width: 80, textAlign: 'right', padding: '3px 8px', borderRadius: 6, border: '1px solid var(--primary)', fontSize: 12, fontFamily: 'var(--mono)' }}
+        placeholder="0"
+      />
+    )
+  }
+
+  return (
+    <div
+      onClick={start}
+      title="คลิกเพื่อตั้งจุดเตือนสต๊อกต่ำ"
+      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}
+    >
+      <span className="mono">{item.reorderAt ?? 0}</span>
+      <span style={{ color: 'var(--text-muted)', opacity: 0.5 }}><Icon name="edit" size={11} /></span>
+    </div>
+  )
+}
+
 function ExpStock() {
-  const [tick, setTick] = useState(0)
-  const refresh = () => setTick((n) => n + 1)
-  const stock = useMemo(() => { void tick; return db.getAll<StockItem>('stock') }, [tick])
-  const receipts = useMemo(() => { void tick; return db.getAll<StockReceipt>('stockReceipts') }, [tick])
-  const partners = db.getAll<Partner>('partners').filter((p) => p.name !== KPS_WAREHOUSE_NAME)
+  const { data: stock = [] } = useList<StockItem>('stock_items')
+  const { data: receipts = [] } = useList<StockReceipt>('stock_receipts')
+  const { data: allPartners = [] } = useList<Partner>('partners')
+  const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: allExpLines = [] } = useList<ExpenseLine>('expense_lines')
+  const updateStock = useUpdate<StockItem>('stock_items')
+  const insertStock = useInsert<StockItem>('stock_items')
+  const insertReceipt = useInsert<StockReceipt>('stock_receipts')
+  const insertPartner = useInsert<Partner>('partners')
+  const partners = allPartners.filter((p) => p.name !== KPS_WAREHOUSE_NAME)
 
   const total = stock.reduce((s, r) => s + r.qty * r.unitCost, 0)
   const low = stock.filter((s) => s.qty <= s.reorderAt)
 
   // Net profit this month: sum over KPS expense lines of qty * (sellPrice - unitCost)
   const thisMonthProfit = useMemo(() => {
-    void tick
     const now = new Date()
     const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-    const headers = db.getAll<ExpenseHeader>('expenseHeaders').filter(h => {
-      if (!isKPSPartner(h.partnerId)) return false
+    const headers = allHeaders.filter(h => {
+      if (!isKPSPartner(h.partnerId, allPartners)) return false
       return h.date?.slice(0, 7) === ym
     })
     const headerIds = new Set(headers.map(h => h.id))
-    return db.getAll<ExpenseLine>('expenseLines')
+    return allExpLines
       .filter(l => headerIds.has(l.headerId) && l.stockItemId)
       .reduce((sum, l) => {
         const s = stock.find(x => x.id === l.stockItemId)
         if (!s || s.sellPrice == null) return sum
         return sum + l.qty * (s.sellPrice - s.unitCost)
       }, 0)
-  }, [tick, stock])
+  }, [allHeaders, allExpLines, allPartners, stock])
 
   // Receive form state
   const today = new Date().toISOString().slice(0, 10)
-  const [form, setForm] = useState({
+  const emptyReceive = {
     date: today,
     partnerId: '',
     stockItemId: '',
     qty: '',
     unitPrice: '',
-  })
+    newName: '',
+    newUnit: '',
+    newCategory: 'อะไหล่',
+    newPartnerName: '',
+    newPartnerType: PARTNER_TYPES[0],
+  }
+  const [form, setForm] = useState(emptyReceive)
   const set = <K extends keyof typeof form>(k: K, v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   const formTotal = (parseFloat(form.qty) || 0) * (parseFloat(form.unitPrice) || 0)
+  const isNewItem = form.stockItemId === '__new__'
+  const isNewPartner = form.partnerId === '__new__'
 
   const onPickItem = (id: string) => {
+    if (id === '__new__') { setForm((f) => ({ ...f, stockItemId: '__new__' })); return }
     const s = stock.find((x) => x.id === id)
     setForm((f) => ({ ...f, stockItemId: id, unitPrice: f.unitPrice || (s ? String(s.unitCost) : '') }))
   }
 
-  const submitReceipt = () => {
+  const submitReceipt = async () => {
     if (!form.partnerId) { alert('กรุณาเลือกคู่ค้า'); return }
     if (!form.stockItemId) { alert('กรุณาเลือกรายการสินค้า'); return }
     const q = parseFloat(form.qty) || 0
     const p = parseFloat(form.unitPrice) || 0
     if (q <= 0) { alert('กรุณากรอกจำนวน'); return }
     if (p <= 0) { alert('กรุณากรอกราคาต่อหน่วย'); return }
+
+    // New vendor: create it in the shared partners registry first.
+    let partnerId = form.partnerId
+    if (isNewPartner) {
+      if (!form.newPartnerName.trim()) { alert('กรุณากรอกชื่อคู่ค้าใหม่'); return }
+      const nextNum = allPartners.reduce((max, x) => {
+        const n = parseInt(x.code.replace(/\D/g, ''), 10)
+        return isNaN(n) ? max : Math.max(max, n)
+      }, 0) + 1
+      const createdPartner = await insertPartner.mutateAsync({
+        code: 'VND-' + String(nextNum).padStart(3, '0'),
+        name: form.newPartnerName.trim(),
+        type: form.newPartnerType,
+        status: 'active',
+      })
+      partnerId = createdPartner.id
+    }
+
+    // New stock item: create it first, then receive into it.
+    if (isNewItem) {
+      if (!form.newName.trim()) { alert('กรุณากรอกชื่อสินค้าใหม่'); return }
+      const created = await insertStock.mutateAsync({
+        code: 'ST-' + Date.now().toString().slice(-6),
+        name: form.newName.trim(),
+        category: form.newCategory,
+        unit: form.newUnit.trim() || 'ชิ้น',
+        qtyIn: q, qtyOut: 0, qty: q,
+        unitCost: p, reorderAt: 0,
+      })
+      await insertReceipt.mutateAsync({
+        date: form.date, partnerId, stockItemId: created.id,
+        qty: q, unitPrice: p, total: q * p,
+      })
+      alert('เพิ่มสินค้าใหม่และรับเข้าคลังเรียบร้อย')
+      setForm(emptyReceive)
+      return
+    }
 
     const s = stock.find((x) => x.id === form.stockItemId)
     if (!s) return
@@ -1096,16 +1242,18 @@ function ExpStock() {
     const newQty = s.qty + q
     const newAvgCost = newQty > 0 ? (oldValue + newValue) / newQty : p
 
-    db.update<StockItem>('stock', s.id, {
-      qty: newQty,
-      in: s.in + q,
-      unitCost: Math.round(newAvgCost * 100) / 100,
+    await updateStock.mutateAsync({
+      id: s.id,
+      patch: {
+        qty: newQty,
+        qtyIn: s.qtyIn + q,
+        unitCost: Math.round(newAvgCost * 100) / 100,
+      },
     })
 
-    db.add<StockReceipt>('stockReceipts', {
-      id: uid('sr'),
+    await insertReceipt.mutateAsync({
       date: form.date,
-      partnerId: form.partnerId,
+      partnerId,
       stockItemId: s.id,
       qty: q,
       unitPrice: p,
@@ -1113,8 +1261,7 @@ function ExpStock() {
     })
 
     alert('รับสินค้าเข้าคลังเรียบร้อย')
-    setForm({ date: today, partnerId: '', stockItemId: '', qty: '', unitPrice: '' })
-    refresh()
+    setForm(emptyReceive)
   }
 
   return (
@@ -1172,6 +1319,7 @@ function ExpStock() {
                 {partners.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
+                <option value="__new__">➕ เพิ่มคู่ค้าใหม่...</option>
               </select>
             </Field>
             <Field label="รายการสินค้า *">
@@ -1182,9 +1330,37 @@ function ExpStock() {
                     {s.name} (คงเหลือ {s.qty} {s.unit})
                   </option>
                 ))}
+                <option value="__new__">➕ เพิ่มสินค้าใหม่...</option>
               </select>
             </Field>
           </div>
+          {isNewPartner && (
+            <div className="grid-2" style={{ gap: 14, marginBottom: 14, padding: 12, background: 'var(--bg-sunk)', borderRadius: 8 }}>
+              <Field label="ชื่อคู่ค้าใหม่ *">
+                <input value={form.newPartnerName} onChange={(e) => set('newPartnerName', e.target.value)} placeholder="เช่น ร้านอะไหล่ ABC" />
+              </Field>
+              <Field label="ประเภท">
+                <select value={form.newPartnerType} onChange={(e) => set('newPartnerType', e.target.value)}>
+                  {PARTNER_TYPES.map((t) => <option key={t}>{t}</option>)}
+                </select>
+              </Field>
+            </div>
+          )}
+          {isNewItem && (
+            <div className="grid-3" style={{ gap: 14, marginBottom: 14, padding: 12, background: 'var(--bg-sunk)', borderRadius: 8 }}>
+              <Field label="ชื่อสินค้าใหม่ *">
+                <input value={form.newName} onChange={(e) => set('newName', e.target.value)} placeholder="เช่น ไส้กรองอากาศ" />
+              </Field>
+              <Field label="หน่วย">
+                <input value={form.newUnit} onChange={(e) => set('newUnit', e.target.value)} placeholder="เช่น ชิ้น / ลิตร" />
+              </Field>
+              <Field label="หมวดหมู่">
+                <select value={form.newCategory} onChange={(e) => set('newCategory', e.target.value)}>
+                  {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+                </select>
+              </Field>
+            </div>
+          )}
           <div className="grid-3" style={{ gap: 14, marginBottom: 14 }}>
             <Field label="จำนวน *">
               <input
@@ -1225,7 +1401,7 @@ function ExpStock() {
           <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
             <button
               className="btn"
-              onClick={() => setForm({ date: today, partnerId: '', stockItemId: '', qty: '', unitPrice: '' })}
+              onClick={() => setForm(emptyReceive)}
             >
               <Icon name="close" size={14} /> ล้างฟอร์ม
             </button>
@@ -1248,6 +1424,7 @@ function ExpStock() {
                 <th style={{ width: 60 }}>ลำดับ</th>
                 <th>รายการสินค้า</th>
                 <th className="right">จำนวนคงเหลือ</th>
+                <th className="right">จุดเตือนต่ำ</th>
                 <th className="right">ราคาทุน / หน่วย</th>
                 <th className="right" style={{ color: '#0369A1' }}>ราคาขาย / หน่วย</th>
                 <th className="right">มูลค่ารวม</th>
@@ -1267,9 +1444,12 @@ function ExpStock() {
                   >
                     {s.qty} <span className="muted" style={{ fontSize: 11, marginLeft: 4 }}>{s.unit}</span>
                   </td>
+                  <td className="num right">
+                    <ReorderCell item={s} onSaved={() => {}} />
+                  </td>
                   <td className="num right">{db.fmt(s.unitCost)} ฿</td>
                   <td className="num right" style={{ color: '#0369A1' }}>
-                    <SellPriceCell item={s} onSaved={refresh} />
+                    <SellPriceCell item={s} onSaved={() => {}} />
                   </td>
                   <td className="num right" style={{ fontWeight: 600, color: 'var(--primary)' }}>
                     {db.fmt(s.qty * s.unitCost)} ฿
@@ -1277,7 +1457,7 @@ function ExpStock() {
                 </tr>
               ))}
               <tr style={{ background: 'var(--green-50)', fontWeight: 700 }}>
-                <td colSpan={5} className="right">
+                <td colSpan={6} className="right">
                   มูลค่าสต็อครวม
                 </td>
                 <td className="num right" style={{ fontSize: 15, color: 'var(--primary)' }}>
@@ -1313,7 +1493,7 @@ function ExpStock() {
                   return (
                     <tr key={r.id}>
                       <td className="num muted">{db.thaiDate(r.date)}</td>
-                      <td>{db.nameOf('partners', r.partnerId)}</td>
+                      <td>{allPartners.find((p) => p.id === r.partnerId)?.name ?? '—'}</td>
                       <td>{it?.name ?? '—'}</td>
                       <td className="num right">{r.qty}</td>
                       <td className="num right">{db.fmt(r.unitPrice)} ฿</td>
@@ -1341,6 +1521,9 @@ const PIVOT_MONTHS = [
 
 function PivotTab() {
   const today = new Date()
+  const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: allPartners = [] } = useList<Partner>('partners')
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
   const [pivotYear,  setPivotYear]  = useState(today.getFullYear())
   const [pivotMonth, setPivotMonth] = useState<number>(today.getMonth() + 1) // 1-12, 0 = ทุกเดือน
 
@@ -1359,16 +1542,16 @@ function PivotTab() {
     : `ทั้งปี พ.ศ. ${pivotYear + 543}`
 
   const headers = useMemo(
-    () => db.getAll<ExpenseHeader>('expenseHeaders').filter(h => h.date >= dateFrom && h.date <= dateTo),
-    [dateFrom, dateTo],
+    () => allHeaders.filter(h => h.date >= dateFrom && h.date <= dateTo),
+    [allHeaders, dateFrom, dateTo],
   )
 
   const activeVendorIds = useMemo(() => Array.from(new Set(headers.map(h => h.partnerId))), [headers])
   const activeVendors   = useMemo(
-    () => activeVendorIds.map(id => db.get<Partner>('partners', id)).filter(Boolean) as Partner[],
-    [activeVendorIds],
+    () => activeVendorIds.map(id => allPartners.find(p => p.id === id)).filter(Boolean) as Partner[],
+    [activeVendorIds, allPartners],
   )
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
+  const vehicles = allVehicles
 
   const matrix = useMemo(() => {
     const m: Record<string, Record<string, number>> = {}
@@ -1533,10 +1716,11 @@ function PivotTab() {
 // ─── Tab 4: รายงานสรุป (Unchanged) ───────────────────────────────────────────
 
 function ExpReport() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: partners = [] } = useList<Partner>('partners')
+  const { data: headers = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: allLines = [] } = useList<ExpenseLine>('expense_lines')
   const [innerTab, setInnerTab] = useState('repair')
-  const headers = db.getAll<ExpenseHeader>('expenseHeaders')
-  const allLines = db.getAll<ExpenseLine>('expenseLines')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [vehicleFilter, setVehicleFilter] = useState('')
@@ -1609,8 +1793,8 @@ function ExpReport() {
               </thead>
               <tbody>
                 {filteredHeaders.map((h) => {
-                  const v = db.get<Vehicle>('vehicles', h.vehicleId)
-                  const p = db.get<Partner>('partners', h.partnerId)
+                  const v = vehicles.find((x) => x.id === h.vehicleId)
+                  const p = partners.find((x) => x.id === h.partnerId)
                   return (
                     <tr key={h.id}>
                       <td>
@@ -1670,7 +1854,7 @@ function ExpReport() {
                   <div>
                     <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>รายละเอียดการซ่อม</h3>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                      {toBeCode(detailHeader.code)} · {db.thaiDate(detailHeader.date)} · {db.nameOf('vehicles', detailHeader.vehicleId)} · {db.nameOf('partners', detailHeader.partnerId)}
+                      {toBeCode(detailHeader.code)} · {db.thaiDate(detailHeader.date)} · {vehicles.find((v) => v.id === detailHeader.vehicleId)?.plate ?? '—'} · {partners.find((p) => p.id === detailHeader.partnerId)?.name ?? '—'}
                     </div>
                   </div>
                   <button className="btn ghost icon sm" onClick={() => setDetailHeader(null)}><Icon name="close" size={16} /></button>
@@ -1744,7 +1928,9 @@ function VendorEditModal({
   onSaved: () => void
 }) {
   const isNew = !partner
-  const partners = db.getAll<Partner>('partners')
+  const { data: partners = [] } = useList<Partner>('partners')
+  const insertPartner = useInsert<Partner>('partners')
+  const updatePartner = useUpdate<Partner>('partners')
   const nextCode = isNew
     ? 'VND-' + String(
         partners.reduce((max, p) => {
@@ -1768,13 +1954,14 @@ function VendorEditModal({
     status: partner?.status ?? 'active',
   })
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
+  const knownTypes = [...new Set([...PARTNER_TYPES.filter(t => t !== 'อื่นๆ'), ...partners.map(p => p.type).filter(Boolean)])]
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim()) { alert('กรุณากรอกชื่อร้านค้า/ช่าง'); return }
     if (isNew) {
-      db.add<Partner>('partners', { ...form, id: uid('pa'), balance: 0 })
+      await insertPartner.mutateAsync({ ...form, balance: 0 })
     } else {
-      db.update<Partner>('partners', partner!.id, form)
+      await updatePartner.mutateAsync({ id: partner!.id, patch: form })
     }
     onSaved()
     onClose()
@@ -1807,18 +1994,21 @@ function VendorEditModal({
               <input value={form.code} readOnly style={{ background: 'var(--bg-2)', color: 'var(--text-muted)' }} />
             </Field>
             <Field label="ประเภท">
-              <input
-                list="partner-type-options"
-                value={form.type}
-                onChange={(e) => set('type', e.target.value)}
-                placeholder="เลือกหรือพิมพ์ประเภทใหม่..."
-              />
-              <datalist id="partner-type-options">
-                {[...new Set([
-                  ...PARTNER_TYPES,
-                  ...db.getAll<Partner>('partners').map((p) => p.type).filter(Boolean),
-                ])].map((t) => <option key={t} value={t} />)}
-              </datalist>
+              <select
+                value={knownTypes.includes(form.type) ? form.type : 'อื่นๆ'}
+                onChange={(e) => set('type', e.target.value === 'อื่นๆ' ? '' : e.target.value)}
+              >
+                {knownTypes.map((t) => <option key={t} value={t}>{t}</option>)}
+                <option value="อื่นๆ">อื่นๆ (พิมพ์เอง)</option>
+              </select>
+              {!knownTypes.includes(form.type) && (
+                <input
+                  value={form.type}
+                  onChange={(e) => set('type', e.target.value)}
+                  placeholder="ระบุประเภทใหม่..."
+                  style={{ marginTop: 8 }}
+                />
+              )}
             </Field>
             <Field label="ชื่อร้านค้า / ช่าง *">
               <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="เช่น ศูนย์ซ่อม ABC" />
@@ -1885,9 +2075,8 @@ function VendorEditModal({
 }
 
 function ExpVendors() {
-  const [tick, setTick] = useState(0)
-  const refresh = () => setTick((n) => n + 1)
-  const partners = useMemo(() => { void tick; return db.getAll<Partner>('partners') }, [tick])
+  const { data: partners = [] } = useList<Partner>('partners')
+  const deletePartner = useDelete('partners')
   const [q, setQ] = useState('')
   const [editing, setEditing] = useState<Partner | null>(null)
   const [addNew, setAddNew] = useState(false)
@@ -1901,10 +2090,9 @@ function ExpVendors() {
       (p.account && p.account.includes(q)),
   )
 
-  const handleDelete = (p: Partner) => {
+  const handleDelete = async (p: Partner) => {
     if (!confirm(`ต้องการลบ "${p.name}" หรือไม่?`)) return
-    db.remove('partners', p.id)
-    refresh()
+    await deletePartner.mutateAsync(p.id)
   }
 
   return (
@@ -2003,10 +2191,10 @@ function ExpVendors() {
       </div>
 
       {editing && (
-        <VendorEditModal partner={editing} onClose={() => setEditing(null)} onSaved={refresh} />
+        <VendorEditModal partner={editing} onClose={() => setEditing(null)} onSaved={() => {}} />
       )}
       {addNew && (
-        <VendorEditModal partner={null} onClose={() => setAddNew(false)} onSaved={refresh} />
+        <VendorEditModal partner={null} onClose={() => setAddNew(false)} onSaved={() => {}} />
       )}
     </div>
   )

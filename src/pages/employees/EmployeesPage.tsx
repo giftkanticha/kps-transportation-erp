@@ -1,11 +1,8 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
+import { useList, useUpdate, useDelete } from '../../hooks/useTable'
 import type { Employee, Vehicle } from '../../types'
-import { Icon, StatusBadge } from '../../components/ui'
-
-function vehiclesOfDriver(employeeId: string): Vehicle[] {
-  return db.getAll<Vehicle>('vehicles').filter(v => v.driverId === employeeId)
-}
+import { Icon, StatusBadge, Field } from '../../components/ui'
 
 function isDriverPosition(pos: string): boolean {
   return pos === 'คนขับ'
@@ -221,7 +218,11 @@ interface EmployeeEditModalProps {
 }
 
 function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProps) {
-  const allVehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allEmployees = [] } = useList<Employee>('employees')
+  const updateEmployee = useUpdate<Employee>('employees')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
+  const empName = (id: string) => allEmployees.find(e => e.id === id)?.name ?? '—'
   const initialVehicleIds = useMemo(
     () => allVehicles.filter(v => v.driverId === employee.id).map(v => v.id),
     [allVehicles, employee.id],
@@ -243,91 +244,109 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
 
   const isDriver = isDriverPosition(form.position)
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim() || !form.phone.trim()) {
       alert('กรุณากรอกชื่อและเบอร์โทร')
       return
     }
-    db.update<Employee>('employees', employee.id, {
-      name: form.name.trim(),
-      position: form.position,
-      phone: form.phone.trim(),
-      lineId: form.lineId,
-      joined: form.joined,
-      address: form.address,
-      vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
-    })
+    if (updateEmployee.isPending) return
+    try {
+      await updateEmployee.mutateAsync({
+        id: employee.id,
+        patch: {
+          name: form.name.trim(),
+          position: form.position,
+          phone: form.phone.trim(),
+          lineId: form.lineId,
+          joined: form.joined,
+          address: form.address,
+          vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
+        },
+      })
 
-    // Sync Vehicle.driverId for the selected set:
-    //   - vehicles newly selected → set driverId to this employee
-    //   - vehicles previously assigned to this employee but now deselected → clear driverId
-    if (isDriver) {
-      const finalSet = new Set(vehicleIds)
-      const prevSet = new Set(initialVehicleIds)
-      for (const v of allVehicles) {
-        const wasAssigned = prevSet.has(v.id)
-        const nowAssigned = finalSet.has(v.id)
-        if (nowAssigned && v.driverId !== employee.id) {
-          db.update<Vehicle>('vehicles', v.id, { driverId: employee.id })
-        } else if (!nowAssigned && wasAssigned) {
-          db.update<Vehicle>('vehicles', v.id, { driverId: null })
+      // Sync Vehicle.driverId for the selected set:
+      //   - vehicles newly selected → set driverId to this employee
+      //   - vehicles previously assigned to this employee but now deselected → clear driverId
+      if (isDriver) {
+        const finalSet = new Set(vehicleIds)
+        const prevSet = new Set(initialVehicleIds)
+        for (const v of allVehicles) {
+          const wasAssigned = prevSet.has(v.id)
+          const nowAssigned = finalSet.has(v.id)
+          if (nowAssigned && v.driverId !== employee.id) {
+            await updateVehicle.mutateAsync({ id: v.id, patch: { driverId: employee.id } })
+          } else if (!nowAssigned && wasAssigned) {
+            await updateVehicle.mutateAsync({ id: v.id, patch: { driverId: null } })
+          }
+        }
+      } else {
+        // Position changed away from คนขับ → clear all previously assigned vehicles
+        for (const vId of initialVehicleIds) {
+          await updateVehicle.mutateAsync({ id: vId, patch: { driverId: null } })
         }
       }
-    } else {
-      // Position changed away from คนขับ → clear all previously assigned vehicles
-      for (const vId of initialVehicleIds) {
-        db.update<Vehicle>('vehicles', vId, { driverId: null })
-      }
+      onClose()
+      onSaved()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ')
     }
-    onClose()
-    onSaved()
   }
 
   return (
     <div
       onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
     >
       <div
         onClick={e => e.stopPropagation()}
-        style={{ background: 'var(--card)', borderRadius: 12, width: '90%', maxWidth: 500, padding: 24, boxShadow: '0 10px 40px rgba(0,0,0,.2)', maxHeight: '90vh', overflowY: 'auto' }}
+        style={{
+          background: 'var(--card)', borderRadius: 12,
+          width: '95%', maxWidth: 560, maxHeight: '90vh',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 10px 40px rgba(0,0,0,.2)',
+        }}
       >
-        <h2 style={{ margin: '0 0 18px 0', fontSize: 18, fontWeight: 600 }}>แก้ไขข้อมูลพนักงาน</h2>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 18 }}>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>เลขที่ ID</label>
-            <input value={employee.code} readOnly style={{ width: '100%', background: 'var(--bg-2)', color: 'var(--text-muted)', cursor: 'default' }} />
+        {/* Header */}
+        <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+          <h2 style={{ margin: '0 0 4px 0', fontSize: 18, fontWeight: 600 }}>แก้ไขข้อมูลพนักงาน</h2>
+          <div style={{ color: 'var(--text-2)', fontSize: 13 }}>
+            <span className="mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{employee.code}</span>
+            {' · '}{employee.name || '—'}
           </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>ชื่อ-สกุล *</label>
-            <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="เช่น สมชาย ใจดี" />
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="เลขที่ ID">
+              <input value={employee.code} readOnly style={{ background: 'var(--bg-sunk)', color: 'var(--text-muted)', cursor: 'default' }} />
+            </Field>
+            <Field label="ตำแหน่ง">
+              <input value={form.position} onChange={e => set('position', e.target.value)} placeholder="เช่น คนขับ" />
+            </Field>
+            <Field label="ชื่อ-สกุล *">
+              <input value={form.name} onChange={e => set('name', e.target.value)} placeholder="เช่น สมชาย ใจดี" />
+            </Field>
+            <Field label="เบอร์โทรศัพท์ *">
+              <input value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="เช่น 0812345678" />
+            </Field>
+            <Field label="Line ID">
+              <input value={form.lineId} onChange={e => set('lineId', e.target.value)} placeholder="เช่น @somchai" />
+            </Field>
+            <Field label="วันเริ่มงาน">
+              <input type="date" value={form.joined} onChange={e => set('joined', e.target.value)} />
+            </Field>
           </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>ตำแหน่ง</label>
-            <input value={form.position} onChange={e => set('position', e.target.value)} placeholder="เช่น คนขับ" />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>เบอร์โทรศัพท์ *</label>
-            <input value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="เช่น 0812345678" />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>Line ID</label>
-            <input value={form.lineId} onChange={e => set('lineId', e.target.value)} placeholder="เช่น @somchai" />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>วันเริ่มงาน</label>
-            <input type="date" value={form.joined} onChange={e => set('joined', e.target.value)} />
-          </div>
-          <div>
-            <label style={{ display: 'block', fontSize: 13, fontWeight: 500, marginBottom: 6, color: 'var(--text-2)' }}>ที่อยู่</label>
+
+          <Field label="ที่อยู่">
             <textarea
               value={form.address}
               onChange={e => set('address', e.target.value)}
               placeholder="เช่น 123/4 ถ.สุขุมวิท แขวงคลองเตย กรุงเทพฯ 10110"
-              rows={3}
-              style={{ width: '100%', resize: 'vertical' }}
+              rows={2}
+              style={{ width: '100%', resize: 'vertical', minHeight: 44 }}
             />
-          </div>
+          </Field>
 
           {isDriver && (
             <div>
@@ -355,7 +374,7 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
                   {allVehicles.map(v => {
                     const checked = vehicleIds.includes(v.id)
                     const otherDriver = !checked && v.driverId && v.driverId !== employee.id
-                      ? db.nameOf('employees', v.driverId)
+                      ? empName(v.driverId)
                       : null
                     return (
                       <label
@@ -395,12 +414,14 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
             </div>
           )}
         </div>
-        <div className="row btn-row" style={{ justifyContent: 'flex-end' }}>
+
+        {/* Footer */}
+        <div style={{ padding: '16px 24px', borderTop: '1px solid var(--line)', flexShrink: 0, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <button className="btn" onClick={onClose}>
             <Icon name="close" size={15} /> ยกเลิก
           </button>
-          <button className="btn primary" onClick={save}>
-            <Icon name="check" size={15} /> บันทึกการแก้ไข
+          <button className="btn primary" onClick={save} disabled={updateEmployee.isPending}>
+            <Icon name="check" size={15} /> {updateEmployee.isPending ? 'กำลังบันทึก…' : 'บันทึกการแก้ไข'}
           </button>
         </div>
       </div>
@@ -415,10 +436,15 @@ interface StatusChangeDialogProps {
 }
 
 function StatusChangeDialog({ employee, onClose, onChanged }: StatusChangeDialogProps) {
+  const updateEmployee = useUpdate<Employee>('employees')
   const changeStatus = (status: Employee['status']) => {
-    db.update<Employee>('employees', employee.id, { status })
-    onClose()
-    onChanged()
+    updateEmployee.mutate(
+      { id: employee.id, patch: { status } },
+      {
+        onSuccess: () => { onClose(); onChanged() },
+        onError: (err) => alert(err instanceof Error ? err.message : 'เปลี่ยนสถานะไม่สำเร็จ'),
+      },
+    )
   }
 
   return (
@@ -463,17 +489,16 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
   const [statusChangingId, setStatusChangingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
-  const [tick, setTick] = useState(0)
   const [q, setQ] = useState('')
   const [filterStatus, setFilterStatus] = useState<FilterStatus>({ active: true, leave: false })
 
-  const refresh = () => setTick(t => t + 1)
+  const { data: allEmployees = [] } = useList<Employee>('employees')
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const deleteEmployee = useDelete('employees')
 
   const inBucket = (e: Employee): boolean =>
     (filterStatus.active && (e.status === 'active' || e.status === 'training')) ||
     (filterStatus.leave && e.status === 'leave')
-
-  const allEmployees = useMemo(() => db.getAll<Employee>('employees'), [tick])
 
   const filtered = useMemo(() => {
     return allEmployees.filter(e => {
@@ -493,10 +518,13 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
 
   const handleDelete = () => {
     if (!deletingId) return
-    db.remove('employees', deletingId)
-    setDeletingId(null)
-    refresh()
-    setToast({ kind: 'success', msg: 'ลบพนักงานเรียบร้อยแล้ว' })
+    deleteEmployee.mutate(deletingId, {
+      onSuccess: () => {
+        setDeletingId(null)
+        setToast({ kind: 'success', msg: 'ลบพนักงานเรียบร้อยแล้ว' })
+      },
+      onError: (err) => setToast({ kind: 'error', msg: err instanceof Error ? err.message : 'ลบไม่สำเร็จ' }),
+    })
   }
 
   return (
@@ -592,7 +620,7 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
                   <td>
                     <div>{e.position}</div>
                     {isDriverPosition(e.position) && (() => {
-                      const vs = vehiclesOfDriver(e.id)
+                      const vs = allVehicles.filter(v => v.driverId === e.id)
                       if (vs.length === 0) return (
                         <div className="muted" style={{ fontSize: 10.5, marginTop: 2 }}>ยังไม่ได้กำหนดรถ</div>
                       )
@@ -674,7 +702,6 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
             onClose={() => setEditingId(null)}
             onSaved={() => {
               setEditingId(null)
-              refresh()
               setToast({ kind: 'success', msg: '✅ บันทึกข้อมูลเรียบร้อย' })
             }}
           />
@@ -690,7 +717,6 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
             onClose={() => setStatusChangingId(null)}
             onChanged={() => {
               setStatusChangingId(null)
-              refresh()
             }}
           />
         )

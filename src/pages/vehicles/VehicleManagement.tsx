@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
-import { db, uid } from '../../lib/db'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
+import { useRealtimeTable } from '../../hooks/useRealtime'
 import type { Vehicle } from '../../types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -10,7 +11,7 @@ interface FormState {
   plate: string
   brand: string
   type: string
-  group: VehicleGroup
+  groupKind: VehicleGroup
   fuel: number
   status: Vehicle['status']
   isActive: boolean
@@ -40,7 +41,7 @@ function emptyForm(): FormState {
     plate: '',
     brand: '',
     type: 'รถบรรทุก 10 ล้อ',
-    group: 'TRANSPORT',
+    groupKind: 'TRANSPORT',
     fuel: 0,
     status: 'available',
     isActive: true,
@@ -175,12 +176,12 @@ function VehicleFormModal({
             <label style={labelStyle}>กลุ่มรถ</label>
             <div style={{ display: 'flex', gap: 10 }}>
               {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
-                const active = form.group === g
+                const active = form.groupKind === g
                 return (
                   <button
                     key={g}
                     type="button"
-                    onClick={() => set('group', g)}
+                    onClick={() => set('groupKind', g)}
                     style={{
                       flex: 1, padding: '8px 0', border: `2px solid ${active ? '#0066CC' : '#E2E8F0'}`,
                       borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -195,7 +196,7 @@ function VehicleFormModal({
               })}
             </div>
             <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 5 }}>
-              {form.group === 'INTERNAL'
+              {form.groupKind === 'INTERNAL'
                 ? 'น้ำมันจะถูกตัดสต็อคทันที ไม่ต้องผูกรอบงาน'
                 : 'น้ำมันต้องผูกกับรอบงาน ถ้าไม่พบรอบจะเป็น "น้ำมันลอย"'}
             </div>
@@ -254,16 +255,17 @@ function VehicleFormModal({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export function VehicleManagement() {
-  const [tick, setTick] = useState(0)
+  useRealtimeTable('vehicles')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles', 'plate', true)
+  const insertVehicle = useInsert<Vehicle>('vehicles')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
   const [search, setSearch] = useState('')
   const [filterGroup, setFilterGroup] = useState<VehicleGroup | 'ALL'>('ALL')
   const [modal, setModal] = useState<{ form: FormState; editId: string | null } | null>(null)
 
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
-
   const filtered = useMemo(() => {
     let list = vehicles
-    if (filterGroup !== 'ALL') list = list.filter(v => (v.group ?? 'TRANSPORT') === filterGroup)
+    if (filterGroup !== 'ALL') list = list.filter(v => (v.groupKind ?? 'TRANSPORT') === filterGroup)
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       list = list.filter(v =>
@@ -277,8 +279,8 @@ export function VehicleManagement() {
 
   const stats = useMemo(() => ({
     total: vehicles.length,
-    internal: vehicles.filter(v => (v.group ?? 'TRANSPORT') === 'INTERNAL').length,
-    transport: vehicles.filter(v => (v.group ?? 'TRANSPORT') === 'TRANSPORT').length,
+    internal: vehicles.filter(v => (v.groupKind ?? 'TRANSPORT') === 'INTERNAL').length,
+    transport: vehicles.filter(v => (v.groupKind ?? 'TRANSPORT') === 'TRANSPORT').length,
   }), [vehicles])
 
   const openAdd = () => setModal({ form: emptyForm(), editId: null })
@@ -290,7 +292,7 @@ export function VehicleManagement() {
         plate: v.plate,
         brand: v.brand ?? '',
         type: v.type ?? 'รถบรรทุก 10 ล้อ',
-        group: (v.group ?? 'TRANSPORT') as VehicleGroup,
+        groupKind: (v.groupKind ?? 'TRANSPORT') as VehicleGroup,
         fuel: v.fuel ?? 0,
         status: v.status,
         isActive: v.status !== 'maintenance',
@@ -302,37 +304,39 @@ export function VehicleManagement() {
       plate: form.plate.toUpperCase().trim(),
       brand: form.brand,
       type: form.type,
-      group: form.group,
+      groupKind: form.groupKind,
       fuel: form.fuel,
       status: form.isActive ? form.status : 'maintenance',
     }
 
     if (editId) {
-      db.update<Vehicle>('vehicles', editId, patch)
+      updateVehicle.mutate(
+        { id: editId, patch },
+        { onSuccess: () => setModal(null), onError: (err) => alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ') },
+      )
     } else {
-      db.add<Vehicle>('vehicles', {
-        id: uid('veh'),
-        plate: patch.plate!,
-        brand: patch.brand!,
-        type: patch.type!,
-        group: patch.group!,
-        fuel: patch.fuel!,
-        status: patch.status!,
-        year: new Date().getFullYear(),
-        driverId: null,
-        odometer: 0,
-        nextServiceKm: 0,
-        lastService: '',
-        nextService: '',
-        purchaseDate: '',
-        tax: '',
-        insurance: '',
-        dispatchPermit: '',
-      })
+      insertVehicle.mutate(
+        {
+          plate: patch.plate!,
+          brand: patch.brand!,
+          type: patch.type!,
+          groupKind: patch.groupKind!,
+          fuel: patch.fuel!,
+          status: patch.status!,
+          year: new Date().getFullYear(),
+          driverId: null,
+          odometer: 0,
+          nextServiceKm: 0,
+          lastService: '',
+          nextService: '',
+          purchaseDate: '',
+          tax: '',
+          insurance: '',
+          dispatchPermit: '',
+        },
+        { onSuccess: () => setModal(null), onError: (err) => alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ') },
+      )
     }
-
-    setModal(null)
-    setTick(t => t + 1)
   }
 
   const existingPlates = vehicles.map(v => v.plate)
@@ -418,7 +422,7 @@ export function VehicleManagement() {
                   </td>
                 </tr>
               ) : filtered.map((v, i) => {
-                const group = (v.group ?? 'TRANSPORT') as VehicleGroup
+                const group = (v.groupKind ?? 'TRANSPORT') as VehicleGroup
                 return (
                   <tr key={v.id} style={{ borderBottom: '1px solid #F1F5F9', background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
                     <td style={{ padding: '10px 14px' }}>

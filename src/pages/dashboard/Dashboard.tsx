@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
-import type { User, Vehicle, Employee, Dispatch, Tire, Expense, ActivityLog, StockItem, Customer, SubJob } from '../../types'
+import { useList } from '../../hooks/useTable'
+import type { User, Vehicle, Employee, Dispatch, Tire, Expense, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
 
 // ─── Mock data ─────────────────────────────────────────────────────────────────
@@ -285,10 +286,19 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const expenses  = db.getAll<Expense>('expenses')
   const activity  = db.getAll<ActivityLog>('activity')
   const stock     = db.getAll<StockItem>('stock')
-  const subJobs   = db.getAll<SubJob>('subJobs')
+  const { data: subJobs = [] } = useList<SubJob>('sub_jobs')
 
+  const netOf = (j: SubJob) => (j.total || 0) - (j.wht ? (j.total || 0) * 0.01 : 0)
   const subUnpaid      = useMemo(() => subJobs.filter(j => j.status === 'unpaid'), [subJobs])
-  const subUnpaidTotal = useMemo(() => subUnpaid.reduce((s, j) => s + (j.total || 0), 0), [subUnpaid])
+  const subUnpaidTotal = useMemo(() => subUnpaid.reduce((s, j) => s + netOf(j), 0), [subUnpaid])
+
+  const { data: expHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: sbVehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: sbPartners = [] } = useList<Partner>('partners')
+  const expUnpaid      = useMemo(() => expHeaders.filter(h => !h.paid), [expHeaders])
+  const expUnpaidTotal = useMemo(() => expUnpaid.reduce((s, h) => s + (h.total || 0), 0), [expUnpaid])
+  const plateOf   = (id: string) => sbVehicles.find(v => v.id === id)?.plate ?? '—'
+  const vendorOf  = (id: string) => sbPartners.find(p => p.id === id)?.name ?? '—'
 
   const onTrip    = useMemo(() => dispatch.filter(t => t.status === 'in-progress'), [dispatch])
   const scheduled = useMemo(() => dispatch.filter(t => t.status === 'scheduled'), [dispatch])
@@ -433,19 +443,91 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                     <div className="when">3 วันที่แล้ว</div>
                   </div>
                 </div>
-                {subUnpaid.length > 0 && (
-                  <div className="feed-item" style={{ cursor: 'pointer' }} onClick={() => setActive('subcontractors.history')}>
-                    <div className="ic amber"><Icon name="truck" size={16} /></div>
-                    <div className="body">
-                      <div className="who">รถรับจ้าง รอชำระเงิน {subUnpaid.length} งาน</div>
-                      <div className="txt">ยอดรวม {db.thb(subUnpaidTotal)}</div>
-                      <div className="when">คลิกเพื่อชำระ</div>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           </div>
+
+          {/* Subcontractor jobs pending payment (to-do) */}
+          {subUnpaid.length > 0 && (
+            <div className="card">
+              <div className="head">
+                <h3>💸 รอชำระเงิน — รถรับจ้าง</h3>
+                <span className="badge amber mono">{subUnpaid.length}</span>
+              </div>
+              <div>
+                {subUnpaid.slice(0, 6).map(j => (
+                  <div
+                    key={j.id}
+                    onClick={() => setActive('subcontractors.history')}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 18px', cursor: 'pointer', borderTop: '1px solid var(--line)' }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>
+                        <span className="mono">{j.plate}</span> → {j.destination}
+                      </div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>
+                        {j.code} · {j.driverName}{j.wht ? ' · หัก ณ ที่จ่าย 1%' : ''}
+                      </div>
+                    </div>
+                    <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)', flexShrink: 0 }}>
+                      {db.thb(netOf(j))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: '11px 18px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="muted" style={{ fontSize: 12.5 }}>ยอดสุทธิรวม</span>
+                <div className="spacer" />
+                <span className="mono" style={{ fontWeight: 800, color: 'var(--primary)' }}>{db.thb(subUnpaidTotal)}</span>
+              </div>
+              <div style={{ padding: '0 18px 14px' }}>
+                <button className="btn sm primary" style={{ width: '100%' }} onClick={() => setActive('subcontractors.history')}>
+                  ไปชำระเงิน
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Expenses pending payment (to-do) */}
+          {expUnpaid.length > 0 && (
+            <div className="card">
+              <div className="head">
+                <h3>🧾 ค่าใช้จ่ายค้างชำระ</h3>
+                <span className="badge amber mono">{expUnpaid.length}</span>
+              </div>
+              <div>
+                {expUnpaid.slice(0, 6).map(h => (
+                  <div
+                    key={h.id}
+                    onClick={() => setActive('expenses.finance')}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 18px', cursor: 'pointer', borderTop: '1px solid var(--line)' }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>
+                        <span className="mono">{plateOf(h.vehicleId)}</span> · {vendorOf(h.partnerId)}
+                      </div>
+                      <div className="muted" style={{ fontSize: 11.5 }}>
+                        {h.code}{h.dueDate ? ` · ครบกำหนด ${db.thaiDate(h.dueDate)}` : ''}
+                      </div>
+                    </div>
+                    <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)', flexShrink: 0 }}>
+                      {db.thb(h.total)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ padding: '11px 18px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="muted" style={{ fontSize: 12.5 }}>ยอดค้างชำระรวม</span>
+                <div className="spacer" />
+                <span className="mono" style={{ fontWeight: 800, color: 'var(--primary)' }}>{db.thb(expUnpaidTotal)}</span>
+              </div>
+              <div style={{ padding: '0 18px 14px' }}>
+                <button className="btn sm primary" style={{ width: '100%' }} onClick={() => setActive('expenses.finance')}>
+                  ไปชำระเงิน
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Vehicle Registrations */}
           <div className="card">

@@ -1,8 +1,10 @@
-import { useState, useMemo } from 'react'
-import { db, uid } from '../../lib/db'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { db } from '../../lib/db'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import { Info } from '../../components/ui/Info'
+import { usePrint } from '../../hooks/usePrint'
 import type { Tire, TireEvent, TireScrapSale, Vehicle } from '../../types'
 
 // ── Thresholds ────────────────────────────────────────────────────
@@ -174,14 +176,14 @@ interface TireMapSVGProps {
 
 function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverTip }: TireMapSVGProps) {
   const layout = TL[wc] ?? TL[10]
-  const [hoverTip, setHoverTip] = useState<{ pos: string; tire: Tire | undefined; x: number; y: number } | null>(null)
+  const [hoverTip, setHoverTip] = useState<{ pos: string; tire: Tire | undefined; x: number; y: number; cw: number } | null>(null)
   return (
     <div style={{ position: 'relative' }}>
       {showHoverTip && hoverTip && (
         <div style={{
           position: 'absolute',
-          left: hoverTip.x + 12,
-          top: hoverTip.y - 10,
+          left: Math.max(4, Math.min(hoverTip.x + 12, hoverTip.cw - 164)),
+          top: Math.max(4, hoverTip.y - 10),
           zIndex: 50,
           background: 'var(--card)',
           border: '1px solid var(--line)',
@@ -190,8 +192,9 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverT
           boxShadow: '0 4px 12px rgba(0,0,0,.15)',
           fontSize: 12.5,
           pointerEvents: 'none',
-          whiteSpace: 'nowrap',
-          minWidth: 140,
+          whiteSpace: 'normal',
+          width: 150,
+          maxWidth: 160,
         }}>
           {hoverTip.tire ? (
             <>
@@ -277,7 +280,7 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverT
               style={{ cursor: selectable ? 'pointer' : 'default' }}
               onMouseEnter={showHoverTip ? (e) => {
                 const rect = (e.currentTarget.closest('svg')!.parentElement as HTMLElement).getBoundingClientRect()
-                setHoverTip({ pos: p.pos, tire: t, x: e.clientX - rect.left, y: e.clientY - rect.top })
+                setHoverTip({ pos: p.pos, tire: t, x: e.clientX - rect.left, y: e.clientY - rect.top, cw: rect.width })
               } : undefined}
               onMouseLeave={showHoverTip ? () => setHoverTip(null) : undefined}
             >
@@ -319,53 +322,190 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverT
 
 // ── Tab 1: All Tires ─────────────────────────────────────────────
 
+function InstallTireModal({ tire, onClose, onDone }: { tire: Tire; onClose: () => void; onDone: () => void }) {
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const updateTire = useUpdate<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
+  const [vehicleId, setVehicleId] = useState('')
+  const [position, setPosition] = useState('')
+
+  const vehicle = vehicles.find((v) => v.id === vehicleId)
+  const wc = wcFrom(vehicle?.type ?? '')
+  const layout = TL[wc] ?? TL[10]
+  const allPos = layout.pos.map((p) => p.pos).concat(['spare_1', 'spare_2'])
+  const occupied: Record<string, Tire> = {}
+  tires
+    .filter((t) => t.vehicleId === vehicleId && t.position && t.id !== tire.id)
+    .forEach((t) => { occupied[t.position as string] = t })
+
+  const confirm = async () => {
+    if (!vehicleId) { alert('กรุณาเลือกรถ'); return }
+    if (!position) { alert('กรุณาเลือกตำแหน่ง'); return }
+    if (occupied[position]) { alert('ตำแหน่งนี้มียางอยู่แล้ว — เลือกตำแหน่งว่าง หรือใช้ "สลับยาง"'); return }
+    const odo = vehicle?.odometer ?? 0
+    const today = new Date().toISOString().slice(0, 10)
+    await updateTire.mutateAsync({
+      id: tire.id,
+      patch: { status: 'in-use', vehicleId, position, installedDate: today, installedOdometer: odo },
+    })
+    await insertEvent.mutateAsync({
+      tireId: tire.id, vehicleId, eventType: 'install', date: today,
+      odometer: odo, fromPos: null, toPos: position, note: 'ติดตั้งจากคลัง', userId: 'e10',
+    })
+    onDone()
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100 }}
+      onClick={onClose}
+    >
+      <div className="card" style={{ width: 480, maxWidth: '95vw', background: '#fff', borderRadius: 14 }} onClick={(e) => e.stopPropagation()}>
+        <div className="row" style={{ padding: '16px 22px', borderBottom: '1px solid var(--line)' }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>ใส่ยางลงล้อ</h3>
+          <button className="btn ghost icon sm" onClick={onClose} style={{ marginLeft: 'auto' }}><Icon name="close" size={16} /></button>
+        </div>
+        <div style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ padding: 14, background: 'var(--bg-sunk)', borderRadius: 10 }}>
+            <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>{tire.serial}</span>
+            <span className="muted" style={{ marginLeft: 8 }}>{tire.brand} {tire.model} · {tire.size}</span>
+          </div>
+          <Field label="เลือกรถ *">
+            <select value={vehicleId} onChange={(e) => { setVehicleId(e.target.value); setPosition('') }}>
+              <option value="">-- เลือกรถ --</option>
+              {vehicles.map((v) => <option key={v.id} value={v.id}>{v.plate} ({v.type})</option>)}
+            </select>
+          </Field>
+          <Field label="ตำแหน่ง *">
+            <select value={position} onChange={(e) => setPosition(e.target.value)} disabled={!vehicleId}>
+              <option value="">-- เลือกตำแหน่ง --</option>
+              {allPos.map((p) => {
+                const t = occupied[p]
+                return <option key={p} value={p} disabled={!!t}>{p} {t ? `(มียาง ${t.serial})` : '(ว่าง)'}</option>
+              })}
+            </select>
+          </Field>
+        </div>
+        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn" onClick={onClose}>ยกเลิก</button>
+          <button className="btn primary" onClick={confirm} disabled={!vehicleId || !position}>
+            <Icon name="check" size={15} /> ยืนยันติดตั้ง
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void }) {
   const [open, setOpen] = useState(false)
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
+  const [modal, setModal] = useState<'history' | 'swap' | 'install' | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allTires = [] } = useList<Tire>('tires')
+  const updateTire = useUpdate<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
 
-  const markScrapped = () => {
+  const vehicle = tire.vehicleId ? vehicles.find((v) => v.id === tire.vehicleId) : undefined
+  const onVehicle = tire.status === 'in-use' && !!vehicle
+  const canInstall = tire.status === 'stock' || tire.status === 'spare'
+
+  const tireMap = useMemo(() => {
+    const m: Record<string, Tire> = {}
+    if (tire.vehicleId) {
+      allTires
+        .filter((t) => t.vehicleId === tire.vehicleId && t.position)
+        .forEach((t) => { m[t.position as string] = t })
+    }
+    return m
+  }, [allTires, tire.vehicleId])
+
+  const markScrapped = async () => {
     const km = computeAccumKm(tire, vehicles)
-    db.update<Tire>('tires', tire.id, {
-      status: 'scrapped',
-      vehicleId: null,
-      position: null,
-      accumulatedKm: km,
+    await updateTire.mutateAsync({
+      id: tire.id,
+      patch: {
+        status: 'scrapped',
+        vehicleId: null,
+        position: null,
+        accumulatedKm: km,
+      },
     })
-    db.add<TireEvent>('tire_events', {
-      id: uid('te'), tireId: tire.id, vehicleId: tire.vehicleId ?? '',
+    await insertEvent.mutateAsync({
+      tireId: tire.id, vehicleId: tire.vehicleId ?? '',
       eventType: 'scrap', date: new Date().toISOString().slice(0, 10),
-      odometer: 0, fromPos: tire.position, toPos: null,
+      odometer: vehicle?.odometer ?? 0, fromPos: tire.position, toPos: null,
       note: 'หมดสภาพ', userId: 'e10',
     })
     setOpen(false)
     onRefresh()
   }
 
-  const actions = [
-    { icon: 'dashboard', label: 'ดูประวัติ', action: () => setOpen(false) },
-    { icon: 'arrow-right', label: 'สลับยาง', action: () => setOpen(false) },
-    { icon: 'edit', label: 'แก้ไข', action: () => setOpen(false) },
+  const moveToStock = async () => {
+    const km = computeAccumKm(tire, vehicles)
+    await updateTire.mutateAsync({
+      id: tire.id,
+      patch: {
+        status: 'stock',
+        vehicleId: null,
+        position: null,
+        accumulatedKm: km,
+      },
+    })
+    await insertEvent.mutateAsync({
+      tireId: tire.id, vehicleId: tire.vehicleId ?? '',
+      eventType: 'remove', date: new Date().toISOString().slice(0, 10),
+      odometer: vehicle?.odometer ?? 0, fromPos: tire.position, toPos: null,
+      note: 'ย้ายเข้าคลัง', userId: 'e10',
+    })
+    setOpen(false)
+    onRefresh()
+  }
+
+  const actions: { icon: string; label: string; danger?: boolean; action: () => void }[] = [
+    { icon: 'dashboard', label: 'ดูประวัติ', action: () => { setOpen(false); setModal('history') } },
+    ...(onVehicle ? [{ icon: 'arrow-right', label: 'สลับยาง', action: () => { setOpen(false); setModal('swap') } }] : []),
+    ...(onVehicle ? [{ icon: 'package', label: 'ถอดเข้าคลัง', action: moveToStock }] : []),
+    ...(canInstall ? [{ icon: 'tire', label: 'ใส่ลงล้อ', action: () => { setOpen(false); setModal('install') } }] : []),
     { icon: 'trash', label: 'หมดสภาพ', danger: true, action: markScrapped },
   ]
+
+  const MENU_W = 160
+  const toggle = () => {
+    if (open) { setOpen(false); return }
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) {
+      const menuH = actions.length * 38 + 12
+      const openUp = r.bottom + menuH > window.innerHeight && r.top - menuH > 0
+      setCoords({
+        top: openUp ? r.top - menuH - 4 : r.bottom + 4,
+        left: Math.max(8, r.right - MENU_W),
+      })
+    }
+    setOpen(true)
+  }
+
   return (
     <div style={{ position: 'relative' }}>
-      <button className="btn ghost icon sm" onClick={() => setOpen((o) => !o)}>
+      <button ref={btnRef} className="btn ghost icon sm" onClick={toggle}>
         <Icon name="more" size={16} />
       </button>
-      {open && (
+      {open && coords && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 90 }} onClick={() => setOpen(false)} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1090 }} onClick={() => setOpen(false)} />
           <div
             style={{
-              position: 'absolute',
-              right: 0,
-              top: 28,
-              zIndex: 100,
+              position: 'fixed',
+              top: coords.top,
+              left: coords.left,
+              zIndex: 1100,
               background: '#fff',
               border: '1px solid var(--line)',
               borderRadius: 10,
-              boxShadow: '0 4px 16px rgba(0,0,0,.1)',
-              minWidth: 140,
+              boxShadow: '0 4px 16px rgba(0,0,0,.15)',
+              width: MENU_W,
               padding: 6,
             }}
           >
@@ -388,15 +528,38 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
           </div>
         </>
       )}
+      {modal === 'history' && (
+        <TireHistoryModal tire={tire} onClose={() => setModal(null)} />
+      )}
+      {modal === 'swap' && vehicle && (
+        <TireSwapModal
+          tire={tire}
+          vehicle={vehicle}
+          tireMap={tireMap}
+          onClose={() => setModal(null)}
+          onDone={() => { setModal(null); onRefresh() }}
+        />
+      )}
+      {modal === 'install' && (
+        <InstallTireModal
+          tire={tire}
+          onClose={() => setModal(null)}
+          onDone={() => { setModal(null); onRefresh() }}
+        />
+      )}
     </div>
   )
 }
 
-function TiresAll() {
-  const [tick, setTick] = useState(0)
-  const allTires = useMemo(() => { void tick; return db.getAll<Tire>('tires') }, [tick])
-  const events = db.getAll<TireEvent>('tire_events')
-  const vehicles = db.getAll<Vehicle>('vehicles')
+function TiresAll({ setActive }: { setActive: (id: string) => void }) {
+  const { data: allTires = [] } = useList<Tire>('tires')
+
+  const openHistory = (serial: string) => {
+    sessionStorage.setItem('kps_tire_history_serial', serial)
+    setActive('tires.history')
+  }
+  const { data: events = [] } = useList<TireEvent>('tire_events')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const brands = [...new Set(allTires.map((t) => t.brand))]
 
   const [q, setQ] = useState('')
@@ -614,7 +777,7 @@ function TiresAll() {
             </thead>
             <tbody>
               {filtered.map((t) => {
-                const v = db.get<Vehicle>('vehicles', t.vehicleId ?? '')
+                const v = vehicles.find((vv) => vv.id === t.vehicleId)
                 const km = t.accumulatedKm ?? 0
                 const ks = kmStatus(km)
                 const isActive = t.status === 'in-use'
@@ -626,12 +789,20 @@ function TiresAll() {
                 return (
                   <tr key={t.id}>
                     <td>
-                      <span
+                      <button
+                        type="button"
                         className="mono"
-                        style={{ fontWeight: 700, color: 'var(--primary)' }}
+                        onClick={() => openHistory(t.serial)}
+                        title="ดูประวัติยางเส้นนี้"
+                        style={{
+                          background: 'none', border: 'none', padding: 0,
+                          fontWeight: 700, color: 'var(--primary)',
+                          fontFamily: 'var(--font-mono)', fontSize: 'inherit',
+                          cursor: 'pointer', textDecoration: 'none',
+                        }}
                       >
                         {t.serial}
-                      </span>
+                      </button>
                     </td>
                     <td style={{ fontWeight: 500 }}>{t.brand}</td>
                     <td className="muted">{t.model}</td>
@@ -698,7 +869,7 @@ function TiresAll() {
                       )}
                     </td>
                     <td>
-                      <TireActionMenu tire={t} onRefresh={() => setTick(n => n + 1)} />
+                      <TireActionMenu tire={t} onRefresh={() => {}} />
                     </td>
                   </tr>
                 )
@@ -723,7 +894,10 @@ function TiresAll() {
 
 // ── Add Tire Modal ────────────────────────────────────────────────
 function AddTireModal({ onClose }: { onClose: () => void }) {
-  const tires = db.getAll<Tire>('tires')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const insertTire = useInsert<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
   const nextSerial = 'TIR' + String(tires.length + 1).padStart(4, '0')
   const [form, setForm] = useState({
     serial: nextSerial,
@@ -739,12 +913,11 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
     accumulatedKm: 0,
   })
   const set = (k: string, v: string | number) => setForm((f) => ({ ...f, [k]: v }))
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const wc = wcFrom(db.get<Vehicle>('vehicles', form.vehicleId)?.type ?? '')
+  const wc = wcFrom(vehicles.find((v) => v.id === form.vehicleId)?.type ?? '')
   const layout = TL[wc] ?? TL[10]
   const allPos = layout.pos.map((p) => p.pos).concat(['spare_1', 'spare_2'])
 
-  const save = () => {
+  const save = async () => {
     if (!form.serial || !form.brand) {
       alert('กรุณากรอกเลขซีเรียลและยี่ห้อ')
       return
@@ -755,10 +928,12 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
     }
     const finalVehicleId = (form.status === 'in-use' || form.status === 'spare') ? (form.vehicleId || null) : null
     const finalPosition = form.status === 'in-use' ? (form.position || null) : null
-    const newTire = db.add<Tire>('tires', {
-      ...form,
+    const newTire = await insertTire.mutateAsync({
+      serial: form.serial,
       brand: form.brand === 'อื่นๆ' ? (form.customBrand.trim() || 'อื่นๆ') : form.brand,
-      id: uid('t'),
+      model: form.model,
+      size: form.size,
+      installedDate: form.installedDate,
       installedOdometer: +(form.installedOdometer) || 0,
       accumulatedKm: 0,
       status: form.status as Tire['status'],
@@ -766,8 +941,7 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
       position: finalPosition,
     })
     if (form.status === 'in-use' && finalVehicleId) {
-      db.add<TireEvent>('tire_events', {
-        id: uid('te'),
+      await insertEvent.mutateAsync({
         tireId: newTire.id,
         vehicleId: finalVehicleId,
         eventType: 'install',
@@ -954,13 +1128,19 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
 
 // ── Tab 2: Layout ─────────────────────────────────────────────────
 function TiresLayout() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const [picked, setPicked] = useState(vehicles[0]?.id ?? '')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const [picked, setPicked] = useState('')
   const [popup, setPopup] = useState<{ pos: string; tire: Tire | undefined } | null>(null)
+  const [historyTire, setHistoryTire] = useState<Tire | null>(null)
+  const [swapTire, setSwapTire] = useState<Tire | null>(null)
+  const { print } = usePrint()
+  const refresh = () => { setPopup(null) }
 
-  const v = db.get<Vehicle>('vehicles', picked)
+  const effectivePicked = picked || vehicles[0]?.id || ''
+  const v = vehicles.find((vv) => vv.id === effectivePicked)
   const wc = wcFrom(v?.type ?? '')
-  const allTires = db.getAll<Tire>('tires').filter((t) => t.vehicleId === picked)
+  const allTires = useMemo(() => tires.filter((t) => t.vehicleId === effectivePicked), [tires, effectivePicked])
   const tireMap: Record<string, Tire> = {}
   allTires.forEach((t) => {
     if (t.position) tireMap[t.position] = t
@@ -970,11 +1150,11 @@ function TiresLayout() {
   return (
     <div>
       {/* Vehicle picker */}
-      <div className="card pad" style={{ marginBottom: 18 }}>
+      <div className="card pad no-print" style={{ marginBottom: 18 }}>
         <div className="row" style={{ gap: 20, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <Field label="เลือกรถ">
             <select
-              value={picked}
+              value={effectivePicked}
               onChange={(e) => {
                 setPicked(e.target.value)
                 setPopup(null)
@@ -1001,11 +1181,28 @@ function TiresLayout() {
               </span>
             </div>
           )}
+          <div style={{ marginLeft: 'auto' }}>
+            <button className="btn primary" onClick={() => print('landscape')} disabled={!v}>
+              <Icon name="download" size={14} /> พิมพ์ผังยาง (A4 แนวนอน)
+            </button>
+          </div>
         </div>
       </div>
 
+      {/* Print-only layout (2-column landscape A4) */}
+      {v && (
+        <TireLayoutPrintView
+          vehicle={v}
+          wc={wc}
+          tireMap={tireMap}
+          allTires={allTires}
+          spares={spares}
+        />
+      )}
+
       {v && (
         <div
+          className="no-print"
           style={{
             display: 'grid',
             gridTemplateColumns: '320px 1fr',
@@ -1019,7 +1216,7 @@ function TiresLayout() {
               ผังยาง {wc} ล้อ
             </div>
             <TireMapSVG
-              key={`${picked}-${wc}`}
+              key={`${effectivePicked}-${wc}`}
               wc={wc}
               tireMap={tireMap}
               selectedPos={popup?.pos ?? null}
@@ -1181,8 +1378,12 @@ function TiresLayout() {
                       )
                     })()}
                     <div className="row" style={{ marginTop: 8, gap: 8 }}>
-                      <button className="btn outline sm">ดูประวัติ</button>
-                      <button className="btn primary sm">สลับยาง</button>
+                      <button className="btn outline sm" onClick={() => setHistoryTire(popup.tire!)}>
+                        <Icon name="dashboard" size={13} /> ดูประวัติ
+                      </button>
+                      <button className="btn primary sm" onClick={() => setSwapTire(popup.tire!)}>
+                        <Icon name="arrow-right" size={13} /> สลับยาง
+                      </button>
                     </div>
                   </div>
                 ) : (
@@ -1206,34 +1407,386 @@ function TiresLayout() {
           </div>
         </div>
       )}
+
+      {historyTire && (
+        <TireHistoryModal tire={historyTire} onClose={() => setHistoryTire(null)} />
+      )}
+      {swapTire && v && (
+        <TireSwapModal
+          tire={swapTire}
+          vehicle={v}
+          tireMap={tireMap}
+          onClose={() => setSwapTire(null)}
+          onDone={() => { setSwapTire(null); refresh() }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ── Tire Layout Print View (A4 landscape, 2-column) ────────────
+function TireLayoutPrintView({ vehicle, wc, tireMap, allTires, spares }: {
+  vehicle: Vehicle
+  wc: number
+  tireMap: Record<string, Tire>
+  allTires: Tire[]
+  spares: Tire[]
+}) {
+  const layout = TL[wc] ?? TL[10]
+  const today = new Date()
+  const printDate = today.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
+
+  // Sort: in-use by position number, then spares
+  const sorted = [...allTires].sort((a, b) => {
+    const pa = a.position ?? ''
+    const pb = b.position ?? ''
+    if (pa.startsWith('spare') && !pb.startsWith('spare')) return 1
+    if (!pa.startsWith('spare') && pb.startsWith('spare')) return -1
+    const na = parseInt(pa.replace(/\D/g, ''), 10) || 0
+    const nb = parseInt(pb.replace(/\D/g, ''), 10) || 0
+    return na - nb
+  })
+
+  return (
+    <div className="print-only tire-layout-print">
+      <div className="kps-print-header">
+        <p className="co">KPS Transportations</p>
+        <p className="ttl">ผังยาง · ทะเบียน {vehicle.plate} ({vehicle.type})</p>
+        <p className="sub">{vehicle.brand} · {wc} ล้อ · เลขไมล์ ณ วันพิมพ์: {db.fmt(vehicle.odometer)} km</p>
+        <p className="ts">พิมพ์เมื่อ {printDate}</p>
+      </div>
+
+      <div className="tire-print-grid">
+        {/* LEFT: SVG layout with prominent numbers + accumulated km */}
+        <div className="tire-print-left">
+          <div className="tire-print-section-title">ผังตำแหน่งล้อ</div>
+          <svg
+            width="100%"
+            viewBox={`0 0 300 ${layout.h}`}
+            preserveAspectRatio="xMidYMid meet"
+            style={{ maxHeight: '170mm' }}
+          >
+            <rect x={93} y={18} width={114} height={layout.h - 36} rx={8} fill="#f8fafc" stroke="#94a3b8" strokeWidth={1.5} />
+            <text x={150} y={12} textAnchor="middle" fontSize={10} fill="#475569" fontFamily="system-ui">▲ หน้ารถ</text>
+            {layout.axles.map((a, i) => (
+              <line key={i} x1={a.x1} y1={a.y1} x2={a.x2} y2={a.y2} stroke="#64748b" strokeWidth={2.5} />
+            ))}
+            {layout.pos.map(p => {
+              const t = tireMap[p.pos]
+              const km = t?.accumulatedKm ?? 0
+              const ks = t ? kmStatus(km) : { color: '#94a3b8', bg: '#f1f5f9', label: '' }
+              // Compact km label: 47320 → "47k", 0 → "—"
+              const compactKm = km >= 1000 ? `${Math.round(km / 1000)}k` : km > 0 ? String(km) : ''
+              return (
+                <g key={p.pos}>
+                  <circle cx={p.cx} cy={p.cy} r={p.r} fill={t ? ks.bg : '#f8fafc'} stroke={ks.color} strokeWidth={2.2} />
+                  <text x={p.cx} y={p.cy - 1} textAnchor="middle" fontSize={p.r >= 20 ? 10 : 9} fontWeight={800} fill={ks.color} fontFamily="system-ui">{p.pos}</text>
+                  {t && compactKm && (
+                    <text x={p.cx} y={p.cy + p.r * 0.55} textAnchor="middle" fontSize={p.r >= 20 ? 8 : 7} fontWeight={600} fill={ks.color} fontFamily="system-ui">
+                      {compactKm}
+                    </text>
+                  )}
+                </g>
+              )
+            })}
+          </svg>
+          {spares.length > 0 && (
+            <div className="tire-print-spares">
+              <div className="tire-print-section-title" style={{ fontSize: '8pt', marginTop: '6mm' }}>ยางสำรอง</div>
+              {spares.map(t => (
+                <div key={t.id} style={{ fontSize: '7.5pt', marginTop: 2 }}>
+                  • <strong>{t.serial}</strong> ({t.brand} {t.model})
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT: detail table */}
+        <div className="tire-print-right">
+          <div className="tire-print-section-title">ตารางรายละเอียดยาง ({sorted.length} เส้น)</div>
+          <table className="tire-print-tbl">
+            <thead>
+              <tr>
+                <th style={{ width: '11%' }}>ตำแหน่ง</th>
+                <th style={{ width: '24%' }}>เลขซีเรียล</th>
+                <th style={{ width: '15%' }}>วันที่ใส่</th>
+                <th style={{ width: '15%' }}>ไมล์เริ่มต้น</th>
+                <th style={{ width: '15%' }}>Km สะสม</th>
+                <th style={{ width: '20%' }}>หมายเหตุ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.length === 0 ? (
+                <tr><td colSpan={6} style={{ textAlign: 'center', padding: 12 }}>ไม่มีข้อมูลยาง</td></tr>
+              ) : sorted.map(t => {
+                const km = t.accumulatedKm ?? 0
+                const ks = kmStatus(km)
+                return (
+                  <tr key={t.id}>
+                    <td><strong>{t.position ?? '—'}</strong></td>
+                    <td><strong>{t.serial}</strong> <span style={{ color: '#64748b' }}>({t.brand})</span></td>
+                    <td>{t.installedDate ? db.thaiDate(t.installedDate) : '—'}</td>
+                    <td style={{ textAlign: 'right' }}>{db.fmt(t.installedOdometer ?? 0)}</td>
+                    <td style={{ textAlign: 'right', color: ks.color, fontWeight: 700 }}>{db.fmt(km)}</td>
+                    <td style={{ fontSize: '7.5pt' }}>{t.size}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Tire History Modal ──────────────────────────────────────────
+function TireHistoryModal({ tire, onClose }: { tire: Tire; onClose: () => void }) {
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allEvents = [] } = useList<TireEvent>('tire_events')
+  const vehicle = tire.vehicleId ? vehicles.find((v) => v.id === tire.vehicleId) : null
+  const events = useMemo(
+    () => allEvents
+      .filter(e => e.tireId === tire.id)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [allEvents, tire.id],
+  )
+  const EVT: Record<string, { label: string; icon: string; color: string; bg: string }> = {
+    install: { label: 'ติดตั้งใหม่', icon: '🛒', color: '#16a34a', bg: '#dcfce7' },
+    swap: { label: 'สลับตำแหน่ง', icon: '↔', color: '#2563eb', bg: '#dbeafe' },
+    remove: { label: 'ถอด/ปะ', icon: '🔧', color: '#d97706', bg: '#fef3c7' },
+    scrap: { label: 'หมดสภาพ', icon: '⚠', color: '#dc2626', bg: '#fee2e2' },
+    sell: { label: 'ขาย', icon: '💰', color: '#7c3aed', bg: '#ede9fe' },
+  }
+  const km = tire.accumulatedKm ?? 0
+  const ks = kmStatus(km)
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100 }}
+      onClick={onClose}
+    >
+      <div
+        className="card"
+        style={{ width: 620, maxWidth: '95vw', maxHeight: '90vh', display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 14 }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="row" style={{ padding: '16px 22px', borderBottom: '1px solid var(--line)', flexShrink: 0 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>ประวัติยาง · <span className="mono" style={{ color: 'var(--primary)' }}>{tire.serial}</span></h3>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+              {tire.brand} {tire.model} · {tire.size}
+            </div>
+          </div>
+          <button className="btn ghost icon sm" onClick={onClose} style={{ marginLeft: 'auto' }}>
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+        <div style={{ overflowY: 'auto', padding: 22, flex: 1 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 18 }}>
+            <div style={{ padding: 12, background: 'var(--bg-sunk)', borderRadius: 10 }}>
+              <div className="muted" style={{ fontSize: 11 }}>รถปัจจุบัน</div>
+              <div className="mono" style={{ fontWeight: 700, color: 'var(--primary)', marginTop: 2 }}>{vehicle?.plate ?? '—'}</div>
+            </div>
+            <div style={{ padding: 12, background: 'var(--bg-sunk)', borderRadius: 10 }}>
+              <div className="muted" style={{ fontSize: 11 }}>ตำแหน่ง</div>
+              <div style={{ fontWeight: 700, marginTop: 2 }}>{tire.position ?? '—'}</div>
+            </div>
+            <div style={{ padding: 12, background: ks.bg, borderRadius: 10 }}>
+              <div className="muted" style={{ fontSize: 11 }}>Km สะสม</div>
+              <div className="mono" style={{ fontWeight: 700, color: ks.color, marginTop: 2 }}>{db.fmt(km)} km</div>
+            </div>
+          </div>
+
+          <div style={{ fontWeight: 600, fontSize: 13.5, marginBottom: 12 }}>
+            Timeline ({events.length} เหตุการณ์)
+          </div>
+          {events.length === 0 ? (
+            <div className="empty" style={{ padding: 30 }}>ยังไม่มีเหตุการณ์ที่บันทึก</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {events.map(ev => {
+                const cfg = EVT[ev.eventType] ?? { label: ev.eventType, icon: '•', color: '#64748b', bg: '#f1f5f9' }
+                return (
+                  <div key={ev.id} style={{ display: 'flex', gap: 12, padding: 12, border: '1px solid var(--line)', borderRadius: 10 }}>
+                    <div style={{
+                      width: 36, height: 36, borderRadius: '50%',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: cfg.bg, fontSize: 16, flexShrink: 0,
+                    }}>{cfg.icon}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="row" style={{ gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                        <strong style={{ color: cfg.color, fontSize: 13.5 }}>{cfg.label}</strong>
+                        <span className="muted" style={{ fontSize: 11.5 }}>{db.thaiDate(ev.date)}</span>
+                        {ev.odometer ? (
+                          <span className="mono muted" style={{ fontSize: 11 }}>· {db.fmt(ev.odometer)} km</span>
+                        ) : null}
+                      </div>
+                      <div style={{ fontSize: 12.5, marginTop: 4, color: 'var(--text-2)' }}>
+                        {ev.fromPos && ev.toPos ? <>ย้าย <strong>{ev.fromPos}</strong> → <strong>{ev.toPos}</strong></>
+                          : ev.toPos ? <>ตำแหน่ง <strong>{ev.toPos}</strong></>
+                          : ev.fromPos ? <>ออกจาก <strong>{ev.fromPos}</strong></>
+                          : null}
+                        {ev.note && <span className="muted"> · {ev.note}</span>}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', flexShrink: 0 }}>
+          <button className="btn" onClick={onClose}>ปิด</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Tire Swap Modal ─────────────────────────────────────────────
+function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
+  tire: Tire
+  vehicle: Vehicle
+  tireMap: Record<string, Tire>
+  onClose: () => void
+  onDone: () => void
+}) {
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const updateTire = useUpdate<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
+  const wc = wcFrom(vehicle.type ?? '')
+  const layout = TL[wc] ?? TL[10]
+  const allPos = layout.pos.map(p => p.pos).concat(['spare_1', 'spare_2'])
+  const fromPos = tire.position ?? ''
+  const [toPos, setToPos] = useState('')
+  const [note, setNote] = useState('')
+  const toTire = toPos ? tireMap[toPos] : undefined
+
+  const confirm = async () => {
+    if (!toPos || toPos === fromPos) return
+    const odometer = vehicle.odometer ?? 0
+    const km1 = computeAccumKm(tire, allVehicles)
+    await updateTire.mutateAsync({ id: tire.id, patch: { position: toPos, accumulatedKm: km1, installedOdometer: odometer } })
+    if (toTire) {
+      const km2 = computeAccumKm(toTire, allVehicles)
+      await updateTire.mutateAsync({ id: toTire.id, patch: { position: fromPos, accumulatedKm: km2, installedOdometer: odometer } })
+    }
+    await insertEvent.mutateAsync({
+      tireId: tire.id,
+      vehicleId: vehicle.id,
+      eventType: 'swap',
+      date: new Date().toISOString().slice(0, 10),
+      odometer,
+      fromPos,
+      toPos,
+      note: note.trim() || (toTire ? `สลับกับ ${toTire.serial}` : 'ย้ายไปตำแหน่งว่าง'),
+      userId: 'e10',
+    })
+    onDone()
+  }
+
+  return (
+    <div
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100 }}
+      onClick={onClose}
+    >
+      <div
+        className="card"
+        style={{ width: 520, maxWidth: '95vw', background: '#fff', borderRadius: 14 }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="row" style={{ padding: '16px 22px', borderBottom: '1px solid var(--line)' }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>สลับยาง · {vehicle.plate}</h3>
+          <button className="btn ghost icon sm" onClick={onClose} style={{ marginLeft: 'auto' }}>
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+        <div style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ padding: 14, background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 10 }}>
+            <div className="muted" style={{ fontSize: 11 }}>ยางที่กำลังสลับ (ต้นทาง)</div>
+            <div style={{ marginTop: 4 }}>
+              <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>{tire.serial}</span>
+              <span className="muted" style={{ marginLeft: 8 }}>{tire.brand} {tire.model}</span>
+              <span className="badge gray" style={{ marginLeft: 8 }}>{fromPos || '—'}</span>
+            </div>
+          </div>
+
+          <Field label="ตำแหน่งปลายทาง *">
+            <select value={toPos} onChange={e => setToPos(e.target.value)}>
+              <option value="">— เลือกตำแหน่ง —</option>
+              {allPos.filter(p => p !== fromPos).map(p => {
+                const t = tireMap[p]
+                return (
+                  <option key={p} value={p}>
+                    {p} {t ? `(มียาง ${t.serial} — จะสลับกัน)` : '(ว่าง)'}
+                  </option>
+                )
+              })}
+            </select>
+          </Field>
+
+          {toTire && (
+            <div style={{ padding: 14, background: '#FEF3C7', border: '1px solid #FCD34D', borderRadius: 10 }}>
+              <div className="muted" style={{ fontSize: 11 }}>จะถูกสลับกับ</div>
+              <div style={{ marginTop: 4 }}>
+                <span className="mono" style={{ fontWeight: 700, color: '#92400E' }}>{toTire.serial}</span>
+                <span className="muted" style={{ marginLeft: 8 }}>{toTire.brand} {toTire.model}</span>
+              </div>
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 4 }}>
+                ยางนี้จะย้ายไปอยู่ตำแหน่ง <strong>{fromPos}</strong>
+              </div>
+            </div>
+          )}
+
+          <Field label="หมายเหตุ">
+            <textarea
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              rows={2}
+              placeholder="เช่น สลับเพื่อยืดอายุการใช้งาน"
+              style={{ resize: 'vertical', minHeight: 48 }}
+            />
+          </Field>
+        </div>
+        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn" onClick={onClose}>ยกเลิก</button>
+          <button className="btn primary" onClick={confirm} disabled={!toPos || toPos === fromPos}>
+            <Icon name="check" size={15} /> ยืนยันสลับ
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
 
 // ── Move to Stock Panel ───────────────────────────────────────────
 function MoveToStockPanel() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const updateTire = useUpdate<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
   const [vehicleId, setVehicleId] = useState('')
   const [pos, setPos] = useState('')
   const [done, setDone] = useState(false)
 
-  const vTires = vehicleId ? db.getAll<Tire>('tires').filter((t) => t.vehicleId === vehicleId && t.status === 'in-use') : []
-  const wc = wcFrom(db.get<Vehicle>('vehicles', vehicleId)?.type ?? '')
+  const vTires = vehicleId ? tires.filter((t) => t.vehicleId === vehicleId && t.status === 'in-use') : []
+  const wc = wcFrom(vehicles.find((v) => v.id === vehicleId)?.type ?? '')
   const layout = TL[wc] ?? TL[10]
   const allPos = layout.pos.map((p) => p.pos)
   const tireAtPos = vTires.find((t) => t.position === pos)
 
-  const doMove = () => {
+  const doMove = async () => {
     if (!tireAtPos) return
-    const allVehicles = db.getAll<Vehicle>('vehicles')
-    const km = computeAccumKm(tireAtPos, allVehicles)
-    db.update<Tire>('tires', tireAtPos.id, {
-      status: 'stock', vehicleId: null, position: null, accumulatedKm: km,
+    const km = computeAccumKm(tireAtPos, vehicles)
+    await updateTire.mutateAsync({
+      id: tireAtPos.id,
+      patch: { status: 'stock', vehicleId: null, position: null, accumulatedKm: km },
     })
-    db.add<TireEvent>('tire_events', {
-      id: uid('te'), tireId: tireAtPos.id, vehicleId,
+    await insertEvent.mutateAsync({
+      tireId: tireAtPos.id, vehicleId,
       eventType: 'remove', date: new Date().toISOString().slice(0, 10),
-      odometer: db.get<Vehicle>('vehicles', vehicleId)?.odometer ?? 0,
+      odometer: vehicles.find((v) => v.id === vehicleId)?.odometer ?? 0,
       fromPos: pos, toPos: null, note: 'ย้ายเข้าคลัง', userId: 'e10',
     })
     setDone(true)
@@ -1287,15 +1840,19 @@ function MoveToStockPanel() {
 
 // ── Tab 3: Manage & Swap ──────────────────────────────────────────
 function TiresManageFull() {
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const { data: tireEvents = [] } = useList<TireEvent>('tire_events')
+  const updateTire = useUpdate<Tire>('tires')
+  const insertEvent = useInsert<TireEvent>('tire_events')
   const [step, setStep] = useState(1)
   const [sw, setSw] = useState({ vehicleId: '', fromPos: '', toPos: '', note: '' })
   const set = (k: string, v: string) => setSw((s) => ({ ...s, [k]: v }))
 
-  const veh = db.get<Vehicle>('vehicles', sw.vehicleId)
+  const veh = vehicles.find((v) => v.id === sw.vehicleId)
   const wc = wcFrom(veh?.type ?? '')
   const vTires = sw.vehicleId
-    ? db.getAll<Tire>('tires').filter((t) => t.vehicleId === sw.vehicleId)
+    ? tires.filter((t) => t.vehicleId === sw.vehicleId)
     : []
   const tireMap: Record<string, Tire> = {}
   vTires.forEach((t) => {
@@ -1307,22 +1864,20 @@ function TiresManageFull() {
   const fromTire = vTires.find((t) => t.position === sw.fromPos)
   const toTire = vTires.find((t) => t.position === sw.toPos)
 
-  const doSwap = () => {
+  const doSwap = async () => {
     if (!sw.vehicleId || !sw.fromPos || !sw.toPos) return
     const odometer = veh?.odometer ?? 0
     const userId = 'e10'
-    const allVehicles = db.getAll<Vehicle>('vehicles')
     // Snapshot accumulated km for both tires before swapping
     if (fromTire) {
-      const km = computeAccumKm(fromTire, allVehicles)
-      db.update<Tire>('tires', fromTire.id, { position: sw.toPos, accumulatedKm: km, installedOdometer: odometer })
+      const km = computeAccumKm(fromTire, vehicles)
+      await updateTire.mutateAsync({ id: fromTire.id, patch: { position: sw.toPos, accumulatedKm: km, installedOdometer: odometer } })
     }
     if (toTire) {
-      const km = computeAccumKm(toTire, allVehicles)
-      db.update<Tire>('tires', toTire.id, { position: sw.fromPos, accumulatedKm: km, installedOdometer: odometer })
+      const km = computeAccumKm(toTire, vehicles)
+      await updateTire.mutateAsync({ id: toTire.id, patch: { position: sw.fromPos, accumulatedKm: km, installedOdometer: odometer } })
     }
-    db.add<TireEvent>('tire_events', {
-      id: uid('te'),
+    await insertEvent.mutateAsync({
       tireId: fromTire?.id ?? '',
       vehicleId: sw.vehicleId,
       eventType: 'swap',
@@ -1436,7 +1991,7 @@ function TiresManageFull() {
                 <tbody>
                   {vehicles.map((vv) => {
                     const wcc = wcFrom(vv.type ?? '')
-                    const cnt = db.getAll<Tire>('tires').filter((t) => t.vehicleId === vv.id).length
+                    const cnt = tires.filter((t) => t.vehicleId === vv.id).length
                     const sel = sw.vehicleId === vv.id
                     return (
                       <tr
@@ -1801,13 +2356,12 @@ function TiresManageFull() {
               </tr>
             </thead>
             <tbody>
-              {db
-                .getAll<TireEvent>('tire_events')
+              {tireEvents
                 .filter((e) => e.eventType === 'swap')
                 .slice(0, 10)
                 .map((e) => {
-                  const vv = db.get<Vehicle>('vehicles', e.vehicleId)
-                  const t = db.get<Tire>('tires', e.tireId)
+                  const vv = vehicles.find((v) => v.id === e.vehicleId)
+                  const t = tires.find((tt) => tt.id === e.tireId)
                   return (
                     <tr key={e.id}>
                       <td className="num muted">{db.thaiDate(e.date)}</td>
@@ -1842,22 +2396,28 @@ function TiresManageFull() {
 
 // ── Tab 4: History Timeline ───────────────────────────────────────
 function TiresHistoryFull() {
-  const tires = db.getAll<Tire>('tires')
-  const [q, setQ] = useState('')
-  const [searched, setSearched] = useState('')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allEvents = [] } = useList<TireEvent>('tire_events')
+  const initial = (typeof window !== 'undefined' && sessionStorage.getItem('kps_tire_history_serial')) || ''
+  const [q, setQ] = useState(initial)
+  const [searched, setSearched] = useState(initial)
+  useEffect(() => {
+    if (initial) sessionStorage.removeItem('kps_tire_history_serial')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const tire = searched
     ? tires.find((t) => t.serial.toLowerCase().includes(searched.toLowerCase()))
     : null
-  const vehicle = tire?.vehicleId ? db.get<Vehicle>('vehicles', tire.vehicleId) : null
+  const vehicle = tire?.vehicleId ? vehicles.find((v) => v.id === tire.vehicleId) : null
 
   const events = useMemo(() => {
     if (!tire) return []
-    return db
-      .getAll<TireEvent>('tire_events')
+    return allEvents
       .filter((e) => e.tireId === tire.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-  }, [tire?.id])
+  }, [allEvents, tire?.id, tire])
 
   const handleSearch = () => setSearched(q.trim())
 
@@ -1986,7 +2546,7 @@ function TiresHistoryFull() {
                 ประวัติการใช้งาน ({events.length} รายการ)
               </div>
               {events.map((e, i) => {
-                const v = db.get<Vehicle>('vehicles', e.vehicleId)
+                const v = vehicles.find((vv) => vv.id === e.vehicleId)
                 const cfg = EVT_CFG[e.eventType] ?? EVT_CFG.install
                 const isLast = i === events.length - 1
                 return (
@@ -2129,17 +2689,19 @@ function TiresHistoryFull() {
 
 // ── Tab 5: Scrapped Tires ─────────────────────────────────────────
 function SellScrapModal({ tire, onClose, onSaved }: { tire: Tire; onClose: () => void; onSaved: () => void }) {
+  const insertSale = useInsert<TireScrapSale>('tire_scrap_sales')
+  const updateTire = useUpdate<Tire>('tires')
   const [buyer, setBuyer] = useState('')
   const [price, setPrice] = useState('')
 
-  const save = () => {
+  const save = async () => {
     if (!buyer || !price) { alert('กรุณากรอกผู้ซื้อและราคา'); return }
-    db.add<TireScrapSale>('tire_scrap_sales', {
-      id: uid('tss'), tireId: tire.id, serial: tire.serial,
+    await insertSale.mutateAsync({
+      tireId: tire.id, serial: tire.serial,
       buyer: buyer.trim(), price: +price || 0,
       date: new Date().toISOString().slice(0, 10), userId: 'e10',
     })
-    db.update<Tire>('tires', tire.id, { status: 'sold' })
+    await updateTire.mutateAsync({ id: tire.id, patch: { status: 'sold' } })
     onSaved()
     onClose()
   }
@@ -2173,9 +2735,9 @@ function SellScrapModal({ tire, onClose, onSaved }: { tire: Tire; onClose: () =>
 }
 
 function TiresScrapped() {
-  const [tick, setTick] = useState(0)
-  const scrapped = useMemo(() => { void tick; return db.getAll<Tire>('tires').filter((t) => t.status === 'scrapped') }, [tick])
-  const sales = useMemo(() => { void tick; return db.getAll<TireScrapSale>('tire_scrap_sales') }, [tick])
+  const { data: allTires = [] } = useList<Tire>('tires')
+  const { data: sales = [] } = useList<TireScrapSale>('tire_scrap_sales')
+  const scrapped = useMemo(() => allTires.filter((t) => t.status === 'scrapped'), [allTires])
   const [sellTire, setSellTire] = useState<Tire | null>(null)
 
   const saleByTireId = useMemo(() => {
@@ -2272,7 +2834,7 @@ function TiresScrapped() {
         <SellScrapModal
           tire={sellTire}
           onClose={() => setSellTire(null)}
-          onSaved={() => setTick((n) => n + 1)}
+          onSaved={() => {}}
         />
       )}
     </div>
@@ -2326,7 +2888,7 @@ export function TiresModule({ tab, setActive }: { tab: string; setActive: (id: s
           </button>
         ))}
       </div>
-      {cur === 'all' && <TiresAll />}
+      {cur === 'all' && <TiresAll setActive={setActive} />}
       {cur === 'layout' && <TiresLayout />}
       {cur === 'manage' && <TiresManageFull />}
       {cur === 'history' && <TiresHistoryFull />}

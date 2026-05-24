@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react'
-import type { SubDriver, SubJob, User, Subcontractor, Vehicle } from '../../types'
-import { db, uid } from '../../lib/db'
+import { useState, useRef } from 'react'
+import type { SubDriver, SubJob, User, Vehicle } from '../../types'
+import { db } from '../../lib/db'
+import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info, PrintButton } from '../../components/ui'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -65,10 +66,13 @@ interface DriverEditModalProps {
   onSaved: () => void
 }
 
+const SUB_VEHICLE_TYPES = ['4ล้อ', '6ล้อ', '10ล้อ', '18ล้อ', '22ล้อ', 'ตู้คอนเทนเนอร์', 'พ่วงข้าง']
+
 function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
   const isNew = !driver
-  const subs = db.getAll<Subcontractor>('subcontractors')
-  const allDrivers = db.getAll<SubDriver>('subDrivers')
+  const { data: allDrivers = [] } = useList<SubDriver>('sub_drivers')
+  const insertDriver = useInsert<SubDriver>('sub_drivers')
+  const updateDriver = useUpdate<SubDriver>('sub_drivers')
   const nextCode = isNew
     ? 'D' + String(
         allDrivers.reduce((max, d) => {
@@ -77,6 +81,9 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
         }, 0) + 1,
       ).padStart(3, '0')
     : driver!.code
+
+  const initialType = driver?.vehicleTypes?.[0] ?? ''
+  const initialIsCustom = !!initialType && !SUB_VEHICLE_TYPES.includes(initialType)
 
   const [form, setForm] = useState({
     code: nextCode,
@@ -90,28 +97,34 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
     accountBank: driver?.accountBank ?? 'KBANK',
     accountNo: driver?.accountNo ?? '',
     status: driver?.status ?? 'active',
-    subId: driver?.subId ?? (subs[0]?.id ?? ''),
     address: driver?.address ?? '',
     truckDump: driver?.truckDump ?? 'no-dump' as 'dump' | 'no-dump',
     cpAccess: driver?.cpAccess ?? 'no' as 'yes' | 'no',
   })
+  const [vehicleType, setVehicleType] = useState(initialIsCustom ? 'อื่นๆ' : initialType)
+  const [customVehicleType, setCustomVehicleType] = useState(initialIsCustom ? initialType : '')
 
   const set = <K extends keyof typeof form>(k: K, v: typeof form[K]) =>
     setForm(f => ({ ...f, [k]: v }))
 
-  const save = () => {
+  const save = async () => {
     if (!form.name.trim() || !form.plate.trim() || !form.phone.trim()) {
       alert('กรุณากรอก ชื่อ, ทะเบียนรถ และเบอร์โทร')
       return
     }
-    const payload = { ...form, vehicleTypes: driver?.vehicleTypes ?? [] }
-    if (isNew) {
-      db.add<SubDriver>('subDrivers', { ...payload, id: uid('sd') })
-    } else {
-      db.update<SubDriver>('subDrivers', driver!.id, payload)
+    const finalType = vehicleType === 'อื่นๆ' ? customVehicleType.trim() : vehicleType
+    const payload = { ...form, vehicleTypes: finalType ? [finalType] : [] } as Partial<SubDriver>
+    try {
+      if (isNew) {
+        await insertDriver.mutateAsync(payload)
+      } else {
+        await updateDriver.mutateAsync({ id: driver!.id, patch: payload })
+      }
+      onSaved()
+      onClose()
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ')
     }
-    onSaved()
-    onClose()
   }
 
   const radioRow: React.CSSProperties = {
@@ -139,6 +152,21 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
             </Field>
             <Field label="ทะเบียนรถ *">
               <input value={form.plate} onChange={e => set('plate', e.target.value)} placeholder="เช่น ABC-1234" />
+            </Field>
+            <Field label="ประเภทรถ">
+              <select value={vehicleType} onChange={e => setVehicleType(e.target.value)}>
+                <option value="">-- เลือกประเภทรถ --</option>
+                {SUB_VEHICLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                <option value="อื่นๆ">อื่นๆ (ระบุเอง)</option>
+              </select>
+              {vehicleType === 'อื่นๆ' && (
+                <input
+                  value={customVehicleType}
+                  onChange={e => setCustomVehicleType(e.target.value)}
+                  placeholder="ระบุประเภทรถ เช่น พ่วง 24 ล้อ"
+                  style={{ marginTop: 8 }}
+                />
+              )}
             </Field>
             <Field label="เบอร์โทรศัพท์ *">
               <input value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="เช่น 081-234-5678" />
@@ -172,12 +200,6 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
             </Field>
             <Field label="เลขที่บัญชี">
               <input value={form.accountNo} onChange={e => set('accountNo', e.target.value)} placeholder="123-4-56789-0" />
-            </Field>
-            <Field label="ผู้รับเหมา (Subcontractor)">
-              <select value={form.subId} onChange={e => set('subId', e.target.value)}>
-                <option value="">-- ไม่ระบุ --</option>
-                {subs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </select>
             </Field>
             <Field label="สถานะ">
               <select value={form.status} onChange={e => set('status', e.target.value)}>
@@ -248,8 +270,10 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
 
 function SubOpenForm() {
   const today = new Date().toISOString().slice(0, 10)
-  const subDrivers = db.getAll<SubDriver>('subDrivers').filter(d => d.status === 'active')
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: allSubDrivers = [] } = useList<SubDriver>('sub_drivers')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const insertJob = useInsert<SubJob>('sub_jobs')
+  const subDrivers = allSubDrivers.filter(d => d.status === 'active')
 
   const blank = {
     date: today,
@@ -286,26 +310,25 @@ function SubOpenForm() {
   }
 
   const picked = subDrivers.find(d => d.id === form.driverId)
-  const weightNum = parseFloat(form.weight) || 0
-  const weightTons = weightNum / 1000
+  const weightInput = parseFloat(form.weight) || 0
+  const weightKg = form.mode === 'per_ton' ? weightInput * 1000 : weightInput
   const priceNum = parseFloat(form.price) || 0
   const total =
     form.mode === 'lump' ? priceNum :
-    form.mode === 'per_kg' ? weightNum * priceNum :
-    weightTons * priceNum
+    weightInput * priceNum
 
+  const weightUnit = form.mode === 'per_ton' ? 'ตัน' : 'กก.'
   const priceLabel =
     form.mode === 'per_ton' ? 'บาท / ตัน' :
     form.mode === 'per_kg' ? 'บาท / กก.' :
     'บาทเหมา'
 
-  const save = () => {
+  const save = async () => {
     if (!form.driverId) { alert('กรุณาเลือกทะเบียนรถรับจ้าง'); return }
     if (!form.destination.trim()) { alert('กรุณาระบุปลายทาง'); return }
     if (!form.price) { alert('กรุณากรอกค่าบรรทุก'); return }
     if (!picked) return
-    db.add<SubJob>('subJobs', {
-      id: uid('sj'),
+    await insertJob.mutateAsync({
       code: 'SUB-' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + String(Math.floor(Math.random() * 100)).padStart(2, '0'),
       date: form.date,
       subId: picked.subId,
@@ -315,7 +338,7 @@ function SubOpenForm() {
       category: form.category,
       destination: form.destination.trim(),
       origin: 'กรุงเทพ',
-      weight: weightNum,
+      weight: weightKg,
       finalWeight: 0,
       mode: form.mode,
       price: priceNum,
@@ -369,13 +392,10 @@ function SubOpenForm() {
                 onChange={e => { set('category', e.target.value); setCategoryAutoFilled(false) }}
               >
                 <option value="">-- เลือกประเภทรถ --</option>
-                <option>4ล้อ</option>
-                <option>6ล้อ</option>
-                <option>10ล้อ</option>
-                <option>18ล้อ</option>
-                <option>22ล้อ</option>
-                <option>ตู้คอนเทนเนอร์</option>
-                <option>พ่วงข้าง</option>
+                {SUB_VEHICLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                {form.category && !SUB_VEHICLE_TYPES.includes(form.category) && (
+                  <option value={form.category}>{form.category}</option>
+                )}
               </select>
             </div>
             {categoryAutoFilled && form.category && (
@@ -391,8 +411,14 @@ function SubOpenForm() {
 
         {/* Right */}
         <div className="col" style={{ gap: 14 }}>
-          <Field label="น้ำหนักต้นทาง (กก.)">
-            <input type="number" value={form.weight} onChange={e => set('weight', e.target.value)} placeholder="เช่น 15000" />
+          <Field label={`น้ำหนักต้นทาง (${weightUnit})`}>
+            <input
+              type="number"
+              value={form.weight}
+              onChange={e => set('weight', e.target.value)}
+              placeholder={form.mode === 'per_ton' ? 'เช่น 15' : 'เช่น 15000'}
+              disabled={form.mode === 'lump'}
+            />
           </Field>
           <Field label="ประเภทการคำนวณ *">
             <div className="row" style={{ gap: 18, paddingTop: 4 }}>
@@ -428,12 +454,12 @@ function SubOpenForm() {
           </div>
           {form.mode === 'per_ton' && form.weight && form.price && (
             <div className="faint" style={{ fontSize: 11 }}>
-              คำนวณจาก: {weightTons.toFixed(2)} ตัน × {form.price} บาท/ตัน
+              คำนวณจาก: {weightInput.toLocaleString()} ตัน × {form.price} บาท/ตัน
             </div>
           )}
           {form.mode === 'per_kg' && form.weight && form.price && (
             <div className="faint" style={{ fontSize: 11 }}>
-              คำนวณจาก: {weightNum.toLocaleString()} กก. × {form.price} บาท/กก.
+              คำนวณจาก: {weightInput.toLocaleString()} กก. × {form.price} บาท/กก.
             </div>
           )}
           {form.mode === 'lump' && (
@@ -455,45 +481,54 @@ function SubOpenForm() {
 // ─── Tab 2: ปิดงาน ───────────────────────────────────────────────────────────
 
 function SubCloseForm() {
-  const [tick, setTick] = useState(0)
-  const openJobs = useMemo(() => { void tick; return db.getAll<SubJob>('subJobs').filter(j => j.status === 'open') }, [tick])
-  const subDrivers = db.getAll<SubDriver>('subDrivers')
+  const { data: allJobs = [] } = useList<SubJob>('sub_jobs')
+  const { data: subDrivers = [] } = useList<SubDriver>('sub_drivers')
+  const updateJob = useUpdate<SubJob>('sub_jobs')
+  const openJobs = allJobs.filter(j => j.status === 'open')
 
   const [pickedId, setPickedId] = useState('')
   const [finalWeight, setFinalWeight] = useState('')
+  const [wht, setWht] = useState(false)
 
   const picked = openJobs.find(j => j.id === pickedId)
   const driver = picked ? subDrivers.find(d => d.id === picked.driverId) : null
 
   // Compute final total based on destination weight
-  const fw = parseFloat(finalWeight) || 0
-  const finalTons = fw / 1000
+  const finalInput = parseFloat(finalWeight) || 0
+  const finalKg = picked && picked.mode === 'per_ton' ? finalInput * 1000 : finalInput
+  const closeUnit = picked && picked.mode === 'per_ton' ? 'ตัน' : 'กก.'
   const finalTotal = picked
     ? picked.mode === 'lump' ? picked.total
-    : picked.mode === 'per_kg' ? fw * picked.price
-    : finalTons * picked.price
+    : finalInput * picked.price
     : 0
+  const whtAmount = wht ? finalTotal * 0.01 : 0
+  const netTotal = finalTotal - whtAmount
 
-  const closeJob = () => {
+  const closeJob = async () => {
     if (!picked) return
     if ((picked.mode === 'per_ton' || picked.mode === 'per_kg') && !finalWeight) {
       alert('กรุณากรอกน้ำหนักปลายทาง')
       return
     }
-    db.update<SubJob>('subJobs', picked.id, {
-      status: 'unpaid',
-      finalWeight: fw,
-      total: finalTotal,
+    await updateJob.mutateAsync({
+      id: picked.id,
+      patch: {
+        status: 'unpaid',
+        finalWeight: finalKg,
+        total: finalTotal,
+        wht,
+      },
     })
     alert('ส่งข้อมูลเรียบร้อย — งานนี้รอชำระเงิน')
     setPickedId('')
     setFinalWeight('')
-    setTick(n => n + 1)
+    setWht(false)
   }
 
   const cancel = () => {
     setPickedId('')
     setFinalWeight('')
+    setWht(false)
   }
 
   return (
@@ -501,7 +536,7 @@ function SubCloseForm() {
       <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, marginBottom: 18 }}>ปิดงานรถรับจ้าง</h3>
 
       <Field label="เลือกงานรับจ้าง (เฉพาะงานที่ยังเปิดอยู่) *">
-        <select value={pickedId} onChange={e => { setPickedId(e.target.value); setFinalWeight('') }}>
+        <select value={pickedId} onChange={e => { setPickedId(e.target.value); setFinalWeight(''); setWht(false) }}>
           <option value="">-- กรุณาเลือกงาน --</option>
           {openJobs.map(j => (
             <option key={j.id} value={j.id}>
@@ -527,7 +562,7 @@ function SubCloseForm() {
               <Info label="คนขับ" value={picked.driverName} />
               <Info label="ประเภทรถ" value={picked.category || '—'} />
               <Info label="ปลายทาง" value={picked.destination} />
-              <Info label="น้ำหนักต้นทาง" value={picked.weight ? `${db.fmt(picked.weight)} กก.` : '—'} />
+              <Info label="น้ำหนักต้นทาง" value={picked.weight ? (picked.mode === 'per_ton' ? `${db.fmt(picked.weight / 1000)} ตัน` : `${db.fmt(picked.weight)} กก.`) : '—'} />
               <Info label="ประเภทคำนวณ" value={picked.mode === 'per_ton' ? 'ต่อตัน' : picked.mode === 'per_kg' ? 'ต่อกิโลกรัม' : 'เหมา'} />
               <Info label="ค่าบรรทุก" value={picked.mode === 'per_ton' ? `${db.fmt(picked.price)} บาท/ตัน` : picked.mode === 'per_kg' ? `${db.fmt(picked.price)} บาท/กก.` : db.thb(picked.price)} />
             </div>
@@ -538,12 +573,12 @@ function SubCloseForm() {
             <div className="card" style={{ padding: 18, marginBottom: 16, border: '2px solid var(--primary)' }}>
               <h3 className="section-title" style={{ color: 'var(--primary)' }}>คำนวณค่าขนส่ง</h3>
               <div className="grid-2" style={{ gap: 14 }}>
-                <Field label="น้ำหนักปลายทาง (กก.) *">
+                <Field label={`น้ำหนักปลายทาง (${closeUnit}) *`}>
                   <input
                     type="number"
                     value={finalWeight}
                     onChange={e => setFinalWeight(e.target.value)}
-                    placeholder="กรอกน้ำหนัก ณ ปลายทาง"
+                    placeholder={picked.mode === 'per_ton' ? 'เช่น 15' : 'กรอกน้ำหนัก ณ ปลายทาง'}
                   />
                 </Field>
                 <div>
@@ -555,8 +590,8 @@ function SubCloseForm() {
                   </div>
                   <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>
                     {picked.mode === 'per_kg'
-                      ? `${fw.toLocaleString()} กก. × ${db.fmt(picked.price)} บาท/กก.`
-                      : `${finalTons.toFixed(2)} ตัน × ${db.fmt(picked.price)} บาท/ตัน`}
+                      ? `${finalInput.toLocaleString()} กก. × ${db.fmt(picked.price)} บาท/กก.`
+                      : `${finalInput.toLocaleString()} ตัน × ${db.fmt(picked.price)} บาท/ตัน`}
                   </div>
                 </div>
               </div>
@@ -574,6 +609,38 @@ function SubCloseForm() {
               </div>
             </div>
           )}
+
+          {/* Withholding tax (1%) option + net payable */}
+          <div className="card" style={{ padding: 16, marginBottom: 16 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13.5, fontWeight: 500 }}>
+              <input
+                type="checkbox"
+                checked={wht}
+                onChange={e => setWht(e.target.checked)}
+                style={{ accentColor: 'var(--primary)', width: 16, height: 16 }}
+              />
+              <span>หักภาษี ณ ที่จ่าย 1%</span>
+            </label>
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <div className="row" style={{ fontSize: 13 }}>
+                <span className="muted">ค่าบรรทุก</span>
+                <div className="spacer" />
+                <span className="mono">{db.thb(finalTotal)}</span>
+              </div>
+              {wht && (
+                <div className="row" style={{ fontSize: 13, color: 'var(--red)' }}>
+                  <span>ภาษีหัก ณ ที่จ่าย 1%</span>
+                  <div className="spacer" />
+                  <span className="mono">− {db.thb(whtAmount)}</span>
+                </div>
+              )}
+              <div className="row" style={{ paddingTop: 7, borderTop: '1px solid var(--line)', alignItems: 'baseline' }}>
+                <span style={{ fontWeight: 700 }}>สุทธิจ่าย</span>
+                <div className="spacer" />
+                <span className="mono" style={{ fontSize: 20, fontWeight: 800, color: 'var(--primary)' }}>{db.thb(netTotal)}</span>
+              </div>
+            </div>
+          </div>
 
           {/* Bank Info Card */}
           <div
@@ -597,10 +664,10 @@ function SubCloseForm() {
               />
               <Info label="ชื่อบัญชี" value={driver?.name || picked.driverName || '—'} />
               <Info
-                label="ยอดที่ต้องชำระ"
+                label={wht ? 'ยอดที่ต้องชำระ (สุทธิ)' : 'ยอดที่ต้องชำระ'}
                 value={
                   <span className="mono" style={{ fontWeight: 800, fontSize: 16, color: 'var(--red)' }}>
-                    {db.thb(picked.mode === 'lump' ? picked.total : finalTotal)}
+                    {db.thb(netTotal)}
                   </span>
                 }
               />
@@ -624,24 +691,29 @@ function SubCloseForm() {
 // ─── Pay Modal ───────────────────────────────────────────────────────────────
 
 function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () => void; onPaid: () => void }) {
-  const driver = db.getAll<SubDriver>('subDrivers').find(d => d.id === job.driverId)
+  const { data: subDrivers = [] } = useList<SubDriver>('sub_drivers')
+  const updateJob = useUpdate<SubJob>('sub_jobs')
+  const driver = subDrivers.find(d => d.id === job.driverId)
+  const whtAmount = job.wht ? job.total * 0.01 : 0
+  const netTotal = job.total - whtAmount
 
-  const pay = () => {
-    db.update<SubJob>('subJobs', job.id, { status: 'paid' })
+  const pay = async () => {
+    await updateJob.mutateAsync({ id: job.id, patch: { status: 'paid' } })
     onPaid()
     onClose()
   }
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-      <div className="card" style={{ width: 460, maxWidth: '95vw' }}>
-        <div className="row" style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>ยืนยันการชำระเงิน</h3>
-          <button className="btn ghost icon sm" onClick={onClose}><Icon name="close" size={16} /></button>
+      <div className="card" style={{ width: 540, maxWidth: '95vw' }}>
+        <div className="row" style={{ padding: '16px 22px', borderBottom: '1px solid var(--line)', gap: 12, whiteSpace: 'nowrap' }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, flex: 1, minWidth: 0 }}>ยืนยันการชำระเงิน</h3>
+          <button className="btn ghost icon sm" onClick={onClose} style={{ flexShrink: 0 }}><Icon name="close" size={16} /></button>
         </div>
         <div style={{ padding: 22 }}>
-          <p style={{ margin: '0 0 16px', fontSize: 13.5, color: 'var(--text-2)' }}>
-            ตรวจสอบยอดก่อนปิดงาน — เมื่อยืนยันแล้วสถานะจะเปลี่ยนเป็น <strong style={{ color: 'var(--green)' }}>ชำระแล้ว</strong>
+          <p style={{ margin: '0 0 16px', fontSize: 13.5, color: 'var(--text-2)', lineHeight: 1.55, wordBreak: 'break-word' }}>
+            ตรวจสอบยอดก่อนปิดงาน — เมื่อยืนยันแล้วสถานะจะเปลี่ยนเป็น{' '}
+            <strong style={{ color: 'var(--green)', whiteSpace: 'nowrap' }}>ชำระแล้ว</strong>
           </p>
           <div style={{ padding: 16, background: 'var(--bg-sunk)', borderRadius: 10 }}>
             <div className="grid-2" style={{ gap: 10 }}>
@@ -653,16 +725,22 @@ function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () =>
               <Info label="ชื่อบัญชี" value={driver?.name || '—'} />
             </div>
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--line)' }}>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>ยอดที่จะชำระ</div>
+              {job.wht && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8, fontSize: 13 }}>
+                  <div className="row"><span className="muted">ค่าบรรทุก</span><div className="spacer" /><span className="mono">{db.thb(job.total)}</span></div>
+                  <div className="row" style={{ color: 'var(--red)' }}><span>ภาษีหัก ณ ที่จ่าย 1%</span><div className="spacer" /><span className="mono">− {db.thb(whtAmount)}</span></div>
+                </div>
+              )}
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>ยอดที่จะชำระ{job.wht ? ' (สุทธิ)' : ''}</div>
               <span className="mono" style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)' }}>
-                {db.thb(job.total)}
+                {db.thb(netTotal)}
               </span>
             </div>
           </div>
         </div>
-        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
+        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn" onClick={onClose}>ยกเลิก</button>
-          <button className="btn primary" onClick={pay}>
+          <button className="btn primary" onClick={pay} style={{ whiteSpace: 'nowrap' }}>
             <Icon name="check" size={15} /> ยืนยันชำระเงิน
           </button>
         </div>
@@ -674,7 +752,8 @@ function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () =>
 // ─── Job Detail Drawer ───────────────────────────────────────────────────────
 
 function JobDetailDrawer({ job, onClose }: { job: SubJob; onClose: () => void }) {
-  const driver = db.getAll<SubDriver>('subDrivers').find(d => d.id === job.driverId)
+  const { data: subDrivers = [] } = useList<SubDriver>('sub_drivers')
+  const driver = subDrivers.find(d => d.id === job.driverId)
   const modeLabel = job.mode === 'per_ton' ? 'ต่อตัน' : job.mode === 'per_kg' ? 'ต่อกิโลกรัม' : 'เหมา'
   const s = STATUS_LABEL[job.status]
   const fmt2 = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -738,12 +817,27 @@ function JobDetailDrawer({ job, onClose }: { job: SubJob; onClose: () => void })
           <div style={{
             padding: '16px 20px', background: 'var(--primary-50)',
             borderRadius: 10, marginBottom: 22,
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
-            <span style={{ fontWeight: 500, fontSize: 14 }}>ค่าขนส่งรวม</span>
-            <span className="mono" style={{ fontSize: 26, fontWeight: 800, color: 'var(--primary)' }}>
-              {fmt2(job.total)} <span style={{ fontSize: 14, fontWeight: 500 }}>฿</span>
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontWeight: 500, fontSize: 14 }}>ค่าขนส่งรวม</span>
+              <span className="mono" style={{ fontSize: job.wht ? 18 : 26, fontWeight: 800, color: 'var(--primary)' }}>
+                {fmt2(job.total)} <span style={{ fontSize: 14, fontWeight: 500 }}>฿</span>
+              </span>
+            </div>
+            {job.wht && (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, color: 'var(--red)', fontSize: 13 }}>
+                  <span>ภาษีหัก ณ ที่จ่าย 1%</span>
+                  <span className="mono">− {fmt2(job.total * 0.01)} ฿</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line)' }}>
+                  <span style={{ fontWeight: 700, fontSize: 14 }}>สุทธิจ่าย</span>
+                  <span className="mono" style={{ fontSize: 26, fontWeight: 800, color: 'var(--primary)' }}>
+                    {fmt2(job.total * 0.99)} <span style={{ fontSize: 14, fontWeight: 500 }}>฿</span>
+                  </span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Section 3: ธนาคาร */}
@@ -774,8 +868,7 @@ function JobDetailDrawer({ job, onClose }: { job: SubJob; onClose: () => void })
 // ─── Tab 3: ประวัติการจ้าง ────────────────────────────────────────────────────
 
 function SubHistoryTab() {
-  const [tick, setTick] = useState(0)
-  const all = useMemo(() => { void tick; return db.getAll<SubJob>('subJobs') }, [tick])
+  const { data: all = [] } = useList<SubJob>('sub_jobs')
   const [plateF, setPlateF] = useState('all')
   const [monthF, setMonthF] = useState('')
   const [statusF, setStatusF] = useState('all')
@@ -915,7 +1008,7 @@ function SubHistoryTab() {
         <PayConfirmModal
           job={payJob}
           onClose={() => setPayJob(null)}
-          onPaid={() => setTick(n => n + 1)}
+          onPaid={() => {}}
         />
       )}
     </div>
@@ -934,10 +1027,29 @@ interface DriverActionProps {
 
 function DriverActionMenu({ driver, isAdmin, onEdit, onDelete, onChanged }: DriverActionProps) {
   const [open, setOpen] = useState(false)
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const updateDriver = useUpdate<SubDriver>('sub_drivers')
 
-  const toggleStatus = () => {
-    db.update<SubDriver>('subDrivers', driver.id, {
-      status: driver.status === 'active' ? 'inactive' : 'active',
+  const MENU_W = 180
+  const toggle = () => {
+    if (open) { setOpen(false); return }
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) {
+      const menuH = isAdmin ? 150 : 44
+      const openUp = r.bottom + menuH > window.innerHeight && r.top - menuH > 0
+      setCoords({
+        top: openUp ? r.top - menuH - 4 : r.bottom + 4,
+        left: Math.max(8, r.right - MENU_W),
+      })
+    }
+    setOpen(true)
+  }
+
+  const toggleStatus = async () => {
+    await updateDriver.mutateAsync({
+      id: driver.id,
+      patch: { status: driver.status === 'active' ? 'inactive' : 'active' },
     })
     setOpen(false)
     onChanged()
@@ -945,16 +1057,16 @@ function DriverActionMenu({ driver, isAdmin, onEdit, onDelete, onChanged }: Driv
 
   return (
     <div style={{ position: 'relative' }}>
-      <button className="btn ghost icon sm" onClick={() => setOpen(o => !o)}>
+      <button ref={btnRef} className="btn ghost icon sm" onClick={toggle}>
         <Icon name="more" size={16} />
       </button>
-      {open && (
+      {open && coords && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 90 }} onClick={() => setOpen(false)} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1090 }} onClick={() => setOpen(false)} />
           <div style={{
-            position: 'absolute', right: 0, top: 32, zIndex: 100,
+            position: 'fixed', top: coords.top, left: coords.left, zIndex: 1100,
             background: '#fff', border: '1px solid var(--line)', borderRadius: 10,
-            boxShadow: '0 4px 16px rgba(0,0,0,.1)', minWidth: 180, padding: 6,
+            boxShadow: '0 4px 16px rgba(0,0,0,.15)', width: MENU_W, padding: 6,
           }}>
             {isAdmin ? (
               <>
@@ -1004,8 +1116,9 @@ function DriverActionMenu({ driver, isAdmin, onEdit, onDelete, onChanged }: Driv
 
 function SubDriversList({ user }: { user?: User }) {
   const isAdmin = user?.role === 'admin'
-  const [tick, setTick] = useState(0)
-  const drivers = useMemo(() => { void tick; return db.getAll<SubDriver>('subDrivers') }, [tick])
+  const { data: drivers = [] } = useList<SubDriver>('sub_drivers')
+  const { data: allJobs = [] } = useList<SubJob>('sub_jobs')
+  const deleteDriver = useDelete('sub_drivers')
   const [q, setQ] = useState('')
   const [editing, setEditing] = useState<SubDriver | null>(null)
   const [addNew, setAddNew] = useState(false)
@@ -1014,17 +1127,16 @@ function SubDriversList({ user }: { user?: User }) {
   const filtered = drivers.filter(d => !q || d.name.toLowerCase().includes(q.toLowerCase()) || d.phone.includes(q) || d.plate.toLowerCase().includes(q.toLowerCase()))
   const today = new Date()
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleting) return
-    const openJobs = db.getAll<SubJob>('subJobs').filter(j => j.driverId === deleting.id && j.status !== 'paid')
+    const openJobs = allJobs.filter(j => j.driverId === deleting.id && j.status !== 'paid')
     if (openJobs.length > 0) {
       alert(`ไม่สามารถลบได้ — คนขับมีงานค้างอยู่ ${openJobs.length} งาน`)
       setDeleting(null)
       return
     }
-    db.remove('subDrivers', deleting.id)
+    await deleteDriver.mutateAsync(deleting.id)
     setDeleting(null)
-    setTick(n => n + 1)
   }
 
   return (
@@ -1125,7 +1237,7 @@ function SubDriversList({ user }: { user?: User }) {
                       isAdmin={isAdmin}
                       onEdit={() => setEditing(d)}
                       onDelete={() => setDeleting(d)}
-                      onChanged={() => setTick(n => n + 1)}
+                      onChanged={() => {}}
                     />
                   </td>
                 </tr>
@@ -1146,14 +1258,14 @@ function SubDriversList({ user }: { user?: User }) {
         <DriverEditModal
           driver={editing}
           onClose={() => setEditing(null)}
-          onSaved={() => setTick(n => n + 1)}
+          onSaved={() => {}}
         />
       )}
       {addNew && (
         <DriverEditModal
           driver={null}
           onClose={() => setAddNew(false)}
-          onSaved={() => setTick(n => n + 1)}
+          onSaved={() => {}}
         />
       )}
       {deleting && (

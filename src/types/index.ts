@@ -53,7 +53,7 @@ export interface Vehicle {
   tax: string
   insurance: string
   dispatchPermit: string
-  group?: 'INTERNAL' | 'TRANSPORT'
+  groupKind?: 'INTERNAL' | 'TRANSPORT'
 }
 
 export interface Customer {
@@ -314,8 +314,8 @@ export interface StockItem {
   code: string
   name: string
   category: string
-  in: number
-  out: number
+  qtyIn: number
+  qtyOut: number
   qty: number
   unit: string
   unitCost: number
@@ -386,6 +386,7 @@ export interface SubJob {
   total: number
   status: string
   bank: string
+  wht?: boolean
 }
 
 export interface ActivityLog {

@@ -214,12 +214,37 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
               </select>
             </Field>
             <Field label="เลือกคนขับ *">
-              <select value={driverId} onChange={e => setDriverId(e.target.value)}>
-                <option value="">-- เลือก --</option>
+              <select
+                value={driverId}
+                onChange={e => setDriverId(e.target.value)}
+                disabled={!vehicleId}
+                style={{
+                  background: vehicle?.driverId && driverId === vehicle.driverId ? '#EFF6FF' : undefined,
+                  borderColor: vehicle?.driverId && driverId === vehicle.driverId ? '#BFDBFE' : undefined,
+                }}
+              >
+                <option value="">{vehicleId ? '-- เลือกคนขับ --' : 'เลือกรถก่อน'}</option>
                 {drivers.map(d => (
-                  <option key={d.id} value={d.id}>{d.name} ({d.code})</option>
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.code}){d.id === vehicle?.driverId ? ' ⭐ ประจำรถ' : ''}
+                  </option>
                 ))}
               </select>
+              {vehicleId && vehicle?.driverId && driverId === vehicle.driverId && (
+                <div style={{ fontSize: 11, color: '#1D4ED8', marginTop: 4 }}>
+                  ✓ ซิงค์อัตโนมัติจากทะเบียน {vehicle.plate}
+                </div>
+              )}
+              {vehicleId && driverId && vehicle?.driverId && driverId !== vehicle.driverId && (
+                <div style={{ fontSize: 11, color: '#B45309', marginTop: 4 }}>
+                  ⚠ ไม่ใช่คนขับประจำรถ (ประจำรถ: {employees.find(e => e.id === vehicle.driverId)?.name ?? '—'})
+                </div>
+              )}
+              {vehicleId && !vehicle?.driverId && (
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                  รถคันนี้ยังไม่ได้กำหนดคนขับประจำ
+                </div>
+              )}
             </Field>
           </div>
           <div className="grid-2" style={{ gap: 14, marginBottom: 14 }}>
