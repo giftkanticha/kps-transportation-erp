@@ -861,6 +861,9 @@ function PayConfirmModal({
 function ExpFinance() {
   const { data: headers = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: partners = [] } = useList<Partner>('partners')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: stocks = [] } = useList<StockItem>('stock_items')
+  const [editing, setEditing] = useState<ExpenseHeader | null>(null)
 
   const today = new Date('2026-05-17')
   const unpaidHeaders = headers.filter((h) => !h.paid)
@@ -981,13 +984,18 @@ function ExpFinance() {
                       </span>
                     </td>
                     <td>
-                      <button
-                        className="btn sm"
-                        style={{ background: 'var(--green)', color: '#fff', borderColor: 'var(--green)' }}
-                        onClick={() => setPayTarget(h)}
-                      >
-                        <Icon name="money" size={12} /> บันทึกชำระ
-                      </button>
+                      <div className="row" style={{ gap: 6 }}>
+                        <button className="btn sm" onClick={() => setEditing(h)} title="แก้ไขรายการ/ราคา">
+                          <Icon name="edit" size={12} /> แก้ไข
+                        </button>
+                        <button
+                          className="btn sm"
+                          style={{ background: 'var(--green)', color: '#fff', borderColor: 'var(--green)' }}
+                          onClick={() => setPayTarget(h)}
+                        >
+                          <Icon name="money" size={12} /> บันทึกชำระ
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -1010,6 +1018,17 @@ function ExpFinance() {
           partner={partners.find((p) => p.id === payTarget.partnerId)}
           onClose={() => setPayTarget(null)}
           onPaid={() => {}}
+        />
+      )}
+
+      {editing && (
+        <ExpenseEditModal
+          header={editing}
+          vehicles={vehicles}
+          partners={partners}
+          stocks={stocks}
+          onClose={() => setEditing(null)}
+          onSaved={() => setEditing(null)}
         />
       )}
     </div>
