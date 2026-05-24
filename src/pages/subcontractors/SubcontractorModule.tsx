@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import type { SubDriver, SubJob, User, Vehicle } from '../../types'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
@@ -960,7 +960,24 @@ interface DriverActionProps {
 
 function DriverActionMenu({ driver, isAdmin, onEdit, onDelete, onChanged }: DriverActionProps) {
   const [open, setOpen] = useState(false)
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
   const updateDriver = useUpdate<SubDriver>('sub_drivers')
+
+  const MENU_W = 180
+  const toggle = () => {
+    if (open) { setOpen(false); return }
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) {
+      const menuH = isAdmin ? 150 : 44
+      const openUp = r.bottom + menuH > window.innerHeight && r.top - menuH > 0
+      setCoords({
+        top: openUp ? r.top - menuH - 4 : r.bottom + 4,
+        left: Math.max(8, r.right - MENU_W),
+      })
+    }
+    setOpen(true)
+  }
 
   const toggleStatus = async () => {
     await updateDriver.mutateAsync({
@@ -973,16 +990,16 @@ function DriverActionMenu({ driver, isAdmin, onEdit, onDelete, onChanged }: Driv
 
   return (
     <div style={{ position: 'relative' }}>
-      <button className="btn ghost icon sm" onClick={() => setOpen(o => !o)}>
+      <button ref={btnRef} className="btn ghost icon sm" onClick={toggle}>
         <Icon name="more" size={16} />
       </button>
-      {open && (
+      {open && coords && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 90 }} onClick={() => setOpen(false)} />
+          <div style={{ position: 'fixed', inset: 0, zIndex: 1090 }} onClick={() => setOpen(false)} />
           <div style={{
-            position: 'absolute', right: 0, top: 32, zIndex: 100,
+            position: 'fixed', top: coords.top, left: coords.left, zIndex: 1100,
             background: '#fff', border: '1px solid var(--line)', borderRadius: 10,
-            boxShadow: '0 4px 16px rgba(0,0,0,.1)', minWidth: 180, padding: 6,
+            boxShadow: '0 4px 16px rgba(0,0,0,.15)', width: MENU_W, padding: 6,
           }}>
             {isAdmin ? (
               <>
