@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info } from '../../components/ui'
@@ -643,7 +643,7 @@ function ExpenseEditModal({
   partners: Partner[]
   stocks: StockItem[]
 }) {
-  const { data: allLines = [] } = useList<ExpenseLine>('expense_lines')
+  const { data: allLines = [], isLoading } = useList<ExpenseLine>('expense_lines')
   const updateHeader = useUpdate<ExpenseHeader>('expense_headers')
   const insertLine = useInsert<ExpenseLine>('expense_lines')
   const deleteLine = useDelete('expense_lines')
@@ -662,8 +662,14 @@ function ExpenseEditModal({
     paid: header.paid ? 'paid' : 'unpaid',
     dueDate: header.dueDate,
   })
-  const [lines, setLines] = useState<LineItem[]>(
-    oldLines.map((l) => ({
+  // Existing lines load asynchronously via useList — initialise the editable
+  // rows once the query has resolved (otherwise they'd capture an empty list).
+  const [lines, setLines] = useState<LineItem[]>([])
+  const linesInited = useRef(false)
+  useEffect(() => {
+    if (linesInited.current || isLoading) return
+    linesInited.current = true
+    setLines(oldLines.map((l) => ({
       id: l.id,
       invoiceNo: l.invoiceNo,
       item: l.item,
@@ -672,8 +678,8 @@ function ExpenseEditModal({
       unitPrice: l.unitPrice,
       note: l.note,
       stockItemId: l.stockItemId,
-    })),
-  )
+    })))
+  }, [isLoading, oldLines])
 
   const handleSave = async () => {
     if (!hdr.vehicleId || !hdr.partnerId) {
@@ -1082,6 +1088,46 @@ function SellPriceCell({ item, onSaved }: { item: StockItem; onSaved: () => void
   )
 }
 
+function ReorderCell({ item, onSaved }: { item: StockItem; onSaved: () => void }) {
+  const updateStock = useUpdate<StockItem>('stock_items')
+  const [editing, setEditing] = useState(false)
+  const [val, setVal] = useState('')
+
+  const start = () => { setVal(String(item.reorderAt ?? 0)); setEditing(true) }
+  const save = async () => {
+    const n = parseFloat(val)
+    await updateStock.mutateAsync({ id: item.id, patch: { reorderAt: isNaN(n) ? 0 : n } })
+    setEditing(false)
+    onSaved()
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        type="number"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+        style={{ width: 80, textAlign: 'right', padding: '3px 8px', borderRadius: 6, border: '1px solid var(--primary)', fontSize: 12, fontFamily: 'var(--mono)' }}
+        placeholder="0"
+      />
+    )
+  }
+
+  return (
+    <div
+      onClick={start}
+      title="คลิกเพื่อตั้งจุดเตือนสต๊อกต่ำ"
+      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}
+    >
+      <span className="mono">{item.reorderAt ?? 0}</span>
+      <span style={{ color: 'var(--text-muted)', opacity: 0.5 }}><Icon name="edit" size={11} /></span>
+    </div>
+  )
+}
+
 function ExpStock() {
   const { data: stock = [] } = useList<StockItem>('stock_items')
   const { data: receipts = [] } = useList<StockReceipt>('stock_receipts')
@@ -1378,6 +1424,7 @@ function ExpStock() {
                 <th style={{ width: 60 }}>ลำดับ</th>
                 <th>รายการสินค้า</th>
                 <th className="right">จำนวนคงเหลือ</th>
+                <th className="right">จุดเตือนต่ำ</th>
                 <th className="right">ราคาทุน / หน่วย</th>
                 <th className="right" style={{ color: '#0369A1' }}>ราคาขาย / หน่วย</th>
                 <th className="right">มูลค่ารวม</th>
@@ -1397,6 +1444,9 @@ function ExpStock() {
                   >
                     {s.qty} <span className="muted" style={{ fontSize: 11, marginLeft: 4 }}>{s.unit}</span>
                   </td>
+                  <td className="num right">
+                    <ReorderCell item={s} onSaved={() => {}} />
+                  </td>
                   <td className="num right">{db.fmt(s.unitCost)} ฿</td>
                   <td className="num right" style={{ color: '#0369A1' }}>
                     <SellPriceCell item={s} onSaved={() => {}} />
@@ -1407,7 +1457,7 @@ function ExpStock() {
                 </tr>
               ))}
               <tr style={{ background: 'var(--green-50)', fontWeight: 700 }}>
-                <td colSpan={5} className="right">
+                <td colSpan={6} className="right">
                   มูลค่าสต็อครวม
                 </td>
                 <td className="num right" style={{ fontSize: 15, color: 'var(--primary)' }}>
