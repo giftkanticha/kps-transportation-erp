@@ -66,6 +66,8 @@ interface DriverEditModalProps {
   onSaved: () => void
 }
 
+const SUB_VEHICLE_TYPES = ['4ล้อ', '6ล้อ', '10ล้อ', '18ล้อ', '22ล้อ', 'ตู้คอนเทนเนอร์', 'พ่วงข้าง']
+
 function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
   const isNew = !driver
   const { data: allDrivers = [] } = useList<SubDriver>('sub_drivers')
@@ -79,6 +81,9 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
         }, 0) + 1,
       ).padStart(3, '0')
     : driver!.code
+
+  const initialType = driver?.vehicleTypes?.[0] ?? ''
+  const initialIsCustom = !!initialType && !SUB_VEHICLE_TYPES.includes(initialType)
 
   const [form, setForm] = useState({
     code: nextCode,
@@ -96,6 +101,8 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
     truckDump: driver?.truckDump ?? 'no-dump' as 'dump' | 'no-dump',
     cpAccess: driver?.cpAccess ?? 'no' as 'yes' | 'no',
   })
+  const [vehicleType, setVehicleType] = useState(initialIsCustom ? 'อื่นๆ' : initialType)
+  const [customVehicleType, setCustomVehicleType] = useState(initialIsCustom ? initialType : '')
 
   const set = <K extends keyof typeof form>(k: K, v: typeof form[K]) =>
     setForm(f => ({ ...f, [k]: v }))
@@ -105,7 +112,8 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
       alert('กรุณากรอก ชื่อ, ทะเบียนรถ และเบอร์โทร')
       return
     }
-    const payload = { ...form, vehicleTypes: driver?.vehicleTypes ?? [] }
+    const finalType = vehicleType === 'อื่นๆ' ? customVehicleType.trim() : vehicleType
+    const payload = { ...form, vehicleTypes: finalType ? [finalType] : [] } as Partial<SubDriver>
     try {
       if (isNew) {
         await insertDriver.mutateAsync(payload)
@@ -144,6 +152,21 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
             </Field>
             <Field label="ทะเบียนรถ *">
               <input value={form.plate} onChange={e => set('plate', e.target.value)} placeholder="เช่น ABC-1234" />
+            </Field>
+            <Field label="ประเภทรถ">
+              <select value={vehicleType} onChange={e => setVehicleType(e.target.value)}>
+                <option value="">-- เลือกประเภทรถ --</option>
+                {SUB_VEHICLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                <option value="อื่นๆ">อื่นๆ (ระบุเอง)</option>
+              </select>
+              {vehicleType === 'อื่นๆ' && (
+                <input
+                  value={customVehicleType}
+                  onChange={e => setCustomVehicleType(e.target.value)}
+                  placeholder="ระบุประเภทรถ เช่น พ่วง 24 ล้อ"
+                  style={{ marginTop: 8 }}
+                />
+              )}
             </Field>
             <Field label="เบอร์โทรศัพท์ *">
               <input value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="เช่น 081-234-5678" />
@@ -369,13 +392,10 @@ function SubOpenForm() {
                 onChange={e => { set('category', e.target.value); setCategoryAutoFilled(false) }}
               >
                 <option value="">-- เลือกประเภทรถ --</option>
-                <option>4ล้อ</option>
-                <option>6ล้อ</option>
-                <option>10ล้อ</option>
-                <option>18ล้อ</option>
-                <option>22ล้อ</option>
-                <option>ตู้คอนเทนเนอร์</option>
-                <option>พ่วงข้าง</option>
+                {SUB_VEHICLE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                {form.category && !SUB_VEHICLE_TYPES.includes(form.category) && (
+                  <option value={form.category}>{form.category}</option>
+                )}
               </select>
             </div>
             {categoryAutoFilled && form.category && (
