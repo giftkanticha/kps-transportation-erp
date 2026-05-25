@@ -358,20 +358,8 @@ function AlertCard({ alert, onComplete }: AlertCardProps) {
 
       <button
         onClick={onComplete}
-        style={{
-          background: 'var(--primary)',
-          color: '#fff',
-          border: 'none',
-          padding: '8px 14px',
-          borderRadius: 6,
-          fontSize: 13,
-          fontWeight: 500,
-          cursor: 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          alignSelf: 'flex-start',
-        }}
+        className="btn primary sm"
+        style={{ alignSelf: 'flex-start' }}
       >
         <Icon name="check" size={14} /> ดำเนินการเรียบร้อย
       </button>

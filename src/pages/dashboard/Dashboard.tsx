@@ -568,11 +568,8 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                       </div>
                     </div>
                     <button
-                      style={{
-                        background: isCritical ? '#EF4444' : '#3B82F6', color: '#fff',
-                        border: 'none', borderRadius: 7, padding: '5px 14px',
-                        fontSize: 12.5, fontWeight: 600, cursor: 'pointer', flexShrink: 0,
-                      }}
+                      className={`btn sm ${isCritical ? 'danger solid' : 'primary'}`}
+                      style={{ flexShrink: 0 }}
                       onClick={() => setRegModal(reg)}
                     >
                       {isCritical ? '⚠️ ต่อด่วน' : 'ต่อเลย'}
