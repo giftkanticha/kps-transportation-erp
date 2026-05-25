@@ -1,9 +1,11 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db } from '../../lib/db'
-import { useList, useUpdate, useInsert } from '../../hooks/useTable'
+import { useQueryClient } from '@tanstack/react-query'
+import { useList, useUpdate } from '../../hooks/useTable'
+import { callRpc } from '../../lib/crud'
 import { Icon } from '../../components/ui'
 import { can } from '../../lib/permissions'
-import type { Vehicle, Maintenance, TaskCompletion, EditApprovalRequest, User } from '../../types'
+import type { Vehicle, Maintenance, EditApprovalRequest, User } from '../../types'
 
 const TODAY = new Date('2026-05-17')
 const SOON_DAYS = 30
@@ -135,65 +137,25 @@ interface NextRoundForm {
 
 interface CompleteModalProps {
   alert: AlertItem
-  user: User
   onClose: () => void
   onSuccess: () => void
   onError: (msg: string) => void
 }
 
-interface SaveDeps {
-  userId: string
-  updateMaint: (args: { id: string; patch: Partial<Maintenance> }) => Promise<unknown>
-  updateVehicle: (args: { id: string; patch: Partial<Vehicle> }) => Promise<unknown>
-  insertTask: (row: Partial<TaskCompletion>) => Promise<unknown>
-}
-
-async function saveNextRound(alert: AlertItem, form: NextRoundForm, deps: SaveDeps): Promise<void> {
-  const patch: Partial<Vehicle> = {}
-
-  if (alert.kind === 'tax' && form.nextDate) patch.tax = form.nextDate
-  if (alert.kind === 'permit' && form.nextDate) patch.dispatchPermit = form.nextDate
-  if (alert.kind === 'insurance' && form.nextDate) patch.insurance = form.nextDate
+// Validates renewal input (throws on bad date/mileage).
+function validateRenewal(alert: AlertItem, form: NextRoundForm): void {
   if (alert.kind === 'mileage' && form.nextMileage) {
     const n = Number(form.nextMileage)
     if (isNaN(n) || n <= 0) throw new Error('เลขไมล์ไม่ถูกต้อง')
-    patch.nextServiceKm = n
   }
-  if (alert.kind === 'repair' && form.nextMaintenance) {
-    patch.nextService = form.nextMaintenance
-  }
-
   if (form.nextDate && (alert.kind === 'tax' || alert.kind === 'permit' || alert.kind === 'insurance')) {
     const d = new Date(form.nextDate)
     if (isNaN(d.getTime())) throw new Error('วันที่ไม่ถูกต้อง')
     if (d.getTime() < TODAY.getTime()) throw new Error('วันที่รอบถัดไปต้องเป็นอนาคต')
   }
-
-  if (alert.kind === 'repair' && alert.maintenanceId) {
-    await deps.updateMaint({
-      id: alert.maintenanceId,
-      patch: { status: 'completed', endDate: TODAY.toISOString().slice(0, 10) },
-    })
-  }
-
-  if (Object.keys(patch).length > 0) {
-    await deps.updateVehicle({ id: alert.vehicleId, patch })
-  }
-
-  await deps.insertTask({
-    alertKind: alert.kind,
-    vehicleId: alert.vehicleId,
-    vehiclePlate: alert.plate,
-    completedAt: new Date().toISOString(),
-    userId: deps.userId,
-    nextDate: form.nextDate,
-    nextMileage: form.nextMileage ? Number(form.nextMileage) : null,
-    nextMaintenanceDate: form.nextMaintenance,
-    note: '',
-  })
 }
 
-function CompleteModal({ alert, user, onClose, onSuccess, onError }: CompleteModalProps) {
+function CompleteModal({ alert, onClose, onSuccess, onError }: CompleteModalProps) {
   const [form, setForm] = useState<NextRoundForm>({
     nextDate: '',
     nextMileage: alert.kind === 'mileage' && alert.targetKm
@@ -202,22 +164,30 @@ function CompleteModal({ alert, user, onClose, onSuccess, onError }: CompleteMod
     nextMaintenance: '',
   })
   const [saving, setSaving] = useState(false)
-  const updateMaint = useUpdate<Maintenance>('maintenance')
-  const updateVehicle = useUpdate<Vehicle>('vehicles')
-  const insertTask = useInsert<TaskCompletion>('task_completions')
+  const qc = useQueryClient()
 
   const set = (k: keyof NextRoundForm, v: string) => setForm(f => ({ ...f, [k]: v }))
 
+  // Renewal runs through the complete_renewal SECURITY DEFINER RPC so any
+  // authenticated user (incl. employees) can renew without broad vehicle-edit
+  // rights; it updates only the renewal fields and logs a task_completion.
   const save = async () => {
     if (saving) return
     setSaving(true)
     try {
-      await saveNextRound(alert, form, {
-        userId: user.id,
-        updateMaint: (a) => updateMaint.mutateAsync(a),
-        updateVehicle: (a) => updateVehicle.mutateAsync(a),
-        insertTask: (r) => insertTask.mutateAsync(r),
+      validateRenewal(alert, form)
+      await callRpc('complete_renewal', {
+        p_vehicle_id: alert.vehicleId,
+        p_kind: alert.kind,
+        p_next_date: form.nextDate || '',
+        p_next_mileage: form.nextMileage ? Number(form.nextMileage) : null,
+        p_next_maintenance: form.nextMaintenance || '',
+        p_maintenance_id: alert.maintenanceId || '',
+        p_plate: alert.plate,
       })
+      qc.invalidateQueries({ queryKey: ['vehicles'] })
+      qc.invalidateQueries({ queryKey: ['maintenance'] })
+      qc.invalidateQueries({ queryKey: ['task_completions'] })
       onSuccess()
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'
@@ -804,7 +774,6 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
       {selectedAlert && (
         <CompleteModal
           alert={selectedAlert}
-          user={user}
           onClose={() => setSelectedAlert(null)}
           onSuccess={() => {
             setSelectedAlert(null)

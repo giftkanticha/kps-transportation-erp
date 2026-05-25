@@ -31,3 +31,9 @@ export async function deleteOne(table: string, id: string): Promise<void> {
   const { error } = await supabase.from(table).delete().eq('id', id)
   if (error) throw error
 }
+
+export async function callRpc<T = unknown>(fn: string, args: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.rpc(fn, args)
+  if (error) throw error
+  return data as T
+}
