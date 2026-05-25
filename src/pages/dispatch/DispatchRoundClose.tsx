@@ -1,6 +1,8 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, OtherExpense, FuelTransaction } from '../../types'
+import { useList, useUpdate } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
+import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -90,9 +92,10 @@ function tonToDwInput(weightTon: number | null | undefined, mode: DispatchLeg['p
 function DraftRoundsList({
   setSubject,
 }: { setSubject: (s: unknown) => void }) {
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const employees = db.getAll<Employee>('employees')
-  const drafts = db.getAll<Dispatch>('dispatch').filter(d => d.roundStatus === 'draft')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: dispatches = [] } = useDispatches()
+  const drafts = dispatches.filter(d => d.roundStatus === 'draft')
 
   return (
     <div>
@@ -169,9 +172,15 @@ function CloseForm({
   setSubject,
 }: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
   const [tick, setTick] = useState(0)
-  const round = useMemo(() => db.get<Dispatch>('dispatch', roundId), [roundId, tick])
-  const vehicle = round ? db.get<Vehicle>('vehicles', round.vehicleId ?? '') : undefined
-  const driver = round ? db.get<Employee>('employees', round.driverId ?? '') : undefined
+  const { data: dispatches = [] } = useDispatches()
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: customers = [] } = useList<Customer>('customers')
+  const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
+  const updateDispatch = useUpdate<Dispatch>('dispatch')
+  const round = useMemo(() => dispatches.find(d => d.id === roundId), [dispatches, roundId])
+  const vehicle = vehicles.find(v => v.id === round?.vehicleId)
+  const driver = employees.find(e => e.id === round?.driverId)
 
   const legs = round?.legs ?? []
   const [legStates, setLegStates] = useState<LegCloseState[]>([])
@@ -182,6 +191,7 @@ function CloseForm({
   const [closingFuelLiters, setClosingFuelLiters] = useState('')
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
+  const initedRef = useRef<string | null>(null)
 
   // Fuel transactions linked to this round
   const linkedFuelTxs = useMemo(
@@ -196,9 +206,13 @@ function CloseForm({
   const sumIntermediate = fuelIntermediate.reduce((s, t) => s + t.liters, 0)
   const sumNormal = fuelNormal.reduce((s, t) => s + t.liters, 0)
 
-  // Initialize form from round
+  // Initialize form once the round's data is available (it loads asynchronously
+  // from Supabase). Re-runs when navigating to a different round, but a guard
+  // prevents background refetches of the same round from wiping in-progress edits.
   useEffect(() => {
     if (!round) return
+    if (initedRef.current === round.id) return
+    initedRef.current = round.id
     setLegStates(
       (round.legs ?? []).map(l => ({
         id: l.id || uid('lg'),
@@ -213,7 +227,7 @@ function CloseForm({
     setReturnAt(round.returnAt || nowLocal())
     setOtherExp(round.otherExpenses ?? [])
     setRoundNotes(round.notes || '')
-  }, [roundId])
+  }, [round])
 
   if (!round) {
     return (
@@ -306,7 +320,7 @@ function CloseForm({
     return null
   }
 
-  const submit = (mode: 'draft' | 'close') => {
+  const submit = async (mode: 'draft' | 'close') => {
     if (saving) return
     setSaving(true)
     try {
@@ -322,7 +336,10 @@ function CloseForm({
       let finalKmPerL: number | null = null
 
       if (mode === 'close') {
-        // Create TRIP_CLOSING fuel transaction if liters provided
+        // Create TRIP_CLOSING fuel transaction if liters provided.
+        // NOTE: fuel_transactions is still localStorage-backed until the fuel module
+        // migrates; this write intentionally uses db so the (not-yet-migrated) fuel
+        // ledger stays coherent. The trip↔fuel link is by id and works across stores.
         if (closingL > 0) {
           db.add<FuelTransaction>('fuelTransactions', {
             id: uid('ftx'),
@@ -347,21 +364,39 @@ function CloseForm({
         finalKmPerL = dist && finalLiters ? dist / finalLiters : null
       }
 
-      db.update<Dispatch>('dispatch', round.id, {
-        legs: newLegs,
-        endOdometer: em,
-        distance: dist,
-        returnAt,
-        otherExpenses: otherExp.filter(e => e.label.trim() && (e.amount || 0) !== 0),
-        notes: roundNotes,
-        perDiem: perDiemTotal,
-        revenue,
-        totalAmount: revenue,
-        liters: finalLiters,
-        kmPerL: finalKmPerL,
-        roundStatus: mode === 'close' ? 'closed' : 'draft',
-        status: mode === 'close' ? 'completed' : round.status,
-        progress: mode === 'close' ? 100 : round.progress,
+      // Persist each leg's closing data to its dispatch_legs row.
+      await Promise.all(
+        newLegs.map(l =>
+          updateLeg.mutateAsync({
+            id: l.id as string,
+            patch: {
+              deliveredWeight: l.deliveredWeight,
+              amount: l.amount,
+              perDiem: l.perDiem,
+              notes: l.notes,
+              closed: l.closed,
+            } as Partial<DispatchLeg>,
+          }),
+        ),
+      )
+
+      await updateDispatch.mutateAsync({
+        id: round.id,
+        patch: {
+          endOdometer: em,
+          distance: dist,
+          returnAt,
+          otherExpenses: otherExp.filter(e => e.label.trim() && (e.amount || 0) !== 0),
+          notes: roundNotes,
+          perDiem: perDiemTotal,
+          revenue,
+          totalAmount: revenue,
+          liters: finalLiters,
+          kmPerL: finalKmPerL,
+          roundStatus: mode === 'close' ? 'closed' : 'draft',
+          status: mode === 'close' ? 'completed' : round.status,
+          progress: mode === 'close' ? 100 : round.progress,
+        },
       })
       setTick(t => t + 1)
       if (mode === 'close') {
@@ -455,7 +490,7 @@ function CloseForm({
                     ขา {i + 1} — {l.origin} → {l.destination}
                   </div>
                   <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                    {l.customerId ? db.nameOf('customers', l.customerId) : '—'}
+                    {l.customerId ? (customers.find(c => c.id === l.customerId)?.name ?? '—') : '—'}
                     {' • '}{l.cargoType || '—'}
                     {' • '}<span className="badge" style={{ fontSize: 10.5 }}>{legTypeLabel(l.legType)}</span>
                     {' • '}<span className="badge" style={{ fontSize: 10.5 }}>
