@@ -7,9 +7,10 @@ interface TopbarProps {
   crumb: string
   onLogout: () => void
   onReset: () => void
+  onOpenAlerts: () => void
 }
 
-export function Topbar({ user, crumb, onLogout, onReset }: TopbarProps) {
+export function Topbar({ user, crumb, onLogout, onReset, onOpenAlerts }: TopbarProps) {
   const [open, setOpen] = useState(false)
 
   const roleLabel =
@@ -50,7 +51,7 @@ export function Topbar({ user, crumb, onLogout, onReset }: TopbarProps) {
         <Icon name="globe" size={18} />
       </button>
 
-      <button className="icon-btn" title="แจ้งเตือน">
+      <button className="icon-btn" title="แจ้งเตือน / รออนุมัติ" onClick={onOpenAlerts}>
         <Icon name="bell" size={18} />
         <span className="dot" />
       </button>

@@ -4,7 +4,7 @@ import { Icon } from '../../components/ui'
 import { Field } from '../../components/ui'
 
 export function RegisterPage({ onBack }: { onBack: () => void }) {
-  const [form, setForm] = useState({ email: '', displayName: '', phone: '', password: '', confirm: '' })
+  const [form, setForm] = useState({ email: '', username: '', displayName: '', phone: '', password: '', confirm: '' })
   const [loading, setLoading] = useState(false)
   const [err, setErr]  = useState('')
   const [done, setDone] = useState(false)
@@ -15,7 +15,8 @@ export function RegisterPage({ onBack }: { onBack: () => void }) {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.email || !form.displayName || !form.password) { setErr('กรุณากรอกข้อมูลที่จำเป็น'); return }
+    if (!form.email || !form.username || !form.displayName || !form.password) { setErr('กรุณากรอกข้อมูลที่จำเป็น'); return }
+    if (!/^[a-zA-Z0-9_.]{3,}$/.test(form.username.trim())) { setErr('ชื่อผู้ใช้ต้องยาว ≥ 3 ตัว (a-z, 0-9, _ . เท่านั้น)'); return }
     if (form.password !== form.confirm) { setErr('รหัสผ่านไม่ตรงกัน'); return }
     if (form.password.length < 6) { setErr('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'); return }
     setLoading(true)
@@ -23,7 +24,7 @@ export function RegisterPage({ onBack }: { onBack: () => void }) {
       const { error } = await supabase.auth.signUp({
         email: form.email.trim(),
         password: form.password,
-        options: { data: { display_name: form.displayName.trim(), phone: form.phone.trim() } },
+        options: { data: { display_name: form.displayName.trim(), phone: form.phone.trim(), username: form.username.trim().toLowerCase() } },
       })
       if (error) throw new Error(error.message)
       setDone(true)
@@ -60,6 +61,7 @@ export function RegisterPage({ onBack }: { onBack: () => void }) {
         <p className="muted" style={{ marginTop: 4, fontSize: 13 }}>กรอกข้อมูลเพื่อสร้างบัญชีใหม่</p>
         <form onSubmit={submit} style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Field label="Email *"><input type="email" value={form.email} onChange={set('email')} placeholder="email@example.com" autoFocus /></Field>
+          <Field label="ชื่อผู้ใช้ (สำหรับ login) *"><input value={form.username} onChange={set('username')} placeholder="เช่น somchai" autoComplete="username" /></Field>
           <Field label="ชื่อ-นามสกุล *"><input value={form.displayName} onChange={set('displayName')} placeholder="ชื่อจริง" /></Field>
           <Field label="เบอร์โทร"><input value={form.phone} onChange={set('phone')} placeholder="08x-xxx-xxxx" /></Field>
           <Field label="รหัสผ่าน *"><input type="password" value={form.password} onChange={set('password')} placeholder="อย่างน้อย 6 ตัวอักษร" /></Field>

@@ -11,7 +11,7 @@ const DEMO = [
 
 export function LoginScreen() {
   const { login, loading } = useAuth()
-  const [email,    setEmail]    = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [err,      setErr]      = useState('')
   const [picked,   setPicked]   = useState<string | null>(null)
@@ -21,10 +21,10 @@ export function LoginScreen() {
 
   const submit = async (e?: React.FormEvent) => {
     e?.preventDefault()
-    if (!email)    { setErr('กรุณากรอก Email');    return }
-    if (!password) { setErr('กรุณากรอก Password'); return }
+    if (!identifier) { setErr('กรุณากรอกชื่อผู้ใช้ หรืออีเมล'); return }
+    if (!password)   { setErr('กรุณากรอกรหัสผ่าน'); return }
     setErr('')
-    try { await login(email, password) }
+    try { await login(identifier, password) }
     catch (ex) { setErr((ex as Error).message) }
   }
 
@@ -55,9 +55,9 @@ export function LoginScreen() {
         <p className="muted" style={{ marginTop: 4, fontSize: 13 }}>ยินดีต้อนรับกลับ — กรุณาเข้าสู่ระบบ</p>
 
         <form onSubmit={submit} style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Field label="Email">
-            <input value={email} onChange={e => { setEmail(e.target.value); setErr('') }}
-              placeholder="you@kps.com" autoFocus autoComplete="email" />
+          <Field label="ชื่อผู้ใช้ หรือ อีเมล">
+            <input value={identifier} onChange={e => { setIdentifier(e.target.value); setErr('') }}
+              placeholder="ชื่อผู้ใช้ หรือ you@kps.com" autoFocus autoComplete="username" />
           </Field>
           <Field label="รหัสผ่าน">
             <input type="password" value={password} onChange={e => { setPassword(e.target.value); setErr('') }}
@@ -84,7 +84,7 @@ export function LoginScreen() {
           <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.08em', fontWeight: 600, marginBottom: 10 }}>Demo accounts — คลิกเพื่อใช้</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {DEMO.map(d => (
-              <div key={d.email} onClick={() => { setPicked(d.email); setEmail(d.email); setPassword('kps1234'); setErr('') }}
+              <div key={d.email} onClick={() => { setPicked(d.email); setIdentifier(d.email); setPassword('kps1234'); setErr('') }}
                 style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 6, cursor: 'pointer',
                   background: picked === d.email ? '#fff' : 'transparent',
                   border: picked === d.email ? '1px solid var(--primary-600)' : '1px solid transparent' }}>
