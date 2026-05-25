@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
-import { useList, useUpdate } from '../../hooks/useTable'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction, FuelStock } from '../../types'
 import { Icon, Field } from '../../components/ui'
@@ -171,13 +171,15 @@ function CloseForm({
   setActive,
   setSubject,
 }: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
-  const [tick, setTick] = useState(0)
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: customers = [] } = useList<Customer>('customers')
+  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
   const updateDispatch = useUpdate<Dispatch>('dispatch')
+  const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
+  const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
   const round = useMemo(() => dispatches.find(d => d.id === roundId), [dispatches, roundId])
   const vehicle = vehicles.find(v => v.id === round?.vehicleId)
   const driver = employees.find(e => e.id === round?.driverId)
@@ -195,11 +197,10 @@ function CloseForm({
   const initedRef = useRef<string | null>(null)
   const legsInitedRef = useRef<string | null>(null)
 
-  // Fuel transactions linked to this round
+  // Fuel transactions linked to this round (Supabase ledger).
   const linkedFuelTxs = useMemo(
-    () => db.getAll<FuelTransaction>('fuelTransactions')
-      .filter(t => t.tripId === roundId && t.status !== 'REVERSED'),
-    [roundId, tick],
+    () => allFuelTxs.filter(t => t.tripId === roundId && t.status !== 'REVERSED'),
+    [allFuelTxs, roundId],
   )
   const fuelOpening = linkedFuelTxs.filter(t => t.tripFuelRole === 'TRIP_OPENING')
   const fuelIntermediate = linkedFuelTxs.filter(t => t.tripFuelRole === 'INTERMEDIATE')
@@ -219,10 +220,10 @@ function CloseForm({
   const ledgerFuelPrice = useMemo(() => {
     const stocks = db.getAll<FuelStock>('fuelStock').filter(s => (s.pricePerL || 0) > 0)
     if (stocks.length) return [...stocks].sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0].pricePerL
-    const txs = db.getAll<FuelTransaction>('fuelTransactions').filter(t => (t.pricePerL || 0) > 0 && t.status !== 'REVERSED')
+    const txs = allFuelTxs.filter(t => (t.pricePerL || 0) > 0 && t.status !== 'REVERSED')
     if (txs.length) return [...txs].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0].pricePerL
     return null
-  }, [tick])
+  }, [allFuelTxs])
 
   // Initialize form once the round's data is available (it loads asynchronously
   // from Supabase). Scalar fields init once per round so background refetches
@@ -398,7 +399,7 @@ function CloseForm({
         // liters/price live on the dispatch row (below) and convert here on close.
         if (!hasExternalClosing) {
           if (closingL > 0 && !ownClosingTx) {
-            db.add<FuelTransaction>('fuelTransactions', {
+            await insertFuelTx.mutateAsync({
               id: uid('ftx'),
               date: new Date().toISOString().slice(0, 10),
               vehicleId: round.vehicleId ?? '',
@@ -416,8 +417,9 @@ function CloseForm({
               note: `TRIP_CLOSING สำหรับรอบ ${round.code}`,
             })
           } else if (closingL > 0 && ownClosingTx) {
-            db.update<FuelTransaction>('fuelTransactions', ownClosingTx.id, {
-              liters: closingL, pricePerL: closingPrice, total: closingL * closingPrice,
+            await updateFuelTx.mutateAsync({
+              id: ownClosingTx.id,
+              patch: { liters: closingL, pricePerL: closingPrice, total: closingL * closingPrice },
             })
           }
         }
@@ -463,7 +465,6 @@ function CloseForm({
           progress: mode === 'close' ? 100 : round.progress,
         },
       })
-      setTick(t => t + 1)
       if (mode === 'close') {
         setToast({ kind: 'success', msg: `✅ ปิดรอบ ${round.code} เรียบร้อย${finalKmPerL ? ` · KM/L = ${finalKmPerL.toFixed(2)}` : ''}` })
         setTimeout(() => {

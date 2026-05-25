@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
-import type { FuelStock, FuelTransaction, Vehicle, Dispatch, User } from '../../types'
+import { useList } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
+import type { FuelStock, FuelTransaction, Vehicle, User } from '../../types'
 import { Icon, Field, PrintButton } from '../../components/ui'
 
 const FUEL_SUPPLIERS = [
@@ -155,11 +157,11 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
   const [filterVehicle, setFilterVehicle] = useState('')
   const [filterSupplier, setFilterSupplier] = useState('')
 
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: dispatches = [] } = useDispatches()
+  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const allFuelStock = db.getAll<FuelStock>('fuelStock')
-  const factoryTxs = db.getAll<FuelTransaction>('fuelTransactions')
-    .filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED')
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const dispatches = db.getAll<Dispatch>('dispatch')
+  const factoryTxs = allFuelTxs.filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED')
 
   const rows = type === 'in'
     ? [...allFuelStock].sort((a, b) => b.date.localeCompare(a.date))
@@ -373,14 +375,14 @@ export function FuelStockDashboard() {
   const canAdd = user?.role !== 'driver'
   const canDelete = user?.role === 'admin'
 
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: dispatches = [] } = useDispatches()
+  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const allFuelStock = useMemo(() => db.getAll<FuelStock>('fuelStock'), [tick])
   const factoryTxs = useMemo(
-    () => db.getAll<FuelTransaction>('fuelTransactions')
-      .filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED'),
-    [tick],
+    () => allFuelTxs.filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED'),
+    [allFuelTxs],
   )
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
-  const dispatches = useMemo(() => db.getAll<Dispatch>('dispatch'), [])
 
   // Running balance per record
   const balanceMap = useMemo<Record<string, number>>(() => {
