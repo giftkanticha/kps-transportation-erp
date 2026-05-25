@@ -136,6 +136,10 @@ export interface Dispatch {
   roundStatus?: 'draft' | 'closed'
   returnAt?: string
   otherExpenses?: OtherExpense[]
+  // End-of-round fuel entered on the close screen, persisted on draft so it
+  // survives reopen. The TRIP_CLOSING ledger entry is created on actual close.
+  closingFuelLiters?: number | null
+  closingFuelPrice?: number | null
 }
 
 export interface Maintenance {

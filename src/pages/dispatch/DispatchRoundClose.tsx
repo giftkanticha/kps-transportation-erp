@@ -241,13 +241,10 @@ function CloseForm({
       setReturnAt(round.returnAt || nowLocal())
       setOtherExp(round.otherExpenses ?? [])
       setRoundNotes(round.notes || '')
-      // Restore the closing fuel we saved on a previous draft, so it survives reopen.
-      const ownTx = db.getAll<FuelTransaction>('fuelTransactions').find(
-        t => t.tripId === round.id && t.tripFuelRole === 'TRIP_CLOSING'
-          && t.entryMethod === 'TRIP_CLOSE' && t.status !== 'REVERSED',
-      )
-      setClosingFuelLiters(ownTx ? String(ownTx.liters) : '')
-      setClosingFuelPrice(ownTx ? String(ownTx.pricePerL) : '')
+      // Restore the closing fuel saved on a previous draft (persisted on the
+      // dispatch row itself, so it survives reopen reliably).
+      setClosingFuelLiters(round.closingFuelLiters != null ? String(round.closingFuelLiters) : '')
+      setClosingFuelPrice(round.closingFuelPrice != null ? String(round.closingFuelPrice) : '')
     }
 
     if (legsInitedRef.current !== legSig) {
@@ -394,20 +391,13 @@ function CloseForm({
       let finalLiters: number | null = round.liters
       let finalKmPerL: number | null = null
 
-      // Persist the closing fuel on BOTH draft and close as a single TRIP_CLOSING
-      // entry owned by dispatch close (so a draft remembers it). Skip when the fuel
-      // module already recorded a closing fill — that one is the source of truth.
-      // Price is the real entered/ledger price, never hardcoded.
-      if (!hasExternalClosing) {
-        if (closingL > 0) {
-          if (ownClosingTx) {
-            db.update<FuelTransaction>('fuelTransactions', ownClosingTx.id, {
-              liters: closingL,
-              pricePerL: closingPrice,
-              total: closingL * closingPrice,
-              vehicleId: round.vehicleId ?? '',
-            })
-          } else {
+      if (mode === 'close') {
+        // On actual close, write the closing fuel into the ledger as a single
+        // TRIP_CLOSING entry (the fuel module's source of truth). Skip when the
+        // fuel module already recorded one. Draft never touches the ledger — its
+        // liters/price live on the dispatch row (below) and convert here on close.
+        if (!hasExternalClosing) {
+          if (closingL > 0 && !ownClosingTx) {
             db.add<FuelTransaction>('fuelTransactions', {
               id: uid('ftx'),
               date: new Date().toISOString().slice(0, 10),
@@ -425,14 +415,12 @@ function CloseForm({
               reversalOf: null,
               note: `TRIP_CLOSING สำหรับรอบ ${round.code}`,
             })
+          } else if (closingL > 0 && ownClosingTx) {
+            db.update<FuelTransaction>('fuelTransactions', ownClosingTx.id, {
+              liters: closingL, pricePerL: closingPrice, total: closingL * closingPrice,
+            })
           }
-        } else if (ownClosingTx) {
-          // Liters cleared — drop our entry so stale fuel doesn't linger.
-          db.remove('fuelTransactions', ownClosingTx.id)
         }
-      }
-
-      if (mode === 'close') {
         // Final fuel = INTERMEDIATE + NORMAL + TRIP_CLOSING (NOT TRIP_OPENING)
         finalLiters = totalFuelForKmpl > 0 ? totalFuelForKmpl : round.liters
         finalKmPerL = dist && finalLiters ? dist / finalLiters : null
@@ -468,6 +456,8 @@ function CloseForm({
           cost: mode === 'close' ? fuelCost : round.cost,
           liters: finalLiters,
           kmPerL: finalKmPerL,
+          closingFuelLiters: closingL > 0 ? closingL : null,
+          closingFuelPrice: closingL > 0 ? closingPrice : null,
           roundStatus: mode === 'close' ? 'closed' : 'draft',
           status: mode === 'close' ? 'completed' : round.status,
           progress: mode === 'close' ? 100 : round.progress,
@@ -894,9 +884,9 @@ function CloseForm({
                     : <>⚠️ ยังไม่มีราคาน้ำมัน — ต้นทุนจะเป็น 0 กรุณากรอกราคา/ลิตร</>}
                 </div>
               )}
-              {ownClosingTx && (
+              {(round.closingFuelLiters ?? 0) > 0 && (
                 <div style={{ fontSize: 11, marginTop: 4, color: 'var(--green)' }}>
-                  ✓ บันทึกไว้ในร่างแล้ว · แก้ไขแล้วกดบันทึกซ้ำได้
+                  ✓ บันทึกไว้แล้ว · แก้ไขแล้วกดบันทึกซ้ำได้
                 </div>
               )}
             </>
