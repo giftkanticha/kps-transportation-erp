@@ -101,7 +101,7 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
     try {
       const round = await insertDispatch.mutateAsync({
         code: db.nextRoundCode(dispatches),
-        customerId: '',
+        customerId: null,
         driverId,
         vehicleId,
         subcontractorId: null,

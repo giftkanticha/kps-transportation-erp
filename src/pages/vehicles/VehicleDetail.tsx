@@ -98,7 +98,7 @@ export function VehicleDetail({ setActive, subject }: VehicleDetailProps) {
   const fuel = allFuel.filter(f => f.vehicleId === v.id)
   const maintenance = allMaintenance.filter(m => m.vehicleId === v.id)
   const trips = allTrips.filter(t => t.vehicleId === v.id)
-  const customerName = (id: string) => customers.find(c => c.id === id)?.name ?? '—'
+  const customerName = (id: string | null) => customers.find(c => c.id === id)?.name ?? '—'
 
   const totalFuelCost = fuel.reduce((s, f) => s + f.total, 0)
   const totalRevenue = trips.reduce((s, t) => s + (t.revenue || 0), 0)

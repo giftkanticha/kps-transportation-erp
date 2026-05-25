@@ -113,7 +113,7 @@ export interface OtherExpense {
 export interface Dispatch {
   id: string
   code: string
-  customerId: string
+  customerId: string | null
   driverId: string | null
   vehicleId: string | null
   subcontractorId: string | null
