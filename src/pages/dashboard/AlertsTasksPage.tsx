@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db } from '../../lib/db'
+import { useList, useUpdate, useInsert } from '../../hooks/useTable'
 import { Icon } from '../../components/ui'
 import { can } from '../../lib/permissions'
 import type { Vehicle, Maintenance, TaskCompletion, EditApprovalRequest, User } from '../../types'
@@ -134,12 +135,20 @@ interface NextRoundForm {
 
 interface CompleteModalProps {
   alert: AlertItem
+  user: User
   onClose: () => void
   onSuccess: () => void
   onError: (msg: string) => void
 }
 
-function saveNextRound(alert: AlertItem, form: NextRoundForm): void {
+interface SaveDeps {
+  userId: string
+  updateMaint: (args: { id: string; patch: Partial<Maintenance> }) => Promise<unknown>
+  updateVehicle: (args: { id: string; patch: Partial<Vehicle> }) => Promise<unknown>
+  insertTask: (row: Partial<TaskCompletion>) => Promise<unknown>
+}
+
+async function saveNextRound(alert: AlertItem, form: NextRoundForm, deps: SaveDeps): Promise<void> {
   const patch: Partial<Vehicle> = {}
 
   if (alert.kind === 'tax' && form.nextDate) patch.tax = form.nextDate
@@ -160,30 +169,23 @@ function saveNextRound(alert: AlertItem, form: NextRoundForm): void {
     if (d.getTime() < TODAY.getTime()) throw new Error('วันที่รอบถัดไปต้องเป็นอนาคต')
   }
 
-  const user = db.currentUser()
-  if (!user) throw new Error('ไม่พบข้อมูลผู้ใช้งาน')
-
   if (alert.kind === 'repair' && alert.maintenanceId) {
-    const existing = db.get<Maintenance>('maintenance', alert.maintenanceId)
-    if (!existing) throw new Error('ไม่พบงานซ่อมในระบบ')
-    db.update<Maintenance>('maintenance', alert.maintenanceId, {
-      status: 'completed',
-      endDate: TODAY.toISOString().slice(0, 10),
+    await deps.updateMaint({
+      id: alert.maintenanceId,
+      patch: { status: 'completed', endDate: TODAY.toISOString().slice(0, 10) },
     })
   }
 
   if (Object.keys(patch).length > 0) {
-    const existing = db.get<Vehicle>('vehicles', alert.vehicleId)
-    if (!existing) throw new Error('ไม่พบรถในระบบ')
-    db.update<Vehicle>('vehicles', alert.vehicleId, patch)
+    await deps.updateVehicle({ id: alert.vehicleId, patch })
   }
 
-  db.add<Partial<TaskCompletion>>('taskCompletions', {
+  await deps.insertTask({
     alertKind: alert.kind,
     vehicleId: alert.vehicleId,
     vehiclePlate: alert.plate,
     completedAt: new Date().toISOString(),
-    userId: user.id,
+    userId: deps.userId,
     nextDate: form.nextDate,
     nextMileage: form.nextMileage ? Number(form.nextMileage) : null,
     nextMaintenanceDate: form.nextMaintenance,
@@ -191,7 +193,7 @@ function saveNextRound(alert: AlertItem, form: NextRoundForm): void {
   })
 }
 
-function CompleteModal({ alert, onClose, onSuccess, onError }: CompleteModalProps) {
+function CompleteModal({ alert, user, onClose, onSuccess, onError }: CompleteModalProps) {
   const [form, setForm] = useState<NextRoundForm>({
     nextDate: '',
     nextMileage: alert.kind === 'mileage' && alert.targetKm
@@ -200,14 +202,22 @@ function CompleteModal({ alert, onClose, onSuccess, onError }: CompleteModalProp
     nextMaintenance: '',
   })
   const [saving, setSaving] = useState(false)
+  const updateMaint = useUpdate<Maintenance>('maintenance')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
+  const insertTask = useInsert<TaskCompletion>('task_completions')
 
   const set = (k: keyof NextRoundForm, v: string) => setForm(f => ({ ...f, [k]: v }))
 
-  const save = () => {
+  const save = async () => {
     if (saving) return
     setSaving(true)
     try {
-      saveNextRound(alert, form)
+      await saveNextRound(alert, form, {
+        userId: user.id,
+        updateMaint: (a) => updateMaint.mutateAsync(a),
+        updateVehicle: (a) => updateVehicle.mutateAsync(a),
+        insertTask: (r) => insertTask.mutateAsync(r),
+      })
       onSuccess()
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'
@@ -663,37 +673,42 @@ interface AlertsTasksPageProps {
 }
 
 export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
-  const [tick, setTick] = useState(0)
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
 
+  const { data: editApprovals = [] } = useList<EditApprovalRequest>('edit_approvals')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: maintenance = [] } = useList<Maintenance>('maintenance')
+  const updateApproval = useUpdate<EditApprovalRequest>('edit_approvals')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
+
   const pendingApprovals = useMemo(() => {
     if (!can.reviewApprovals(user.role)) return []
-    return db.getAll<EditApprovalRequest>('editApprovals')
+    return [...editApprovals]
       .filter(r => r.status === 'pending')
       .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
-  }, [tick, user.role])
+  }, [editApprovals, user.role])
 
-  const reviewRequest = (req: EditApprovalRequest, decision: 'approved' | 'rejected') => {
+  const reviewRequest = async (req: EditApprovalRequest, decision: 'approved' | 'rejected') => {
     try {
-      const fresh = db.get<EditApprovalRequest>('editApprovals', req.id)
+      const fresh = editApprovals.find(r => r.id === req.id)
       if (!fresh) throw new Error('ไม่พบคำขอในระบบ')
       if (fresh.status !== 'pending') throw new Error('คำขอนี้ถูกพิจารณาแล้ว')
 
       if (decision === 'approved') {
-        const vehicle = db.get<Vehicle>('vehicles', req.vehicleId)
-        if (!vehicle) throw new Error('ไม่พบรถในระบบ')
-        db.update<Vehicle>('vehicles', req.vehicleId, req.changes)
+        await updateVehicle.mutateAsync({ id: req.vehicleId, patch: req.changes })
       }
 
-      db.update<EditApprovalRequest>('editApprovals', req.id, {
-        status: decision,
-        reviewerId: user.id,
-        reviewerName: user.name,
-        reviewedAt: new Date().toISOString(),
+      await updateApproval.mutateAsync({
+        id: req.id,
+        patch: {
+          status: decision,
+          reviewerId: user.id,
+          reviewerName: user.name,
+          reviewedAt: new Date().toISOString(),
+        },
       })
 
-      setTick(t => t + 1)
       setToast({
         kind: 'success',
         msg: decision === 'approved'
@@ -706,11 +721,7 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
     }
   }
 
-  const alerts = useMemo(() => {
-    const vehicles = db.getAll<Vehicle>('vehicles')
-    const maintenance = db.getAll<Maintenance>('maintenance')
-    return buildAlerts(vehicles, maintenance)
-  }, [tick])
+  const alerts = useMemo(() => buildAlerts(vehicles, maintenance), [vehicles, maintenance])
 
   const grouped = useMemo(() => {
     const map: Record<AlertKind, AlertItem[]> = {
@@ -793,10 +804,10 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
       {selectedAlert && (
         <CompleteModal
           alert={selectedAlert}
+          user={user}
           onClose={() => setSelectedAlert(null)}
           onSuccess={() => {
             setSelectedAlert(null)
-            setTick(t => t + 1)
             setToast({ kind: 'success', msg: 'บันทึกรอบถัดไปเรียบร้อย' })
           }}
           onError={msg => {
