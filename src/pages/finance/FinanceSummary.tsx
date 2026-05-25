@@ -1,18 +1,22 @@
 import { db } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
 import { Icon } from '../../components/ui'
-import type { Dispatch, Expense, FuelRecord, Maintenance, FixedCost } from '../../types'
+import type { Expense, ExpenseHeader, FuelRecord, Maintenance, FixedCost } from '../../types'
 
 export function FinanceSummary() {
-  const dispatch = db.getAll<Dispatch>('dispatch')
-  const expenses = db.getAll<Expense>('expenses')
-  const fuel = db.getAll<FuelRecord>('fuel')
-  const maintenance = db.getAll<Maintenance>('maintenance')
-  const fixed = db.getAll<FixedCost>('fixedCosts').reduce((s, f) => s + f.monthly, 0)
+  const { data: dispatch = [] } = useDispatches()
+  const { data: expenses = [] } = useList<Expense>('expenses')
+  const { data: expenseHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: fuel = [] } = useList<FuelRecord>('fuel_records')
+  const { data: maintenance = [] } = useList<Maintenance>('maintenance')
+  const { data: fixedCosts = [] } = useList<FixedCost>('fixed_costs')
+  const fixed = fixedCosts.reduce((s, f) => s + f.monthly, 0)
 
   const rev = dispatch.reduce((s, t) => s + (t.revenue || 0), 0)
   const fuelC = fuel.reduce((s, f) => s + f.total, 0)
   const mntC = maintenance.reduce((s, m) => s + (m.cost || 0), 0)
-  const expC = expenses.reduce((s, x) => s + x.amount, 0)
+  const expC = expenseHeaders.reduce((s, h) => s + (h.total || 0), 0) + expenses.reduce((s, x) => s + (x.amount || 0), 0)
   const cost = fuelC + mntC + expC + fixed
   const pnl = rev - cost
   const margin = rev > 0 ? (pnl / rev) * 100 : 0

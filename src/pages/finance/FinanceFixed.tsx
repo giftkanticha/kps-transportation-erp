@@ -1,9 +1,11 @@
 import { db } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import { Icon } from '../../components/ui'
-import type { FixedCost } from '../../types'
+import type { FixedCost, Vehicle } from '../../types'
 
 export function FinanceFixed() {
-  const all = db.getAll<FixedCost>('fixedCosts')
+  const { data: all = [] } = useList<FixedCost>('fixed_costs')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const total = all.reduce((s, f) => s + f.monthly, 0)
 
   return (
@@ -40,7 +42,7 @@ export function FinanceFixed() {
                 </td>
                 <td>
                   {f.vehicleId ? (
-                    <span className="mono badge gray">{db.nameOf('vehicles', f.vehicleId)}</span>
+                    <span className="mono badge gray">{vehicles.find(v => v.id === f.vehicleId)?.plate ?? '—'}</span>
                   ) : (
                     <span className="faint">— ทุกคัน —</span>
                   )}
