@@ -38,7 +38,7 @@ const MENU: MenuItem[] = [
     id: 'tires', label: 'ระบบยาง', icon: 'tire', roles: ['admin', 'manager'],
     sub: [
       { id: 'tires', label: 'รายการยางทั้งหมด', emoji: '📋' },
-      { id: 'tires.layout', label: 'ผังยางปัจจุบัน', emoji: '🗺️' },
+      { id: 'tires.layout', label: 'ผังยางปัจจุบัน', emoji: '🛞' },
       { id: 'tires.manage', label: 'จัดการและสลับยาง', emoji: '🔄' },
       { id: 'tires.history', label: 'ประวัติยางรายเส้น', emoji: '🕘' },
       { id: 'tires.scrapped', label: 'ยางหมดสภาพ', emoji: '🗑️' },
