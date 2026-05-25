@@ -35,6 +35,7 @@ import { SettingsCompany } from './pages/settings/SettingsCompany'
 
 const crumbMap: Record<string, string> = {
   dashboard: 'Dashboard',
+  alerts: 'แจ้งเตือน • รออนุมัติ',
   vehicles: 'จัดการรถ',
   'vehicles.add': 'เพิ่มรถใหม่',
   'vehicles.detail': 'รายละเอียดรถ',
@@ -238,6 +239,7 @@ export default function App() {
           crumb={crumbMap[active] ?? 'Dashboard'}
           onLogout={handleLogout}
           onReset={handleReset}
+          onOpenAlerts={() => setActive('alerts')}
         />
         <div className="content">{renderPage()}</div>
       </div>
