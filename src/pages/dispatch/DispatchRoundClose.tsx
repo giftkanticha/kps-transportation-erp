@@ -204,6 +204,12 @@ function CloseForm({
   const fuelOpening = linkedFuelTxs.filter(t => t.tripFuelRole === 'TRIP_OPENING')
   const fuelIntermediate = linkedFuelTxs.filter(t => t.tripFuelRole === 'INTERMEDIATE')
   const fuelClosing = linkedFuelTxs.filter(t => t.tripFuelRole === 'TRIP_CLOSING')
+  // Split closing fills by owner: the one dispatch close manages (TRIP_CLOSE) vs.
+  // any recorded by the fuel module. The fuel-module ones are the source of truth
+  // and shown read-only; our own is editable and persisted on draft + close.
+  const ownClosingTx = fuelClosing.find(t => t.entryMethod === 'TRIP_CLOSE') ?? null
+  const externalClosing = fuelClosing.filter(t => t.entryMethod !== 'TRIP_CLOSE')
+  const hasExternalClosing = externalClosing.length > 0
   const fuelNormal = linkedFuelTxs.filter(t => t.tripFuelRole === 'NORMAL')
   const sumIntermediate = fuelIntermediate.reduce((s, t) => s + t.liters, 0)
   const sumNormal = fuelNormal.reduce((s, t) => s + t.liters, 0)
@@ -235,6 +241,13 @@ function CloseForm({
       setReturnAt(round.returnAt || nowLocal())
       setOtherExp(round.otherExpenses ?? [])
       setRoundNotes(round.notes || '')
+      // Restore the closing fuel we saved on a previous draft, so it survives reopen.
+      const ownTx = db.getAll<FuelTransaction>('fuelTransactions').find(
+        t => t.tripId === round.id && t.tripFuelRole === 'TRIP_CLOSING'
+          && t.entryMethod === 'TRIP_CLOSE' && t.status !== 'REVERSED',
+      )
+      setClosingFuelLiters(ownTx ? String(ownTx.liters) : '')
+      setClosingFuelPrice(ownTx ? String(ownTx.pricePerL) : '')
     }
 
     if (legsInitedRef.current !== legSig) {
@@ -381,30 +394,45 @@ function CloseForm({
       let finalLiters: number | null = round.liters
       let finalKmPerL: number | null = null
 
-      if (mode === 'close') {
-        // Single source of truth for closing fuel: create the TRIP_CLOSING entry in
-        // the fuel ledger only when none is already linked (the fuel module may have
-        // recorded it). Price is the real entered/ledger price — never hardcoded.
-        // The trip↔fuel link is by tripId + tripFuelRole and works across stores.
-        if (closingL > 0 && fuelClosing.length === 0) {
-          db.add<FuelTransaction>('fuelTransactions', {
-            id: uid('ftx'),
-            date: new Date().toISOString().slice(0, 10),
-            vehicleId: round.vehicleId ?? '',
-            liters: closingL,
-            pricePerL: closingPrice,
-            total: closingL * closingPrice,
-            source: 'FACTORY_TANK',
-            tripId: round.id,
-            status: 'TRIP_LINKED',
-            tripFuelRole: 'TRIP_CLOSING',
-            entryMethod: 'TRIP_CLOSE',
-            createdAt: new Date().toISOString(),
-            reversedAt: null,
-            reversalOf: null,
-            note: `TRIP_CLOSING สำหรับรอบ ${round.code}`,
-          })
+      // Persist the closing fuel on BOTH draft and close as a single TRIP_CLOSING
+      // entry owned by dispatch close (so a draft remembers it). Skip when the fuel
+      // module already recorded a closing fill — that one is the source of truth.
+      // Price is the real entered/ledger price, never hardcoded.
+      if (!hasExternalClosing) {
+        if (closingL > 0) {
+          if (ownClosingTx) {
+            db.update<FuelTransaction>('fuelTransactions', ownClosingTx.id, {
+              liters: closingL,
+              pricePerL: closingPrice,
+              total: closingL * closingPrice,
+              vehicleId: round.vehicleId ?? '',
+            })
+          } else {
+            db.add<FuelTransaction>('fuelTransactions', {
+              id: uid('ftx'),
+              date: new Date().toISOString().slice(0, 10),
+              vehicleId: round.vehicleId ?? '',
+              liters: closingL,
+              pricePerL: closingPrice,
+              total: closingL * closingPrice,
+              source: 'FACTORY_TANK',
+              tripId: round.id,
+              status: 'TRIP_LINKED',
+              tripFuelRole: 'TRIP_CLOSING',
+              entryMethod: 'TRIP_CLOSE',
+              createdAt: new Date().toISOString(),
+              reversedAt: null,
+              reversalOf: null,
+              note: `TRIP_CLOSING สำหรับรอบ ${round.code}`,
+            })
+          }
+        } else if (ownClosingTx) {
+          // Liters cleared — drop our entry so stale fuel doesn't linger.
+          db.remove('fuelTransactions', ownClosingTx.id)
         }
+      }
+
+      if (mode === 'close') {
         // Final fuel = INTERMEDIATE + NORMAL + TRIP_CLOSING (NOT TRIP_OPENING)
         finalLiters = totalFuelForKmpl > 0 ? totalFuelForKmpl : round.liters
         finalKmPerL = dist && finalLiters ? dist / finalLiters : null
@@ -815,8 +843,8 @@ function CloseForm({
           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
             เติมปลายรอบ (TRIP_CLOSING) — นับในการคำนวณ
           </div>
-          {fuelClosing.length > 0 ? (
-            fuelClosing.map(t => (
+          {hasExternalClosing ? (
+            externalClosing.map(t => (
               <div
                 key={t.id}
                 style={{
@@ -824,7 +852,7 @@ function CloseForm({
                   padding: '7px 12px', background: '#F0FDF4', borderRadius: 7, marginBottom: 4,
                 }}
               >
-                <span style={{ fontSize: 12 }}>บันทึกแล้ว · {db.thaiDate(t.date)}</span>
+                <span style={{ fontSize: 12 }}>บันทึกจากโมดูลน้ำมัน · {db.thaiDate(t.date)}</span>
                 <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: 'var(--green)' }}>
                   {t.liters.toFixed(2)} L ✓
                 </span>
@@ -864,6 +892,11 @@ function CloseForm({
                   {closingPrice > 0
                     ? <>ต้นทุนน้ำมันปลายรอบ = {closingL.toFixed(2)} ลิตร × {closingPrice.toFixed(2)} = <span className="mono" style={{ fontWeight: 600 }}>{db.thb(closingL * closingPrice)}</span></>
                     : <>⚠️ ยังไม่มีราคาน้ำมัน — ต้นทุนจะเป็น 0 กรุณากรอกราคา/ลิตร</>}
+                </div>
+              )}
+              {ownClosingTx && (
+                <div style={{ fontSize: 11, marginTop: 4, color: 'var(--green)' }}>
+                  ✓ บันทึกไว้ในร่างแล้ว · แก้ไขแล้วกดบันทึกซ้ำได้
                 </div>
               )}
             </>
