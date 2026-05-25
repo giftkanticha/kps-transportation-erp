@@ -14,6 +14,7 @@ interface MenuItem {
 interface SubMenuItem {
   id: string
   label: string
+  emoji?: string
 }
 
 const MENU: MenuItem[] = [
@@ -21,84 +22,84 @@ const MENU: MenuItem[] = [
   {
     id: 'vehicles', label: 'จัดการรถ', icon: 'truck', roles: ['admin', 'manager', 'driver'],
     sub: [
-      { id: 'vehicles', label: 'รายการรถทั้งหมด' },
-      { id: 'vehicles.add', label: 'เพิ่มรถใหม่' },
-      { id: 'vehicles.detail', label: 'รายละเอียดรถ' },
+      { id: 'vehicles', label: 'รายการรถทั้งหมด', emoji: '🚛' },
+      { id: 'vehicles.add', label: 'เพิ่มรถใหม่', emoji: '➕' },
+      { id: 'vehicles.detail', label: 'รายละเอียดรถ', emoji: '🔍' },
     ],
   },
   {
     id: 'employees', label: 'ข้อมูลพนักงาน', icon: 'users', roles: ['admin', 'manager'],
     sub: [
-      { id: 'employees', label: 'รายชื่อพนักงาน' },
-      { id: 'employees.add', label: 'เพิ่มพนักงานใหม่' },
+      { id: 'employees', label: 'รายชื่อพนักงาน', emoji: '👥' },
+      { id: 'employees.add', label: 'เพิ่มพนักงานใหม่', emoji: '➕' },
     ],
   },
   {
     id: 'tires', label: 'ระบบยาง', icon: 'tire', roles: ['admin', 'manager'],
     sub: [
-      { id: 'tires', label: 'รายการยางทั้งหมด' },
-      { id: 'tires.layout', label: 'ผังยางปัจจุบัน' },
-      { id: 'tires.manage', label: 'จัดการและสลับยาง' },
-      { id: 'tires.history', label: 'ประวัติยางรายเส้น' },
-      { id: 'tires.scrapped', label: 'ยางหมดสภาพ' },
+      { id: 'tires', label: 'รายการยางทั้งหมด', emoji: '📋' },
+      { id: 'tires.layout', label: 'ผังยางปัจจุบัน', emoji: '🗺️' },
+      { id: 'tires.manage', label: 'จัดการและสลับยาง', emoji: '🔄' },
+      { id: 'tires.history', label: 'ประวัติยางรายเส้น', emoji: '🕘' },
+      { id: 'tires.scrapped', label: 'ยางหมดสภาพ', emoji: '🗑️' },
     ],
   },
   {
     id: 'fuel', label: 'ระบบน้ำมัน', icon: 'fuel', roles: ['admin', 'manager'],
     sub: [
-      { id: 'fuel', label: '📊 ภาพรวมคลังน้ำมัน' },
-      { id: 'fuel.express', label: '⚡ คีย์ด่วนน้ำมัน' },
-      { id: 'fuel.floating', label: '🟡 น้ำมันลอยรอผูก' },
-      { id: 'fuel.report', label: '📋 รายงานน้ำมันรายเดือน' },
-      { id: 'fuel.summary', label: '📦 สรุปคลังน้ำมันรวม' },
+      { id: 'fuel', label: 'ภาพรวมคลังน้ำมัน', emoji: '📊' },
+      { id: 'fuel.express', label: 'คีย์ด่วนน้ำมัน', emoji: '⚡' },
+      { id: 'fuel.floating', label: 'น้ำมันลอยรอผูก', emoji: '🟡' },
+      { id: 'fuel.report', label: 'รายงานน้ำมันรายเดือน', emoji: '📈' },
+      { id: 'fuel.summary', label: 'สรุปคลังน้ำมันรวม', emoji: '📦' },
     ],
   },
   {
     id: 'dispatch', label: 'งานขนส่ง', icon: 'package', roles: ['admin', 'manager', 'driver'],
     sub: [
-      { id: 'dispatch.open', label: 'เปิดงานขนส่ง' },
-      { id: 'dispatch.close', label: 'ปิดงานขนส่ง' },
-      { id: 'dispatch.report', label: 'รายงานสรุป' },
-      { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน' },
+      { id: 'dispatch.open', label: 'เปิดงานขนส่ง', emoji: '📝' },
+      { id: 'dispatch.close', label: 'ปิดงานขนส่ง', emoji: '✅' },
+      { id: 'dispatch.report', label: 'รายงานสรุป', emoji: '📊' },
+      { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน', emoji: '🕘' },
     ],
   },
   {
     id: 'subcontractors', label: 'รถรับจ้างร่วม', icon: 'truck2', roles: ['admin', 'manager'],
     sub: [
-      { id: 'subcontractors', label: 'เปิดงาน' },
-      { id: 'subcontractors.close', label: 'ปิดงาน' },
-      { id: 'subcontractors.history', label: 'ประวัติการจ้าง' },
-      { id: 'subcontractors.drivers', label: 'คนขับรถร่วม' },
+      { id: 'subcontractors', label: 'เปิดงาน', emoji: '📝' },
+      { id: 'subcontractors.close', label: 'ปิดงาน', emoji: '✅' },
+      { id: 'subcontractors.history', label: 'ประวัติการจ้าง', emoji: '🕘' },
+      { id: 'subcontractors.drivers', label: 'คนขับรถร่วม', emoji: '🧑‍✈️' },
     ],
   },
   {
     id: 'expenses', label: 'ค่าใช้จ่าย', icon: 'wallet', roles: ['admin', 'manager'],
     sub: [
-      { id: 'expenses', label: 'บันทึกค่าใช้จ่าย' },
-      { id: 'expenses.finance', label: 'สถานะการเงิน' },
-      { id: 'expenses.stock', label: 'สต๊อคคลัง KPS' },
-      { id: 'expenses.report', label: 'รายงานสรุป' },
-      { id: 'expenses.vendors', label: 'ทะเบียนร้านค้า/ช่าง' },
+      { id: 'expenses', label: 'บันทึกค่าใช้จ่าย', emoji: '📝' },
+      { id: 'expenses.finance', label: 'สถานะการเงิน', emoji: '💰' },
+      { id: 'expenses.stock', label: 'สต๊อคคลัง KPS', emoji: '📦' },
+      { id: 'expenses.report', label: 'รายงานสรุป', emoji: '📊' },
+      { id: 'expenses.vendors', label: 'ทะเบียนร้านค้า/ช่าง', emoji: '🏪' },
     ],
   },
   {
     id: 'finance', label: 'การเงิน', icon: 'chart', roles: ['admin', 'manager'],
     sub: [
-      { id: 'finance', label: 'P&L รายคัน' },
+      { id: 'finance', label: 'P&L รายคัน', emoji: '💹' },
     ],
   },
   {
     id: 'settings', label: 'ตั้งค่า', icon: 'settings', roles: ['admin'],
     sub: [
-      { id: 'settings.users', label: 'จัดการผู้ใช้งาน' },
-      { id: 'settings.company', label: 'ข้อมูลบริษัท' },
+      { id: 'settings.users', label: 'จัดการผู้ใช้งาน', emoji: '👥' },
+      { id: 'settings.company', label: 'ข้อมูลบริษัท', emoji: '🏢' },
     ],
   },
   {
     id: 'admin', label: 'Admin Panel', icon: 'settings', roles: ['admin'],
     sub: [
-      { id: 'admin.users', label: '👥 จัดการผู้ใช้ + ACL' },
-      { id: 'admin.reset', label: '🔄 รีเซตข้อมูล' },
+      { id: 'admin.users', label: 'จัดการผู้ใช้ + ACL', emoji: '👥' },
+      { id: 'admin.reset', label: 'รีเซตข้อมูล', emoji: '🔄' },
     ],
   },
 ]
@@ -202,7 +203,8 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
                       className={`subnav-item ${active === s.id ? 'active' : ''}`}
                       onClick={() => setActive(s.id)}
                     >
-                      {s.label}
+                      {s.emoji && <span className="emoji">{s.emoji}</span>}
+                      <span>{s.label}</span>
                     </div>
                   ))}
                 </div>

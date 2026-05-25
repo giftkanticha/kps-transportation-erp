@@ -290,36 +290,40 @@ function ExpenseFormBody({
             </Field>
           </div>
 
-          {docCode && (
-            <div style={{ marginTop: 10 }}>
-              <Field label="เลขที่เอกสาร (อัตโนมัติ)">
-                <input
-                  readOnly
-                  value={toBeCode(docCode)}
-                  style={{
-                    background: 'var(--bg-2, #F1F5F9)', color: 'var(--text-muted)',
-                    cursor: 'default', borderRadius: 8, border: '1px solid #E2E8F0',
-                    padding: '8px 14px', fontSize: 13, fontFamily: 'var(--mono)', maxWidth: 280,
-                  }}
-                />
-              </Field>
+          <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            {docCode && (
+              <div style={{ flex: '0 0 260px', minWidth: 220 }}>
+                <Field label="เลขที่เอกสาร (อัตโนมัติ)">
+                  <input
+                    readOnly
+                    value={toBeCode(docCode)}
+                    style={{
+                      width: '100%', height: 44,
+                      background: 'var(--bg-sunk)', color: 'var(--text-muted)',
+                      cursor: 'default', borderRadius: 'var(--r-md)', border: '1px solid var(--line)',
+                      padding: '0 14px', fontSize: 13, fontFamily: 'var(--mono)',
+                    }}
+                  />
+                </Field>
+              </div>
+            )}
+            <div
+              style={{
+                flex: 1, minWidth: 240, height: 44,
+                padding: '0 18px',
+                background: 'var(--primary-50)',
+                borderRadius: 'var(--r-md)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>ยอดรวมสุทธิ</span>
+              <div className="spacer" />
+              <span className="mono" style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary)' }}>
+                {netTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท
+              </span>
             </div>
-          )}
-
-          <div
-            style={{
-              padding: '14px 18px',
-              background: 'var(--primary-50)',
-              borderRadius: 8,
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <span style={{ fontWeight: 500 }}>ยอดรวมสุทธิ:</span>
-            <div className="spacer" />
-            <span className="mono" style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary)' }}>
-              {netTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท
-            </span>
           </div>
         </div>
       </div>
