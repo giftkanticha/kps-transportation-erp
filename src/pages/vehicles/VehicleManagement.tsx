@@ -3,6 +3,7 @@ import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useRealtimeTable } from '../../hooks/useRealtime'
 import type { Vehicle } from '../../types'
 import { SearchInput } from '../../components/ui/SearchInput'
+import { SegmentedFilter } from '../../components/ui/SegmentedFilter'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -342,13 +343,6 @@ export function VehicleManagement() {
 
   const existingPlates = vehicles.map(v => v.plate)
 
-  const pillBtn = (active: boolean): React.CSSProperties => ({
-    padding: '5px 14px', borderRadius: 7, border: 'none', cursor: 'pointer',
-    fontSize: 13, fontWeight: active ? 600 : 400, fontFamily: 'inherit',
-    background: active ? 'var(--primary)' : 'transparent',
-    color: active ? '#fff' : 'var(--text-2)', transition: 'all .15s',
-  })
-
   return (
     <div>
       {/* Header */}
@@ -384,11 +378,15 @@ export function VehicleManagement() {
       {/* Filters */}
       <div className="card no-print" style={{ padding: '12px 16px', marginBottom: 14, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาทะเบียน, ยี่ห้อ..." width={220} />
-        <div style={{ background: '#F1F5F9', borderRadius: 8, padding: 3, display: 'flex', gap: 2 }}>
-          <button style={pillBtn(filterGroup === 'ALL')} onClick={() => setFilterGroup('ALL')}>ทั้งหมด ({stats.total})</button>
-          <button style={pillBtn(filterGroup === 'INTERNAL')} onClick={() => setFilterGroup('INTERNAL')}>🏭 โรงงาน ({stats.internal})</button>
-          <button style={pillBtn(filterGroup === 'TRANSPORT')} onClick={() => setFilterGroup('TRANSPORT')}>🚛 ขนส่ง ({stats.transport})</button>
-        </div>
+        <SegmentedFilter
+          value={filterGroup}
+          onChange={setFilterGroup}
+          options={[
+            { value: 'ALL', label: `ทั้งหมด (${stats.total})` },
+            { value: 'INTERNAL', label: `🏭 โรงงาน (${stats.internal})` },
+            { value: 'TRANSPORT', label: `🚛 ขนส่ง (${stats.transport})` },
+          ]}
+        />
       </div>
 
       {/* Table */}

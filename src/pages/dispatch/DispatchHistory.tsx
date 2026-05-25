@@ -3,7 +3,7 @@ import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import type { Vehicle, Employee, Dispatch } from '../../types'
-import { Icon, SearchInput } from '../../components/ui'
+import { Icon, SearchInput, SegmentedFilter } from '../../components/ui'
 
 interface Props {
   setActive: (id: string) => void
@@ -35,6 +35,9 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
     return all
   }, [dispatch])
+
+  const draftCount = useMemo(() => rounds.filter(d => d.roundStatus === 'draft').length, [rounds])
+  const closedCount = useMemo(() => rounds.filter(d => d.roundStatus === 'closed' || d.status === 'completed').length, [rounds])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -76,11 +79,15 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
             onChange={setQuery}
             placeholder="ค้นหา Job No, ทะเบียนรถ, คนขับ, สินค้า, เส้นทาง..."
           />
-          <select value={status} onChange={e => setStatus(e.target.value as StatusFilter)} style={{ minWidth: 160 }}>
-            <option value="all">ทุกสถานะ</option>
-            <option value="draft">กำลังดำเนินการ</option>
-            <option value="closed">เสร็จสิ้น</option>
-          </select>
+          <SegmentedFilter
+            value={status}
+            onChange={setStatus}
+            options={[
+              { value: 'all', label: `ทั้งหมด (${rounds.length})` },
+              { value: 'draft', label: `กำลังดำเนินการ (${draftCount})` },
+              { value: 'closed', label: `เสร็จสิ้น (${closedCount})` },
+            ]}
+          />
           <span className="muted" style={{ fontSize: 13 }}>{filtered.length} รายการ</span>
         </div>
       </div>
