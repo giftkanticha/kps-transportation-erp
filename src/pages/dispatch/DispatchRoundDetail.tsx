@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
-import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
+import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
+import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
 import type { Vehicle, Employee, Dispatch, DispatchLeg, Customer, FuelRound } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -484,14 +486,19 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
 
 export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const subj = subject as { type?: string; id?: string } | null
-  const [tick, setTick] = useState(0)
+  const { data: dispatches = [] } = useDispatches()
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: customers = [] } = useList<Customer>('customers')
+  const insertLeg = useInsert<DispatchLeg>('dispatch_legs')
+  const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
+  const removeLeg = useDelete('dispatch_legs')
+  const updateDispatch = useUpdate<Dispatch>('dispatch')
+
   const round = useMemo(
-    () => (subj?.id ? db.get<Dispatch>('dispatch', subj.id) : undefined),
-    [subj?.id, tick],
+    () => (subj?.id ? dispatches.find(d => d.id === subj.id) : undefined),
+    [subj?.id, dispatches],
   )
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const employees = db.getAll<Employee>('employees')
-  const customers = db.getAll<Customer>('customers')
 
   const [editingLeg, setEditingLeg] = useState<{ index: number; data: LegFormState } | null>(null)
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null)
@@ -516,20 +523,20 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const totalWeight = legs.reduce((s, l) => s + (l.weight || 0), 0)
   const fuelRound = db.fuelRoundOfDispatch(round.id) as FuelRound | null
 
-  const saveLeg = (form: LegFormState) => {
+  // Legs live in the dispatch_legs table; each save is a row insert/update plus a
+  // revenue recompute on the parent dispatch row. revenue/totalAmount are derived
+  // from the resulting leg set (computed locally to avoid awaiting a refetch).
+  const saveLeg = async (form: LegFormState) => {
     if (!editingLeg) return
     const isReturn = form.legType === 'return'
     // form.weight is in user's chosen unit (กก. or ตัน) → convert to canonical ตัน for storage
     const weightTon = inputWeightToTon(form.weight, form.priceMode)
     const price = Number(form.price) || 0
     const amount = isReturn ? 0 : calcLegAmount(form.priceMode, weightTon, price)
-    const newLeg: DispatchLeg = {
-      id: editingLeg.index >= 0 && legs[editingLeg.index]?.id
-        ? legs[editingLeg.index].id
-        : uid('lg'),
+    const fields = {
       origin: form.origin.trim(),
       destination: form.destination.trim(),
-      customerId: form.customerId || undefined,
+      customerId: form.customerId || null,
       cargo: form.cargo.trim(),
       cargoType: form.cargoType.trim(),
       priceMode: form.priceMode,
@@ -537,36 +544,46 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       price,
       amount,
       legType: form.legType,
-      notes: form.notes.trim() || undefined,
-      deliveredWeight: legs[editingLeg.index]?.deliveredWeight ?? null,
-      perDiem: legs[editingLeg.index]?.perDiem ?? 0,
-      closed: false,
+      notes: form.notes.trim() || null,
+    } as Partial<DispatchLeg>
+    try {
+      let nextLegs: DispatchLeg[]
+      if (editingLeg.index < 0) {
+        const created = await insertLeg.mutateAsync({
+          ...fields,
+          dispatchId: round.id,
+          sortOrder: legs.length,
+          deliveredWeight: null,
+          perDiem: 0,
+          closed: false,
+        })
+        nextLegs = [...legs, created]
+      } else {
+        const existing = legs[editingLeg.index]
+        const updated = await updateLeg.mutateAsync({ id: existing.id as string, patch: fields })
+        nextLegs = legs.map((l, ix) => (ix === editingLeg.index ? updated : l))
+      }
+      const newRevenue = nextLegs.reduce((s, l) => s + (l.amount || 0), 0)
+      await updateDispatch.mutateAsync({ id: round.id, patch: { totalAmount: newRevenue, revenue: newRevenue } })
+      setEditingLeg(null)
+      setToast({ kind: 'success', msg: '✅ บันทึกขาเรียบร้อย' })
+    } catch (e) {
+      setToast({ kind: 'error', msg: '❌ บันทึกไม่สำเร็จ: ' + (e as Error).message })
     }
-    const next = [...legs]
-    if (editingLeg.index < 0) next.push(newLeg)
-    else next[editingLeg.index] = newLeg
-    const newRevenue = next.reduce((s, l) => s + (l.amount || 0), 0)
-    db.update<Dispatch>('dispatch', round.id, {
-      legs: next,
-      totalAmount: newRevenue,
-      revenue: newRevenue,
-    })
-    setEditingLeg(null)
-    setTick(t => t + 1)
-    setToast({ kind: 'success', msg: '✅ บันทึกขาเรียบร้อย' })
   }
 
-  const deleteLeg = (i: number) => {
-    const next = legs.filter((_, ix) => ix !== i)
-    const newRevenue = next.reduce((s, l) => s + (l.amount || 0), 0)
-    db.update<Dispatch>('dispatch', round.id, {
-      legs: next,
-      totalAmount: newRevenue,
-      revenue: newRevenue,
-    })
-    setDeletingIndex(null)
-    setTick(t => t + 1)
-    setToast({ kind: 'success', msg: '✅ ลบขาเรียบร้อย' })
+  const deleteLeg = async (i: number) => {
+    const target = legs[i]
+    try {
+      if (target?.id) await removeLeg.mutateAsync(target.id)
+      const next = legs.filter((_, ix) => ix !== i)
+      const newRevenue = next.reduce((s, l) => s + (l.amount || 0), 0)
+      await updateDispatch.mutateAsync({ id: round.id, patch: { totalAmount: newRevenue, revenue: newRevenue } })
+      setDeletingIndex(null)
+      setToast({ kind: 'success', msg: '✅ ลบขาเรียบร้อย' })
+    } catch (e) {
+      setToast({ kind: 'error', msg: '❌ ลบไม่สำเร็จ: ' + (e as Error).message })
+    }
   }
 
   return (
@@ -692,7 +709,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                       <div style={{ fontSize: 13 }}>{l.origin}</div>
                       <div className="muted" style={{ fontSize: 11.5 }}>→ {l.destination}</div>
                     </td>
-                    <td>{l.customerId ? db.nameOf('customers', l.customerId) : <span className="muted">—</span>}</td>
+                    <td>{l.customerId ? (customers.find(c => c.id === l.customerId)?.name ?? '—') : <span className="muted">—</span>}</td>
                     <td>{l.cargoType || <span className="muted">—</span>}</td>
                     <td><span className="badge" style={{ fontSize: 11 }}>{legTypeLabel(l.legType)}</span></td>
                     <td className="num">{(l.weight || 0).toFixed(2)}</td>
