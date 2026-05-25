@@ -1,9 +1,30 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { db } from '../../lib/db'
-import { useList, useUpdate, useDelete } from '../../hooks/useTable'
+import { db, uid } from '../../lib/db'
+import { useList, useUpdate, useDelete, useInsert } from '../../hooks/useTable'
 import { useRealtimeTable } from '../../hooks/useRealtime'
-import type { Vehicle, Employee, User } from '../../types'
+import { can } from '../../lib/permissions'
+import type { Vehicle, Employee, User, EditApprovalRequest, VehicleChangeField } from '../../types'
 import { Icon, StatusBadge, Field } from '../../components/ui'
+
+const FIELD_LABELS: Record<string, string> = {
+  plate: 'ทะเบียน', brand: 'ยี่ห้อ', year: 'ปี', type: 'ประเภท', groupKind: 'กลุ่ม',
+  status: 'สถานะ', driverId: 'คนขับ', odometer: 'เลขไมล์', nextServiceKm: 'ไมล์ครบกำหนดเซอร์วิส',
+  fuel: 'น้ำมัน (%)', purchaseDate: 'วันที่ซื้อ', lastService: 'เซอร์วิสล่าสุด',
+  nextService: 'เซอร์วิสครั้งถัดไป', tax: 'ภาษี', insurance: 'ประกัน', dispatchPermit: 'ใบอนุญาต',
+}
+function buildChangeFields(before: Vehicle, after: Partial<Vehicle>): VehicleChangeField[] {
+  const out: VehicleChangeField[] = []
+  const beforeRec = before as unknown as Record<string, unknown>
+  const afterRec = after as unknown as Record<string, unknown>
+  for (const key of Object.keys(after)) {
+    const b = beforeRec[key]
+    const a = afterRec[key]
+    if (String(b ?? '') !== String(a ?? '')) {
+      out.push({ key, label: FIELD_LABELS[key] ?? key, before: String(b ?? ''), after: String(a ?? '') })
+    }
+  }
+  return out
+}
 
 interface VehiclesPageProps {
   setActive: (id: string) => void
@@ -99,17 +120,20 @@ interface VehicleEditForm {
 
 function VehicleEditModal({
   vehicle,
+  user,
   onClose,
   onSuccess,
   onError,
 }: {
   vehicle: Vehicle
+  user: User
   onClose: () => void
   onSuccess: (msg: string) => void
   onError: (msg: string) => void
 }) {
   const { data: employees = [] } = useList<Employee>('employees')
   const updateVehicle = useUpdate<Vehicle>('vehicles')
+  const insertApproval = useInsert<EditApprovalRequest>('edit_approvals')
   const isCustomType = !VEHICLE_TYPES.includes(vehicle.type)
   const [form, setForm] = useState<VehicleEditForm>({
     plate: vehicle.plate,
@@ -145,34 +169,67 @@ function VehicleEditModal({
     if (!form.brand.trim()) { onError('กรุณากรอกยี่ห้อรถ'); return }
     setSaving(true)
     const effectiveType = form.type === 'อื่นๆ' ? (form.customType.trim() || 'อื่นๆ') : form.type
-    updateVehicle.mutate(
-      {
-        id: vehicle.id,
-        patch: {
-          plate: form.plate.trim(),
-          brand: form.brand.trim(),
-          year: Number(form.year) || vehicle.year,
-          type: effectiveType,
-          groupKind: form.groupKind,
-          status: form.status,
-          driverId: form.driverId || null,
-          odometer: Number(form.odometer) || 0,
-          nextServiceKm: Number(form.nextServiceKm) || 0,
-          fuel: Math.min(100, Math.max(0, Number(form.fuel) || 0)),
-          purchaseDate: form.purchaseDate,
-          lastService: form.lastService,
-          nextService: form.nextService,
-          tax: form.tax,
-          insurance: form.insurance,
-          dispatchPermit: form.dispatchPermit,
+    const patch: Partial<Vehicle> = {
+      plate: form.plate.trim(),
+      brand: form.brand.trim(),
+      year: Number(form.year) || vehicle.year,
+      type: effectiveType,
+      groupKind: form.groupKind,
+      status: form.status,
+      driverId: form.driverId || null,
+      odometer: Number(form.odometer) || 0,
+      nextServiceKm: Number(form.nextServiceKm) || 0,
+      fuel: Math.min(100, Math.max(0, Number(form.fuel) || 0)),
+      purchaseDate: form.purchaseDate,
+      lastService: form.lastService,
+      nextService: form.nextService,
+      tax: form.tax,
+      insurance: form.insurance,
+      dispatchPermit: form.dispatchPermit,
+    }
+
+    // Privileged users edit directly; others submit an approval request.
+    if (can.editVehicle(user.role)) {
+      updateVehicle.mutate(
+        { id: vehicle.id, patch },
+        {
+          onSuccess: () => onSuccess('✅ บันทึกข้อมูลเรียบร้อย'),
+          onError: (err) => { onError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'); setSaving(false) },
         },
+      )
+      return
+    }
+
+    if (!can.requestVehicleEdit(user.role)) {
+      onError('คุณไม่มีสิทธิ์แก้ไขรถคันนี้'); setSaving(false); return
+    }
+
+    const changeFields = buildChangeFields(vehicle, patch)
+    if (changeFields.length === 0) { onError('ไม่มีการเปลี่ยนแปลงให้บันทึก'); setSaving(false); return }
+    const reason = window.prompt('เหตุผลในการขอแก้ไข (ส่งให้ผู้จัดการอนุมัติ):', '')?.trim()
+    if (!reason) { setSaving(false); return }
+
+    insertApproval.mutate(
+      {
+        id: uid('ear'),
+        requesterId: user.id,
+        requesterName: user.name,
+        requesterRole: user.role,
+        vehicleId: vehicle.id,
+        vehiclePlate: vehicle.plate,
+        reason,
+        changes: patch,
+        changeFields,
+        requestedAt: new Date().toISOString(),
+        status: 'pending',
+        reviewerId: null,
+        reviewerName: null,
+        reviewedAt: null,
+        reviewNote: '',
       },
       {
-        onSuccess: () => onSuccess('✅ บันทึกข้อมูลเรียบร้อย'),
-        onError: (err) => {
-          onError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ')
-          setSaving(false)
-        },
+        onSuccess: () => onSuccess('📨 ส่งคำขอแก้ไขให้ผู้จัดการอนุมัติแล้ว'),
+        onError: (err) => { onError(err instanceof Error ? err.message : 'ส่งคำขอไม่สำเร็จ'); setSaving(false) },
       },
     )
   }
@@ -487,7 +544,7 @@ function RowActionMenu({
   )
 }
 
-export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
+export function VehiclesPage({ setActive, setSubject, user }: VehiclesPageProps) {
   useRealtimeTable('vehicles')
   const { data: vehicles = [] } = useList<Vehicle>('vehicles', 'plate', true)
   const { data: employees = [] } = useList<Employee>('employees')
@@ -689,6 +746,7 @@ export function VehiclesPage({ setActive, setSubject }: VehiclesPageProps) {
       {editingVehicle && (
         <VehicleEditModal
           vehicle={editingVehicle}
+          user={user}
           onClose={() => setEditingVehicle(null)}
           onSuccess={msg => {
             setEditingVehicle(null)
