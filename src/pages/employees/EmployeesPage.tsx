@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useList, useUpdate, useDelete } from '../../hooks/useTable'
 import type { Employee, Vehicle } from '../../types'
-import { Icon, StatusBadge, Field } from '../../components/ui'
+import { Icon, StatusBadge, Field, SearchInput } from '../../components/ui'
 
 function isDriverPosition(pos: string): boolean {
   return pos === 'คนขับ'
@@ -551,33 +551,7 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
             flexWrap: 'wrap',
           }}
         >
-          <div style={{ position: 'relative', flex: 1, minWidth: 240 }}>
-            <Icon
-              name="search"
-              size={15}
-              style={{
-                position: 'absolute',
-                left: 12,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                color: 'var(--text-faint)',
-              }}
-            />
-            <input
-              value={q}
-              onChange={e => setQ(e.target.value)}
-              placeholder="ค้นหา: ชื่อ / เบอร์โทร / ID"
-              style={{
-                width: '100%',
-                height: 38,
-                padding: '0 12px 0 36px',
-                border: '1px solid var(--line)',
-                borderRadius: 8,
-                background: 'var(--bg)',
-                fontSize: 13,
-              }}
-            />
-          </div>
+          <SearchInput value={q} onChange={setQ} placeholder="ค้นหา: ชื่อ / เบอร์โทร / ID" />
           <FilterCheckGroup
             label="สถานะ"
             options={[

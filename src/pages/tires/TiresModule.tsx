@@ -3,6 +3,7 @@ import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
+import { SearchInput } from '../../components/ui/SearchInput'
 import { Info } from '../../components/ui/Info'
 import { usePrint } from '../../hooks/usePrint'
 import type { Tire, TireEvent, TireScrapSale, Vehicle } from '../../types'
@@ -668,33 +669,7 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
         {/* Filters */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
           <div className="row" style={{ gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
-              <Icon
-                name="search"
-                size={14}
-                style={{
-                  position: 'absolute',
-                  left: 12,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--text-faint)',
-                }}
-              />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="ค้นหา เลขซีเรียล / ยี่ห้อ"
-                style={{
-                  width: '100%',
-                  height: 38,
-                  padding: '0 12px 0 36px',
-                  border: '1px solid var(--line)',
-                  borderRadius: 8,
-                  background: 'var(--bg)',
-                  fontSize: 13,
-                }}
-              />
-            </div>
+            <SearchInput value={q} onChange={setQ} placeholder="ค้นหา เลขซีเรียล / ยี่ห้อ" />
             {/* Status checkboxes */}
             <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
               <span

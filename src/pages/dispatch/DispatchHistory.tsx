@@ -3,7 +3,7 @@ import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import type { Vehicle, Employee, Dispatch } from '../../types'
-import { Icon } from '../../components/ui'
+import { Icon, SearchInput } from '../../components/ui'
 
 interface Props {
   setActive: (id: string) => void
@@ -71,17 +71,11 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
       {/* Filters */}
       <div className="card pad" style={{ marginBottom: 14 }}>
         <div className="row" style={{ gap: 12, alignItems: 'center' }}>
-          <div style={{ flex: 1, position: 'relative' }}>
-            <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-2)' }}>
-              <Icon name="search" size={14} />
-            </span>
-            <input
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="ค้นหา Job No, ทะเบียนรถ, คนขับ, สินค้า, เส้นทาง..."
-              style={{ paddingLeft: 32, width: '100%' }}
-            />
-          </div>
+          <SearchInput
+            value={query}
+            onChange={setQuery}
+            placeholder="ค้นหา Job No, ทะเบียนรถ, คนขับ, สินค้า, เส้นทาง..."
+          />
           <select value={status} onChange={e => setStatus(e.target.value as StatusFilter)} style={{ minWidth: 160 }}>
             <option value="all">ทุกสถานะ</option>
             <option value="draft">กำลังดำเนินการ</option>

@@ -1,6 +1,7 @@
 export { Icon } from './Icon'
 export type { IconProps } from './Icon'
 export { Field } from './Field'
+export { SearchInput } from './SearchInput'
 export { StatusBadge } from './StatusBadge'
 export { Info } from './Info'
 export { PrintButton } from './PrintButton'

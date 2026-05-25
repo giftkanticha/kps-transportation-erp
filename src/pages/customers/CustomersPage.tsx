@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert } from '../../hooks/useTable'
-import { Icon, Field, StatusBadge } from '../../components/ui'
+import { Icon, Field, StatusBadge, SearchInput } from '../../components/ui'
 import type { Customer } from '../../types'
 
 interface CustomerForm {
@@ -149,33 +149,7 @@ export function CustomersPage() {
       </div>
 
       <div className="toolbar">
-        <div style={{ position: 'relative' }}>
-          <Icon
-            name="search"
-            size={15}
-            style={{
-              position: 'absolute',
-              left: 11,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: 'var(--text-faint)',
-            }}
-          />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="ค้นหาลูกค้า..."
-            style={{
-              height: 36,
-              padding: '0 12px 0 34px',
-              width: 280,
-              border: '1px solid var(--line)',
-              borderRadius: 8,
-              background: '#fff',
-              fontSize: 13,
-            }}
-          />
-        </div>
+        <SearchInput value={q} onChange={setQ} placeholder="ค้นหาลูกค้า..." width={280} />
       </div>
 
       <div className="tbl-wrap">

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
-import { Icon, Field, Info } from '../../components/ui'
+import { Icon, Field, Info, SearchInput } from '../../components/ui'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
 interface ExpensesModuleProps {
@@ -2106,20 +2106,7 @@ function ExpVendors() {
             </div>
           </div>
           <div className="spacer" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="ค้นหา ชื่อ / เบอร์โทร / เลขผู้เสียภาษี..."
-            style={{
-              height: 34,
-              padding: '0 12px',
-              border: '1px solid var(--line)',
-              borderRadius: 8,
-              background: 'var(--bg)',
-              fontSize: 13,
-              width: 280,
-            }}
-          />
+          <SearchInput value={q} onChange={setQ} placeholder="ค้นหา ชื่อ / เบอร์โทร / เลขผู้เสียภาษี..." width={280} />
           <button className="btn primary" onClick={() => setAddNew(true)}>
             <Icon name="plus" size={14} /> เพิ่มใหม่
           </button>
