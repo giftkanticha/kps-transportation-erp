@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { db, uid } from '../../lib/db'
+import { useList, useUpdate } from '../../hooks/useTable'
 import type { Vehicle, FuelRound, FuelRefill } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -38,8 +39,9 @@ function nowLocal(): string {
 }
 
 function OpenRoundsPicker({ setSubject }: { setSubject: (s: unknown) => void }) {
-  const rounds = db.getAll<FuelRound>('fuelRounds').filter(r => r.status === 'open')
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: allRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const rounds = allRounds.filter(r => r.status === 'open')
   return (
     <div>
       <div className="page-head">
@@ -107,9 +109,11 @@ function RefillForm({
   setActive,
   setSubject,
 }: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
-  const [tick, setTick] = useState(0)
-  const round = useMemo(() => db.get<FuelRound>('fuelRounds', roundId), [roundId, tick])
-  const vehicle = round ? db.get<Vehicle>('vehicles', round.vehicleId) : undefined
+  const { data: allRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const updateRound = useUpdate<FuelRound>('fuel_rounds')
+  const round = allRounds.find(r => r.id === roundId)
+  const vehicle = round ? vehicles.find(v => v.id === round.vehicleId) : undefined
 
   const [location, setLocation] = useState('')
   const [mileage, setMileage] = useState('')
@@ -156,7 +160,7 @@ function RefillForm({
   const actualL = overCapacity ? cap : reqL
   const cost = actualL * (Number(pricePerL) || 0)
 
-  const submit = () => {
+  const submit = async () => {
     if (!location.trim()) return setToast({ kind: 'error', msg: 'กรุณากรอกตำแหน่งเติม' })
     if (!mileage || isNaN(Number(mileage))) return setToast({ kind: 'error', msg: 'เลขไมล์ไม่ถูกต้อง' })
     if (startRefill && Number(mileage) < startRefill.mileage) {
@@ -177,14 +181,18 @@ function RefillForm({
       at,
       notes: notes.trim() || undefined,
     }
-    db.update<FuelRound>('fuelRounds', round.id, {
-      refills: [...round.refills, refill],
-    })
-    setTick(t => t + 1)
-    setToast({ kind: 'success', msg: `✅ บันทึกการเติม ${actualL.toFixed(0)} L เรียบร้อย` })
-    // Reset form
-    setLocation(''); setMileage(''); setRequestedL(''); setNotes('')
-    setAt(nowLocal())
+    try {
+      await updateRound.mutateAsync({
+        id: round.id,
+        patch: { refills: [...round.refills, refill] },
+      })
+      setToast({ kind: 'success', msg: `✅ บันทึกการเติม ${actualL.toFixed(0)} L เรียบร้อย` })
+      // Reset form
+      setLocation(''); setMileage(''); setRequestedL(''); setNotes('')
+      setAt(nowLocal())
+    } catch (e) {
+      setToast({ kind: 'error', msg: '❌ บันทึกไม่สำเร็จ: ' + (e as Error).message })
+    }
   }
 
   return (

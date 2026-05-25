@@ -43,6 +43,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: dispatch = [] } = useDispatches()
+  const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
   const drivers = employees.filter(e => e.position === 'คนขับ')
 
   const rows = useMemo<Row[]>(() => {
@@ -64,7 +65,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
       })
 
     return rounds.map(round => {
-      const fuelRound = db.fuelRoundOfDispatch(round.id)
+      const fuelRound = db.fuelRoundOfDispatch(round.id, fuelRounds)
       const legs = round.legs ?? []
       const revenue = db.roundRevenue(round)
       const perDiemTotal = db.roundPerDiem(round)
@@ -94,7 +95,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
         status: statusLabel,
       }
     }).sort((a, b) => (b.round.depart || b.round.date || '').localeCompare(a.round.depart || a.round.date || ''))
-  }, [from, to, vehicleId, driverId, status, vehicles, employees, dispatch])
+  }, [from, to, vehicleId, driverId, status, vehicles, employees, dispatch, fuelRounds])
 
   // Aggregates
   const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0)

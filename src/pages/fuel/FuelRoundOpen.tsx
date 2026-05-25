@@ -1,6 +1,8 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db, uid, DEFAULT_TANK_CAPACITY, HOME_BASE } from '../../lib/db'
-import type { Vehicle, Dispatch, FuelRound, FuelRefill } from '../../types'
+import { useList, useInsert } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
+import type { Vehicle, FuelRound, FuelRefill } from '../../types'
 import { Icon, StatusBadge, Field } from '../../components/ui'
 
 interface Props {
@@ -37,9 +39,10 @@ function nowLocal(): string {
 }
 
 export function FuelRoundOpen({ setActive, setSubject }: Props) {
-  const [tick, setTick] = useState(0)
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
-  const allRounds = useMemo(() => db.getAll<FuelRound>('fuelRounds'), [tick])
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: dispatches = [] } = useDispatches()
+  const { data: allRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const insertRound = useInsert<FuelRound>('fuel_rounds')
   const openRounds = allRounds.filter(r => r.status === 'open')
 
   const [vehicleId, setVehicleId] = useState('')
@@ -71,25 +74,24 @@ export function FuelRoundOpen({ setActive, setSubject }: Props) {
   // Candidate dispatch rounds to link (DRAFT for this vehicle)
   const draftDispatches = useMemo(() => {
     if (!vehicleId) return []
-    return db.getAll<Dispatch>('dispatch')
-      .filter(d => d.vehicleId === vehicleId && d.roundStatus === 'draft')
-  }, [vehicleId, tick])
+    return dispatches.filter(d => d.vehicleId === vehicleId && d.roundStatus === 'draft')
+  }, [vehicleId, dispatches])
 
   // Auto-fill mileage from vehicle's last known mileage
   useEffect(() => {
     if (!vehicleId) { setMileage(''); setLinkDispatchId(''); return }
-    const lastMileage = db.lastClosedMileage(vehicleId)
+    const lastMileage = db.lastClosedMileage(vehicleId, dispatches)
     if (lastMileage != null) setMileage(String(lastMileage))
     else if (vehicle) setMileage(String(vehicle.odometer || ''))
     // Auto-link if exactly one DRAFT dispatch round
-    const drafts = db.getAll<Dispatch>('dispatch').filter(d => d.vehicleId === vehicleId && d.roundStatus === 'draft')
+    const drafts = dispatches.filter(d => d.vehicleId === vehicleId && d.roundStatus === 'draft')
     if (drafts.length === 1) setLinkDispatchId(drafts[0].id)
     else setLinkDispatchId('')
   }, [vehicleId])
 
   const totalCost = (Number(liters) || 0) * (Number(pricePerL) || 0)
 
-  const submit = () => {
+  const submit = async () => {
     if (!vehicleId) return setToast({ kind: 'error', msg: 'กรุณาเลือกรถ' })
     if (activeRoundForVehicle) return setToast({ kind: 'error', msg: `รถคันนี้มีรอบน้ำมันเปิดอยู่แล้ว: ${activeRoundForVehicle.code}` })
     if (!mileage || isNaN(Number(mileage))) return setToast({ kind: 'error', msg: 'เลขไมล์ไม่ถูกต้อง' })
@@ -108,21 +110,24 @@ export function FuelRoundOpen({ setActive, setSubject }: Props) {
       location: HOME_BASE,
       at: startAt,
     }
-    const round = db.add<Partial<FuelRound>>('fuelRounds', {
-      code: db.nextFuelRoundCode(),
-      vehicleId,
-      dispatchRoundId: linkDispatchId || null,
-      tankCapacity: cap,
-      status: 'open',
-      refills: [startRefill],
-      notes,
-    })
-    setTick(t => t + 1)
-    setToast({ kind: 'success', msg: `✅ เปิดรอบ ${round.code} เรียบร้อย` })
-    setTimeout(() => {
-      setSubject({ type: 'fuelRound', id: round.id })
-      setActive('fuel.round.refill')
-    }, 800)
+    try {
+      const round = await insertRound.mutateAsync({
+        code: db.nextFuelRoundCode(allRounds),
+        vehicleId,
+        dispatchRoundId: linkDispatchId || null,
+        tankCapacity: cap,
+        status: 'open',
+        refills: [startRefill],
+        notes,
+      })
+      setToast({ kind: 'success', msg: `✅ เปิดรอบ ${round.code} เรียบร้อย` })
+      setTimeout(() => {
+        setSubject({ type: 'fuelRound', id: round.id })
+        setActive('fuel.round.refill')
+      }, 800)
+    } catch (e) {
+      setToast({ kind: 'error', msg: '❌ เปิดรอบไม่สำเร็จ: ' + (e as Error).message })
+    }
   }
 
   return (
@@ -155,7 +160,7 @@ export function FuelRoundOpen({ setActive, setSubject }: Props) {
                   const v = vehicles.find(x => x.id === r.vehicleId)
                   const startR = r.refills.find(x => x.type === 'start')
                   const inters = r.refills.filter(x => x.type === 'intermediate')
-                  const dsp = r.dispatchRoundId ? db.get<Dispatch>('dispatch', r.dispatchRoundId) : null
+                  const dsp = r.dispatchRoundId ? dispatches.find(d => d.id === r.dispatchRoundId) ?? null : null
                   return (
                     <tr key={r.id}>
                       <td className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{r.code}</td>

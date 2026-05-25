@@ -494,6 +494,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
+  const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
   const insertLeg = useInsert<DispatchLeg>('dispatch_legs')
   const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
   const removeLeg = useDelete('dispatch_legs')
@@ -525,7 +526,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const legs = round.legs ?? []
   const totalRevenue = db.roundRevenue(round)
   const totalWeight = legs.reduce((s, l) => s + (l.weight || 0), 0)
-  const fuelRound = db.fuelRoundOfDispatch(round.id) as FuelRound | null
+  const fuelRound = db.fuelRoundOfDispatch(round.id, fuelRounds)
 
   // Legs live in the dispatch_legs table; each save is a row insert/update plus a
   // revenue recompute on the parent dispatch row. revenue/totalAmount are derived
