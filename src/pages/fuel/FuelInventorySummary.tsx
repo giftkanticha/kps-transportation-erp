@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
 import type { FuelRecord, FuelStock } from '../../types'
 import { Field, PrintButton } from '../../components/ui'
 
@@ -22,8 +23,8 @@ export function FuelInventorySummary() {
   const [month, setMonth] = useState(today.getMonth() + 1)
   const [year, setYear] = useState(today.getFullYear())
 
-  const allStocks = useMemo(() => db.getAll<FuelStock>('fuelStock'), [])
-  const allFuelings = useMemo(() => db.getAll<FuelRecord>('fuel'), [])
+  const { data: allStocks = [] } = useList<FuelStock>('fuel_stock')
+  const { data: allFuelings = [] } = useList<FuelRecord>('fuel_records')
   const factoryFuelings = useMemo(
     () => allFuelings.filter(f => isFactoryStation(f.station)),
     [allFuelings],

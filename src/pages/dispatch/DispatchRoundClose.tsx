@@ -176,6 +176,7 @@ function CloseForm({
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: customers = [] } = useList<Customer>('customers')
   const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: allFuelStock = [] } = useList<FuelStock>('fuel_stock')
   const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
   const updateDispatch = useUpdate<Dispatch>('dispatch')
   const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
@@ -218,12 +219,12 @@ function CloseForm({
   // Default closing-fuel price comes from the fuel ledger (latest stock purchase,
   // else latest non-reversed transaction) — never a hardcoded number. Editable.
   const ledgerFuelPrice = useMemo(() => {
-    const stocks = db.getAll<FuelStock>('fuelStock').filter(s => (s.pricePerL || 0) > 0)
+    const stocks = allFuelStock.filter(s => (s.pricePerL || 0) > 0)
     if (stocks.length) return [...stocks].sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0].pricePerL
     const txs = allFuelTxs.filter(t => (t.pricePerL || 0) > 0 && t.status !== 'REVERSED')
     if (txs.length) return [...txs].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0].pricePerL
     return null
-  }, [allFuelTxs])
+  }, [allFuelTxs, allFuelStock])
 
   // Initialize form once the round's data is available (it loads asynchronously
   // from Supabase). Scalar fields init once per round so background refetches

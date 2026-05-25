@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
+import { useList, useInsert } from '../../hooks/useTable'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import { VehiclePickerSidebar } from '../../components/ui/VehiclePickerSidebar'
@@ -55,31 +56,36 @@ function FuelRecord() {
   })
   const set = (k: string, v: string | number) => setForm((f) => ({ ...f, [k]: v }))
   const total = (+form.liters || 0) * (+form.pricePerL || 0)
-  const fuel = db.getAll<FuelRecord>('fuel')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: fuel = [] } = useList<FuelRecord>('fuel_records')
+  const insertFuel = useInsert<FuelRecord>('fuel_records')
 
-  const save = () => {
+  const save = async () => {
     if (!form.vehicleId || !form.driverId || !form.liters) {
       alert('กรุณาเลือกรถ คนขับ และระบุปริมาณ')
       return
     }
-    db.add<FuelRecord>('fuel', {
-      id: uid('f'),
-      code:
-        'FUL-' +
-        new Date().toISOString().slice(2, 10).replace(/-/g, '') +
-        Math.floor(Math.random() * 100),
-      vehicleId: form.vehicleId,
-      driverId: form.driverId,
-      station: form.source === 'tank' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
-      liters: +form.liters,
-      pricePerL: +form.pricePerL,
-      total,
-      odometer: +form.odometer || 0,
-      date: new Date().toISOString().slice(0, 16).replace('T', ' '),
-      type: 'diesel',
-    })
-    alert('บันทึกการเติมน้ำมันเรียบร้อย')
-    setForm({ vehicleId: '', driverId: '', odometer: '', liters: '', pricePerL: 35, source: 'tank', note: '' })
+    const recId = uid('f')
+    try {
+      await insertFuel.mutateAsync({
+        id: recId,
+        code: 'FUL-' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + '-' + recId.slice(-5),
+        vehicleId: form.vehicleId,
+        driverId: form.driverId,
+        station: form.source === 'tank' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
+        liters: +form.liters,
+        pricePerL: +form.pricePerL,
+        total,
+        odometer: +form.odometer || 0,
+        date: new Date().toISOString().slice(0, 16).replace('T', ' '),
+        type: 'diesel',
+      })
+      alert('บันทึกการเติมน้ำมันเรียบร้อย')
+      setForm({ vehicleId: '', driverId: '', odometer: '', liters: '', pricePerL: 35, source: 'tank', note: '' })
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e as Error).message)
+    }
   }
 
   const isExternal = (station: string) =>
@@ -96,7 +102,7 @@ function FuelRecord() {
             <Field label="เลือกรถ *">
               <select value={form.vehicleId} onChange={(e) => set('vehicleId', e.target.value)}>
                 <option value="">-- เลือกรถ --</option>
-                {db.getAll<Vehicle>('vehicles').map((v) => (
+                {vehicles.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.plate} • {v.brand}
                   </option>
@@ -106,8 +112,7 @@ function FuelRecord() {
             <Field label="คนขับ">
               <select value={form.driverId} onChange={(e) => set('driverId', e.target.value)}>
                 <option value="">-- เลือกคนขับ --</option>
-                {db
-                  .getAll<Employee>('employees')
+                {employees
                   .filter((e) => e.position === 'คนขับ')
                   .map((e) => (
                     <option key={e.id} value={e.id}>
@@ -244,14 +249,14 @@ function FuelRecord() {
                   <td className="num muted">{db.thaiDate(f.date.slice(0, 10))}</td>
                   <td>
                     <a style={{ color: 'var(--primary)', fontWeight: 600 }} className="mono">
-                      {db.nameOf('vehicles', f.vehicleId)}
+                      {vehicles.find(v => v.id === f.vehicleId)?.plate ?? '—'}
                     </a>
                   </td>
                   <td className="num right">{f.liters}</td>
                   <td className="num right" style={{ fontWeight: 600 }}>
                     {db.fmt(f.total)} บาท
                   </td>
-                  <td>{db.nameOf('employees', f.driverId)}</td>
+                  <td>{employees.find(e => e.id === f.driverId)?.name ?? '—'}</td>
                   <td>
                     {isExternal(f.station) ? (
                       <span className="badge amber">ปั๊มภายนอก</span>
@@ -280,8 +285,8 @@ function FuelReportV2() {
   const [metric, setMetric] = useState<'liters' | 'amount'>('liters')
   const [hideEmpty, setHideEmpty] = useState(true)
 
-  const allFuelings = useMemo(() => db.getAll<FuelRecord>('fuel'), [])
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
+  const { data: allFuelings = [] } = useList<FuelRecord>('fuel_records')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const [pickedVehicles, setPickedVehicles] = useState<Set<string>>(
     () => new Set(vehicles.map(v => v.id)),
   )

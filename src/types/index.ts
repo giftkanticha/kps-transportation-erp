@@ -198,7 +198,7 @@ export interface FuelRecord {
   id: string
   code: string
   vehicleId: string
-  driverId: string
+  driverId: string | null
   station: string
   liters: number
   pricePerL: number

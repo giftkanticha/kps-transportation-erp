@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { db, uid } from '../../lib/db'
+import { uid } from '../../lib/db'
 import { useList, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import type { Vehicle, FuelRecord, FuelTransaction, FuelStock } from '../../types'
@@ -14,7 +14,6 @@ const isFactory = (f: FuelRecord) =>
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function FuelReconciliation() {
-  const [tick, setTick] = useState(0)
   const [syncing, setSyncing] = useState(false)
   const [syncLog, setSyncLog] = useState<string[]>([])
 
@@ -22,12 +21,12 @@ export function FuelReconciliation() {
   const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const { data: dispatches = [] } = useDispatches()
   const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
-  const legacyRecords = useMemo(() => db.getAll<FuelRecord>('fuel'), [tick])
+  const { data: legacyRecords = [] } = useList<FuelRecord>('fuel_records')
+  const { data: fuelStock = [] } = useList<FuelStock>('fuel_stock')
   const fuelTxs = useMemo(
     () => allFuelTxs.filter(t => t.status !== 'REVERSED'),
     [allFuelTxs],
   )
-  const fuelStock = useMemo(() => db.getAll<FuelStock>('fuelStock'), [tick])
 
   // ── Per-vehicle comparison ─────────────────────────────────────────────────
 
@@ -123,7 +122,6 @@ export function FuelReconciliation() {
 
     setSyncLog(log)
     setSyncing(false)
-    setTick(t => t + 1)
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
