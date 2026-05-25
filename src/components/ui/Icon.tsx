@@ -105,6 +105,46 @@ export function Icon({ name, size = 18, color = 'currentColor', style, className
           </g>
         </svg>
       )
+    case 'history':
+      return (
+        <svg {...props}>
+          <path d="M3 12a9 9 0 1 0 2.6-6.4L3 8" />
+          <path d="M3 4v4h4" />
+          <path d="M12 8v4l3 1.5" />
+        </svg>
+      )
+    case 'list':
+      return (
+        <svg {...props}>
+          <path d="M9 7h11M9 12h11M9 17h11" />
+          <circle cx="4.5" cy="7" r="1" fill={color} stroke="none" />
+          <circle cx="4.5" cy="12" r="1" fill={color} stroke="none" />
+          <circle cx="4.5" cy="17" r="1" fill={color} stroke="none" />
+        </svg>
+      )
+    case 'bolt':
+      return (
+        <svg {...props}>
+          <path d="M13 2 5 13h6l-1 9 9-12h-6z" />
+        </svg>
+      )
+    case 'building':
+      return (
+        <svg {...props}>
+          <rect x="5" y="3" width="14" height="18" rx="1" />
+          <path d="M9 7h1.5M13.5 7h1.5M9 11h1.5M13.5 11h1.5M9 15h1.5M13.5 15h1.5" />
+          <path d="M5 21h14" />
+        </svg>
+      )
+    case 'refresh':
+      return (
+        <svg {...props}>
+          <path d="M3 12a9 9 0 0 1 15.5-6.3" />
+          <path d="M19 2.5v4h-4" />
+          <path d="M21 12a9 9 0 0 1-15.5 6.3" />
+          <path d="M5 21.5v-4h4" />
+        </svg>
+      )
     case 'chart':
       return (
         <svg {...props}>

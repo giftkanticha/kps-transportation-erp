@@ -14,7 +14,6 @@ interface MenuItem {
 interface SubMenuItem {
   id: string
   label: string
-  emoji?: string
   icon?: string
 }
 
@@ -23,84 +22,84 @@ const MENU: MenuItem[] = [
   {
     id: 'vehicles', label: 'จัดการรถ', icon: 'truck', roles: ['admin', 'manager', 'driver'],
     sub: [
-      { id: 'vehicles', label: 'รายการรถทั้งหมด', emoji: '🚛' },
-      { id: 'vehicles.add', label: 'เพิ่มรถใหม่', emoji: '➕' },
-      { id: 'vehicles.detail', label: 'รายละเอียดรถ', emoji: '🔍' },
+      { id: 'vehicles', label: 'รายการรถทั้งหมด', icon: 'truck' },
+      { id: 'vehicles.add', label: 'เพิ่มรถใหม่', icon: 'plus' },
+      { id: 'vehicles.detail', label: 'รายละเอียดรถ', icon: 'search' },
     ],
   },
   {
     id: 'employees', label: 'ข้อมูลพนักงาน', icon: 'users', roles: ['admin', 'manager'],
     sub: [
-      { id: 'employees', label: 'รายชื่อพนักงาน', emoji: '👥' },
-      { id: 'employees.add', label: 'เพิ่มพนักงานใหม่', emoji: '➕' },
+      { id: 'employees', label: 'รายชื่อพนักงาน', icon: 'users' },
+      { id: 'employees.add', label: 'เพิ่มพนักงานใหม่', icon: 'plus' },
     ],
   },
   {
     id: 'tires', label: 'ระบบยาง', icon: 'tire', roles: ['admin', 'manager'],
     sub: [
-      { id: 'tires', label: 'รายการยางทั้งหมด', emoji: '📋' },
+      { id: 'tires', label: 'รายการยางทั้งหมด', icon: 'list' },
       { id: 'tires.layout', label: 'ผังยางปัจจุบัน', icon: 'wheel' },
-      { id: 'tires.manage', label: 'จัดการและสลับยาง', emoji: '🔄' },
-      { id: 'tires.history', label: 'ประวัติยางรายเส้น', emoji: '🕘' },
-      { id: 'tires.scrapped', label: 'ยางหมดสภาพ', emoji: '🗑️' },
+      { id: 'tires.manage', label: 'จัดการและสลับยาง', icon: 'wrench' },
+      { id: 'tires.history', label: 'ประวัติยางรายเส้น', icon: 'history' },
+      { id: 'tires.scrapped', label: 'ยางหมดสภาพ', icon: 'trash' },
     ],
   },
   {
     id: 'fuel', label: 'ระบบน้ำมัน', icon: 'fuel', roles: ['admin', 'manager'],
     sub: [
-      { id: 'fuel', label: 'ภาพรวมคลังน้ำมัน', emoji: '📊' },
-      { id: 'fuel.express', label: 'คีย์ด่วนน้ำมัน', emoji: '⚡' },
-      { id: 'fuel.floating', label: 'น้ำมันลอยรอผูก', emoji: '🟡' },
-      { id: 'fuel.report', label: 'รายงานน้ำมันรายเดือน', emoji: '📈' },
-      { id: 'fuel.summary', label: 'สรุปคลังน้ำมันรวม', emoji: '📦' },
+      { id: 'fuel', label: 'ภาพรวมคลังน้ำมัน', icon: 'gauge' },
+      { id: 'fuel.express', label: 'คีย์ด่วนน้ำมัน', icon: 'bolt' },
+      { id: 'fuel.floating', label: 'น้ำมันลอยรอผูก', icon: 'alert' },
+      { id: 'fuel.report', label: 'รายงานน้ำมันรายเดือน', icon: 'chart' },
+      { id: 'fuel.summary', label: 'สรุปคลังน้ำมันรวม', icon: 'package' },
     ],
   },
   {
     id: 'dispatch', label: 'งานขนส่ง', icon: 'package', roles: ['admin', 'manager', 'driver'],
     sub: [
-      { id: 'dispatch.open', label: 'เปิดงานขนส่ง', emoji: '📝' },
-      { id: 'dispatch.close', label: 'ปิดงานขนส่ง', emoji: '✅' },
-      { id: 'dispatch.report', label: 'รายงานสรุป', emoji: '📊' },
-      { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน', emoji: '🕘' },
+      { id: 'dispatch.open', label: 'เปิดงานขนส่ง', icon: 'edit' },
+      { id: 'dispatch.close', label: 'ปิดงานขนส่ง', icon: 'check' },
+      { id: 'dispatch.report', label: 'รายงานสรุป', icon: 'chart' },
+      { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน', icon: 'history' },
     ],
   },
   {
     id: 'subcontractors', label: 'รถรับจ้างร่วม', icon: 'truck2', roles: ['admin', 'manager'],
     sub: [
-      { id: 'subcontractors', label: 'เปิดงาน', emoji: '📝' },
-      { id: 'subcontractors.close', label: 'ปิดงาน', emoji: '✅' },
-      { id: 'subcontractors.history', label: 'ประวัติการจ้าง', emoji: '🕘' },
-      { id: 'subcontractors.drivers', label: 'คนขับรถร่วม', emoji: '🧑‍✈️' },
+      { id: 'subcontractors', label: 'เปิดงาน', icon: 'edit' },
+      { id: 'subcontractors.close', label: 'ปิดงาน', icon: 'check' },
+      { id: 'subcontractors.history', label: 'ประวัติการจ้าง', icon: 'history' },
+      { id: 'subcontractors.drivers', label: 'คนขับรถร่วม', icon: 'user' },
     ],
   },
   {
     id: 'expenses', label: 'ค่าใช้จ่าย', icon: 'wallet', roles: ['admin', 'manager'],
     sub: [
-      { id: 'expenses', label: 'บันทึกค่าใช้จ่าย', emoji: '📝' },
-      { id: 'expenses.finance', label: 'สถานะการเงิน', emoji: '💰' },
-      { id: 'expenses.stock', label: 'สต๊อคคลัง KPS', emoji: '📦' },
-      { id: 'expenses.report', label: 'รายงานสรุป', emoji: '📊' },
-      { id: 'expenses.vendors', label: 'ทะเบียนร้านค้า/ช่าง', emoji: '🏪' },
+      { id: 'expenses', label: 'บันทึกค่าใช้จ่าย', icon: 'edit' },
+      { id: 'expenses.finance', label: 'สถานะการเงิน', icon: 'money' },
+      { id: 'expenses.stock', label: 'สต๊อคคลัง KPS', icon: 'package' },
+      { id: 'expenses.report', label: 'รายงานสรุป', icon: 'chart' },
+      { id: 'expenses.vendors', label: 'ทะเบียนร้านค้า/ช่าง', icon: 'client' },
     ],
   },
   {
     id: 'finance', label: 'การเงิน', icon: 'chart', roles: ['admin', 'manager'],
     sub: [
-      { id: 'finance', label: 'P&L รายคัน', emoji: '💹' },
+      { id: 'finance', label: 'P&L รายคัน', icon: 'chart' },
     ],
   },
   {
     id: 'settings', label: 'ตั้งค่า', icon: 'settings', roles: ['admin'],
     sub: [
-      { id: 'settings.users', label: 'จัดการผู้ใช้งาน', emoji: '👥' },
-      { id: 'settings.company', label: 'ข้อมูลบริษัท', emoji: '🏢' },
+      { id: 'settings.users', label: 'จัดการผู้ใช้งาน', icon: 'users' },
+      { id: 'settings.company', label: 'ข้อมูลบริษัท', icon: 'building' },
     ],
   },
   {
     id: 'admin', label: 'Admin Panel', icon: 'settings', roles: ['admin'],
     sub: [
-      { id: 'admin.users', label: 'จัดการผู้ใช้ + ACL', emoji: '👥' },
-      { id: 'admin.reset', label: 'รีเซตข้อมูล', emoji: '🔄' },
+      { id: 'admin.users', label: 'จัดการผู้ใช้ + ACL', icon: 'users' },
+      { id: 'admin.reset', label: 'รีเซตข้อมูล', icon: 'refresh' },
     ],
   },
 ]
@@ -204,9 +203,7 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
                       className={`subnav-item ${active === s.id ? 'active' : ''}`}
                       onClick={() => setActive(s.id)}
                     >
-                      {s.icon
-                        ? <span className="emoji"><Icon name={s.icon} size={15} color="#0F172A" /></span>
-                        : s.emoji && <span className="emoji">{s.emoji}</span>}
+                      {s.icon && <span className="ico"><Icon name={s.icon} size={15} /></span>}
                       <span>{s.label}</span>
                     </div>
                   ))}

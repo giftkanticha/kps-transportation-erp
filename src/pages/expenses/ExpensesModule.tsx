@@ -90,18 +90,19 @@ export function ExpensesModule({ tab, setActive }: ExpensesModuleProps) {
       <div className="tabs" style={{ marginBottom: 22 }}>
         {(
           [
-            ['record', '', 'บันทึกค่าใช้จ่าย'],
-            ['finance', 'finance', 'สถานะการเงิน'],
-            ['stock', 'stock', 'สต็อคคลัง KPS'],
-            ['report', 'report', 'รายงานสรุป'],
-            ['vendors', 'vendors', 'ทะเบียนร้านค้า/ช่าง'],
-          ] as [string, string, string][]
-        ).map(([id, route, label]) => (
+            ['record', '', 'บันทึกค่าใช้จ่าย', 'edit'],
+            ['finance', 'finance', 'สถานะการเงิน', 'money'],
+            ['stock', 'stock', 'สต็อคคลัง KPS', 'package'],
+            ['report', 'report', 'รายงานสรุป', 'chart'],
+            ['vendors', 'vendors', 'ทะเบียนร้านค้า/ช่าง', 'client'],
+          ] as [string, string, string, string][]
+        ).map(([id, route, label, ic]) => (
           <button
             key={id}
             className={`tab ${current === id ? 'active' : ''}`}
             onClick={() => setActive('expenses' + (route ? '.' + route : ''))}
           >
+            <Icon name={ic} size={14} style={{ marginRight: 6, verticalAlign: -3 }} />
             {label}
           </button>
         ))}
