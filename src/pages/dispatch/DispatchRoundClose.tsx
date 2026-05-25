@@ -193,6 +193,7 @@ function CloseForm({
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
   const initedRef = useRef<string | null>(null)
+  const legsInitedRef = useRef<string | null>(null)
 
   // Fuel transactions linked to this round
   const linkedFuelTxs = useMemo(
@@ -218,26 +219,37 @@ function CloseForm({
   }, [tick])
 
   // Initialize form once the round's data is available (it loads asynchronously
-  // from Supabase). Re-runs when navigating to a different round, but a guard
-  // prevents background refetches of the same round from wiping in-progress edits.
+  // from Supabase). Scalar fields init once per round so background refetches
+  // don't wipe in-progress edits. Leg states re-sync whenever the set of legs
+  // changes — `dispatch_legs` is a separate query that often resolves AFTER the
+  // dispatch row, and a one-shot guard used to lock in an empty leg list, leaving
+  // the close form with no editable rows.
   useEffect(() => {
     if (!round) return
-    if (initedRef.current === round.id) return
-    initedRef.current = round.id
-    setLegStates(
-      (round.legs ?? []).map(l => ({
-        id: l.id || uid('lg'),
-        // legState.deliveredWeight is the USER-input value in the leg's display unit
-        // (กก. for per_kg, ตัน otherwise). Convert from canonical ตัน at load.
-        deliveredWeight: tonToDwInput(l.deliveredWeight ?? null, l.priceMode),
-        perDiem: l.perDiem != null ? String(l.perDiem) : '',
-        notes: l.notes || '',
-      })),
-    )
-    setEndMileage(round.endOdometer != null ? String(round.endOdometer) : '')
-    setReturnAt(round.returnAt || nowLocal())
-    setOtherExp(round.otherExpenses ?? [])
-    setRoundNotes(round.notes || '')
+    const rl = round.legs ?? []
+    const legSig = `${round.id}|${rl.map(l => l.id).join(',')}`
+
+    if (initedRef.current !== round.id) {
+      initedRef.current = round.id
+      setEndMileage(round.endOdometer != null ? String(round.endOdometer) : '')
+      setReturnAt(round.returnAt || nowLocal())
+      setOtherExp(round.otherExpenses ?? [])
+      setRoundNotes(round.notes || '')
+    }
+
+    if (legsInitedRef.current !== legSig) {
+      legsInitedRef.current = legSig
+      setLegStates(
+        rl.map(l => ({
+          id: l.id || uid('lg'),
+          // legState.deliveredWeight is the USER-input value in the leg's display unit
+          // (กก. for per_kg, ตัน otherwise). Convert from canonical ตัน at load.
+          deliveredWeight: tonToDwInput(l.deliveredWeight ?? null, l.priceMode),
+          perDiem: l.perDiem != null ? String(l.perDiem) : '',
+          notes: l.notes || '',
+        })),
+      )
+    }
   }, [round])
 
   if (!round) {
