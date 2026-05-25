@@ -57,6 +57,11 @@ function legTypeLabel(t?: string): string {
   return 'Outbound'
 }
 
+// A single truck/trailer load rarely exceeds ~60 ตัน. A larger ตัน value almost
+// always means กก. was typed into a ตัน field — warn so the close screen never
+// shows nonsense like "ส่งครบ 31,000 ตัน".
+const MAX_REALISTIC_TON = 100
+
 function calcLegAmount(priceMode: LegFormState['priceMode'], weightTon: number, price: number): number {
   if (priceMode === 'lump') return price
   if (priceMode === 'per_kg') return weightTon * 1000 * price
@@ -125,6 +130,10 @@ function LegModal({
     if (!isReturn) {
       if (!isLump && !Number(f.weight)) return alert('กรุณากรอกน้ำหนักโหลด')
       if (!Number(f.price)) return alert(`กรุณากรอกราคา (${priceUnitLabel(f.priceMode)})`)
+      if (f.priceMode !== 'per_kg' && wInput > MAX_REALISTIC_TON) {
+        if (!confirm(`น้ำหนัก ${wInput.toLocaleString()} ตัน สูงผิดปกติ (ปกติ ≤ ${MAX_REALISTIC_TON} ตัน)\n\nถ้านี่คือค่าจากใบชั่ง (กก.) ควรกรอก ${(wInput / 1000).toLocaleString()} ตัน หรือเปลี่ยนหน่วยราคาเป็น "ต่อกิโลกรัม"\n\nยืนยันบันทึกค่านี้?`))
+          return
+      }
     }
     onSave(f)
   }
@@ -209,6 +218,11 @@ function LegModal({
                         : <>หน่วย <strong>ตัน</strong> ({wInput > 0 ? `= ${(wInput * 1000).toLocaleString()} กก.` : 'เช่น 25 = 25,000 กก.'})</>
                       }
                     </div>
+                    {f.priceMode !== 'per_kg' && wInput > MAX_REALISTIC_TON && (
+                      <div style={{ fontSize: 11, marginTop: 4, color: 'var(--red)', fontWeight: 600 }}>
+                        ⚠️ {wInput.toLocaleString()} ตัน สูงผิดปกติ — ถ้านี่คือค่าจากใบชั่ง (กก.) ให้กรอกเป็น {(wInput / 1000).toLocaleString()} หรือเปลี่ยนหน่วยราคาเป็น “ต่อกิโลกรัม”
+                      </div>
+                    )}
                   </Field>
                 )}
                 <Field label={`ราคา (${priceUnitLabel(f.priceMode)}) *`}>

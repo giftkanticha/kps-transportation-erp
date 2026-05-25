@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction } from '../../types'
+import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction, FuelStock } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -189,6 +189,7 @@ function CloseForm({
   const [otherExp, setOtherExp] = useState<OtherExpense[]>([])
   const [roundNotes, setRoundNotes] = useState('')
   const [closingFuelLiters, setClosingFuelLiters] = useState('')
+  const [closingFuelPrice, setClosingFuelPrice] = useState('')
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
   const initedRef = useRef<string | null>(null)
@@ -205,6 +206,16 @@ function CloseForm({
   const fuelNormal = linkedFuelTxs.filter(t => t.tripFuelRole === 'NORMAL')
   const sumIntermediate = fuelIntermediate.reduce((s, t) => s + t.liters, 0)
   const sumNormal = fuelNormal.reduce((s, t) => s + t.liters, 0)
+
+  // Default closing-fuel price comes from the fuel ledger (latest stock purchase,
+  // else latest non-reversed transaction) — never a hardcoded number. Editable.
+  const ledgerFuelPrice = useMemo(() => {
+    const stocks = db.getAll<FuelStock>('fuelStock').filter(s => (s.pricePerL || 0) > 0)
+    if (stocks.length) return [...stocks].sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0].pricePerL
+    const txs = db.getAll<FuelTransaction>('fuelTransactions').filter(t => (t.pricePerL || 0) > 0 && t.status !== 'REVERSED')
+    if (txs.length) return [...txs].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0].pricePerL
+    return null
+  }, [tick])
 
   // Initialize form once the round's data is available (it loads asynchronously
   // from Supabase). Re-runs when navigating to a different round, but a guard
@@ -272,11 +283,12 @@ function CloseForm({
   // Fuel cost for THIS round = intermediate + normal + closing fills. TRIP_OPENING
   // is the previous round's closing fill, so it's excluded. Include the closing
   // fill being entered now so the net profit reflects it before saving.
-  const fuelPricePerL = 35
+  // Price for the closing fill: user-entered, else the latest ledger price.
+  const closingPrice = parseFloat(closingFuelPrice) || ledgerFuelPrice || 0
   const recordedFuelCost = linkedFuelTxs
     .filter(t => t.tripFuelRole !== 'TRIP_OPENING')
-    .reduce((s, t) => s + (t.total ?? t.liters * (t.pricePerL ?? fuelPricePerL)), 0)
-  const fuelCost = recordedFuelCost + (fuelClosing.length > 0 ? 0 : closingL * fuelPricePerL)
+    .reduce((s, t) => s + (t.total ?? t.liters * (t.pricePerL || 0)), 0)
+  const fuelCost = recordedFuelCost + (fuelClosing.length > 0 ? 0 : closingL * closingPrice)
   const profit = revenue - fuelCost - perDiemTotal - otherTotal
 
   const kmPerL = distance > 0 && totalFuelForKmpl > 0
@@ -358,18 +370,18 @@ function CloseForm({
       let finalKmPerL: number | null = null
 
       if (mode === 'close') {
-        // Create TRIP_CLOSING fuel transaction if liters provided.
-        // NOTE: fuel_transactions is still localStorage-backed until the fuel module
-        // migrates; this write intentionally uses db so the (not-yet-migrated) fuel
-        // ledger stays coherent. The trip↔fuel link is by id and works across stores.
-        if (closingL > 0) {
+        // Single source of truth for closing fuel: create the TRIP_CLOSING entry in
+        // the fuel ledger only when none is already linked (the fuel module may have
+        // recorded it). Price is the real entered/ledger price — never hardcoded.
+        // The trip↔fuel link is by tripId + tripFuelRole and works across stores.
+        if (closingL > 0 && fuelClosing.length === 0) {
           db.add<FuelTransaction>('fuelTransactions', {
             id: uid('ftx'),
             date: new Date().toISOString().slice(0, 10),
             vehicleId: round.vehicleId ?? '',
             liters: closingL,
-            pricePerL: fuelPricePerL,
-            total: closingL * fuelPricePerL,
+            pricePerL: closingPrice,
+            total: closingL * closingPrice,
             source: 'FACTORY_TANK',
             tripId: round.id,
             status: 'TRIP_LINKED',
@@ -539,6 +551,13 @@ function CloseForm({
                     disabled
                     style={{ background: 'var(--bg)' }}
                   />
+                  {!isPerKg && (l.weight || 0) > 0 && (
+                    (l.weight || 0) > 100
+                      ? <div style={{ fontSize: 11, marginTop: 4, color: 'var(--red)', fontWeight: 600 }}>
+                          ⚠️ {(l.weight || 0).toLocaleString()} ตัน สูงผิดปกติ — น่าจะกรอกจากใบชั่ง (กก.) ผิดหน่วยตอนเพิ่มขา
+                        </div>
+                      : <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>= {((l.weight || 0) * 1000).toLocaleString()} กก.</div>
+                  )}
                 </Field>
                 {!isReturn && (
                   <Field label={`น้ำหนักปลายทาง (${wUnit})${isLump ? '' : ' *'}`}>
@@ -800,16 +819,42 @@ function CloseForm({
               </div>
             ))
           ) : (
-            <Field label="จำนวนน้ำมันเติมปลายรอบ (ลิตร)">
-              <input
-                type="number"
-                step="0.01"
-                value={closingFuelLiters}
-                onChange={e => setClosingFuelLiters(e.target.value)}
-                placeholder="0.00"
-                disabled={isClosed}
-              />
-            </Field>
+            <>
+              <div className="grid-2" style={{ gap: 12 }}>
+                <Field label="จำนวนน้ำมันเติมปลายรอบ (ลิตร)">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={closingFuelLiters}
+                    onChange={e => setClosingFuelLiters(e.target.value)}
+                    placeholder="0.00"
+                    disabled={isClosed}
+                  />
+                </Field>
+                <Field label="ราคา (฿/ลิตร)">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={closingFuelPrice}
+                    onChange={e => setClosingFuelPrice(e.target.value)}
+                    placeholder={ledgerFuelPrice != null ? ledgerFuelPrice.toFixed(2) : '0.00'}
+                    disabled={isClosed}
+                  />
+                  <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                    {ledgerFuelPrice != null
+                      ? <>ค่าเริ่มต้นจากราคาน้ำมันล่าสุดในระบบ {ledgerFuelPrice.toFixed(2)} ฿/ลิตร (แก้ไขได้)</>
+                      : <>ยังไม่มีราคาน้ำมันในระบบ — กรุณากรอกราคา</>}
+                  </div>
+                </Field>
+              </div>
+              {closingL > 0 && (
+                <div style={{ fontSize: 12, marginTop: 6, color: closingPrice > 0 ? 'var(--text-muted)' : 'var(--red)', fontWeight: closingPrice > 0 ? 400 : 600 }}>
+                  {closingPrice > 0
+                    ? <>ต้นทุนน้ำมันปลายรอบ = {closingL.toFixed(2)} ลิตร × {closingPrice.toFixed(2)} = <span className="mono" style={{ fontWeight: 600 }}>{db.thb(closingL * closingPrice)}</span></>
+                    : <>⚠️ ยังไม่มีราคาน้ำมัน — ต้นทุนจะเป็น 0 กรุณากรอกราคา/ลิตร</>}
+                </div>
+              )}
+            </>
           )}
         </div>
 
