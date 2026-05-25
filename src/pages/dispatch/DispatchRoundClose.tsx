@@ -264,12 +264,21 @@ function CloseForm({
   const distance = endMileage && round.startOdometer != null
     ? Math.max(0, Number(endMileage) - round.startOdometer)
     : 0
-  const fuelCost = round.cost || 0
-  const profit = revenue - fuelCost - perDiemTotal - otherTotal
 
-  // New KM/L calc: INTERMEDIATE + TRIP_CLOSING input (TRIP_OPENING excluded)
+  // KM/L uses INTERMEDIATE + NORMAL + the closing fill (TRIP_OPENING excluded)
   const closingL = parseFloat(closingFuelLiters) || 0
   const totalFuelForKmpl = sumIntermediate + sumNormal + closingL
+
+  // Fuel cost for THIS round = intermediate + normal + closing fills. TRIP_OPENING
+  // is the previous round's closing fill, so it's excluded. Include the closing
+  // fill being entered now so the net profit reflects it before saving.
+  const fuelPricePerL = 35
+  const recordedFuelCost = linkedFuelTxs
+    .filter(t => t.tripFuelRole !== 'TRIP_OPENING')
+    .reduce((s, t) => s + (t.total ?? t.liters * (t.pricePerL ?? fuelPricePerL)), 0)
+  const fuelCost = recordedFuelCost + (fuelClosing.length > 0 ? 0 : closingL * fuelPricePerL)
+  const profit = revenue - fuelCost - perDiemTotal - otherTotal
+
   const kmPerL = distance > 0 && totalFuelForKmpl > 0
     ? distance / totalFuelForKmpl
     : round.liters && distance ? distance / round.liters : null
@@ -313,9 +322,8 @@ function CloseForm({
         return `ขา ${i + 1}: กรุณากรอกน้ำหนักปลายทาง`
       if (l.deliveredWeight > (l.weight || 0))
         return `ขา ${i + 1}: น้ำหนักปลาย (${l.deliveredWeight}) เกินน้ำหนักต้น (${l.weight})`
-      const lossKg = ((l.weight || 0) - l.deliveredWeight) * 1000
-      if (lossKg > MAX_WEIGHT_LOSS_KG)
-        return `ขา ${i + 1}: น้ำหนักหาย ${lossKg.toFixed(0)} กก. เกินกำหนด ${MAX_WEIGHT_LOSS_KG} กก.`
+      // Weight loss over the threshold is allowed (it may be the real delivered
+      // weight). It triggers a confirm at close time instead of blocking here.
     }
     return null
   }
@@ -328,6 +336,20 @@ function CloseForm({
       if (mode === 'close') {
         const err = validateClose(newLegs)
         if (err) throw new Error(err)
+        // Weight loss beyond the threshold is allowed but must be confirmed.
+        const lossy = newLegs.filter(l =>
+          l.legType !== 'return' && l.deliveredWeight != null &&
+          ((l.weight || 0) - l.deliveredWeight) * 1000 > MAX_WEIGHT_LOSS_KG,
+        )
+        if (lossy.length > 0) {
+          const detail = lossy
+            .map(l => `ขา ${newLegs.indexOf(l) + 1}: หาย ${(((l.weight || 0) - (l.deliveredWeight ?? 0)) * 1000).toFixed(0)} กก.`)
+            .join('\n')
+          if (!window.confirm(`⚠️ น้ำหนักหายเกิน ${MAX_WEIGHT_LOSS_KG} กก.\n${detail}\n\nยืนยันปิดงานด้วยน้ำหนักจริงนี้หรือไม่?`)) {
+            setSaving(false)
+            return
+          }
+        }
       }
       const em = endMileage ? Number(endMileage) : null
       const dist = em != null && round.startOdometer != null ? Math.max(0, em - round.startOdometer) : null
@@ -346,8 +368,8 @@ function CloseForm({
             date: new Date().toISOString().slice(0, 10),
             vehicleId: round.vehicleId ?? '',
             liters: closingL,
-            pricePerL: 35,
-            total: closingL * 35,
+            pricePerL: fuelPricePerL,
+            total: closingL * fuelPricePerL,
             source: 'FACTORY_TANK',
             tripId: round.id,
             status: 'TRIP_LINKED',
@@ -391,6 +413,7 @@ function CloseForm({
           perDiem: perDiemTotal,
           revenue,
           totalAmount: revenue,
+          cost: mode === 'close' ? fuelCost : round.cost,
           liters: finalLiters,
           kmPerL: finalKmPerL,
           roundStatus: mode === 'close' ? 'closed' : 'draft',
