@@ -89,6 +89,22 @@ export function Icon({ name, size = 18, color = 'currentColor', style, className
           <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.5 5.5l2 2M16.5 16.5l2 2M5.5 18.5l2-2M16.5 7.5l2-2" />
         </svg>
       )
+    case 'wheel':
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="9.5" strokeWidth="2.4" />
+          <circle cx="12" cy="12" r="5.4" strokeWidth="1.4" />
+          <circle cx="12" cy="12" r="1.5" fill={color} stroke="none" />
+          <g fill={color} stroke="none">
+            <circle cx="12" cy="8.7" r="0.85" />
+            <circle cx="14.86" cy="10.35" r="0.85" />
+            <circle cx="14.86" cy="13.65" r="0.85" />
+            <circle cx="12" cy="15.3" r="0.85" />
+            <circle cx="9.14" cy="13.65" r="0.85" />
+            <circle cx="9.14" cy="10.35" r="0.85" />
+          </g>
+        </svg>
+      )
     case 'chart':
       return (
         <svg {...props}>

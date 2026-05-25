@@ -652,20 +652,19 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       <div className="tabs no-print" style={{ marginBottom: 22 }}>
         {(
           [
-            ['overview', 'fuel', '📊 ภาพรวม', 'fuel'],
-            ['express', 'express', '⚡ คีย์ด่วน', 'edit'],
-            ['floating', 'floating', '🟡 น้ำมันลอย', 'alert'],
-            ['report', 'report', '📋 รายงาน', 'chart'],
-            ['summary', 'summary', '📦 สรุปคลัง', 'download'],
-            ['reconcile', 'reconcile', '🔍 ตรวจสอบข้อมูล', 'search'],
-          ] as [string, string, string, string][]
-        ).map(([id, route, label, ic]) => (
+            ['overview', 'fuel', '📊 ภาพรวม'],
+            ['express', 'express', '⚡ คีย์ด่วน'],
+            ['floating', 'floating', '🟡 น้ำมันลอย'],
+            ['report', 'report', '📈 รายงาน'],
+            ['summary', 'summary', '📦 สรุปคลัง'],
+            ['reconcile', 'reconcile', '🔍 ตรวจสอบข้อมูล'],
+          ] as [string, string, string][]
+        ).map(([id, route, label]) => (
           <button
             key={id}
             className={`tab ${current === id ? 'active' : ''}`}
             onClick={() => setActive('fuel' + (route === 'fuel' ? '' : '.' + route))}
           >
-            <Icon name={ic} size={14} style={{ marginRight: 6, verticalAlign: -3 }} />
             {label}
           </button>
         ))}
