@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, Customer, FuelRound } from '../../types'
+import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -87,12 +87,10 @@ function priceUnitLabel(mode: LegFormState['priceMode']): string {
 
 function LegModal({
   initial,
-  customers,
   onSave,
   onCancel,
 }: {
   initial: LegFormState
-  customers: Customer[]
   onSave: (f: LegFormState) => void
   onCancel: () => void
 }) {
@@ -125,7 +123,6 @@ function LegModal({
     if (!f.origin.trim()) return alert('กรุณากรอกต้นทาง')
     if (!f.destination.trim()) return alert('กรุณากรอกปลายทาง')
     if (!isReturn) {
-      if (!f.customerId) return alert('กรุณาเลือกลูกค้า')
       if (!isLump && !Number(f.weight)) return alert('กรุณากรอกน้ำหนักโหลด')
       if (!Number(f.price)) return alert(`กรุณากรอกราคา (${priceUnitLabel(f.priceMode)})`)
     }
@@ -166,12 +163,6 @@ function LegModal({
           </div>
           {!isReturn && (
             <>
-              <Field label="ลูกค้า *">
-                <select value={f.customerId} onChange={e => set('customerId', e.target.value)}>
-                  <option value="">-- เลือก --</option>
-                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </Field>
               <div className="grid-2" style={{ gap: 12 }}>
                 <Field label="ประเภทสินค้า">
                   <input value={f.cargoType} onChange={e => set('cargoType', e.target.value)} placeholder="เช่น ปูนซีเมนต์" />
@@ -489,7 +480,6 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
-  const { data: customers = [] } = useList<Customer>('customers')
   const insertLeg = useInsert<DispatchLeg>('dispatch_legs')
   const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
   const removeLeg = useDelete('dispatch_legs')
@@ -693,7 +683,6 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                 <tr>
                   <th>ขา</th>
                   <th>เส้นทาง</th>
-                  <th>ลูกค้า</th>
                   <th>สินค้า</th>
                   <th>ประเภท</th>
                   <th className="num">น้ำหนัก (ตัน)</th>
@@ -709,7 +698,6 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                       <div style={{ fontSize: 13 }}>{l.origin}</div>
                       <div className="muted" style={{ fontSize: 11.5 }}>→ {l.destination}</div>
                     </td>
-                    <td>{l.customerId ? (customers.find(c => c.id === l.customerId)?.name ?? '—') : <span className="muted">—</span>}</td>
                     <td>{l.cargoType || <span className="muted">—</span>}</td>
                     <td><span className="badge" style={{ fontSize: 11 }}>{legTypeLabel(l.legType)}</span></td>
                     <td className="num">{(l.weight || 0).toFixed(2)}</td>
@@ -755,7 +743,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                   </tr>
                 ))}
                 <tr style={{ fontWeight: 600, background: 'var(--bg)' }}>
-                  <td colSpan={5} className="right">รวม {legs.length} ขา</td>
+                  <td colSpan={4} className="right">รวม {legs.length} ขา</td>
                   <td className="num">{totalWeight.toFixed(2)}</td>
                   <td className="num right" style={{ color: 'var(--green)' }}>{db.thb(totalRevenue)}</td>
                   {!isClosed && <td></td>}
@@ -771,7 +759,6 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       {editingLeg && (
         <LegModal
           initial={editingLeg.data}
-          customers={customers}
           onSave={saveLeg}
           onCancel={() => setEditingLeg(null)}
         />
