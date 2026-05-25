@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { User } from '../../types'
+import { canAccessRoute } from '../../lib/permissions'
 import { Icon } from '../ui'
 
 interface MenuItem {
@@ -131,7 +132,6 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
     })
   }, [active, collapsed])
 
-  const can = (roles: string[]) => roles.includes(user.role)
   const sectionActive = (m: MenuItem) =>
     active === m.id ||
     (m.sub != null && m.sub.some(s => s.id === active)) ||
@@ -152,9 +152,12 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
       </div>
 
       <nav className="nav">
-        {MENU.filter(m => can(m.roles)).map(m => {
+        {MENU.filter(m => canAccessRoute(m.id, user.role)).map(m => {
+          const visibleSub = m.sub?.filter(s => canAccessRoute(s.id, user.role)) ?? []
+          // A section with sub-items but none accessible to this role is hidden.
+          if (m.sub && visibleSub.length === 0) return null
           const sec = sectionActive(m)
-          const hasSub = !!m.sub
+          const hasSub = visibleSub.length > 0
 
           return (
             <div className="nav-group" key={m.id}>
@@ -193,7 +196,7 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
 
               {hasSub && open[m.id] && !collapsed && (
                 <div className="subnav">
-                  {m.sub!.map(s => (
+                  {visibleSub.map(s => (
                     <div
                       key={s.id}
                       className={`subnav-item ${active === s.id ? 'active' : ''}`}

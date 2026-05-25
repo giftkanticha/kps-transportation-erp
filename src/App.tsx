@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { db } from './lib/db'
 import { useAuth } from './context/AuthContext'
+import { canAccessRoute } from './lib/permissions'
 import { LoginScreen } from './pages/auth/LoginScreen'
 import { Sidebar } from './components/layout/Sidebar'
 import { Topbar } from './components/layout/Topbar'
@@ -111,6 +112,16 @@ export default function App() {
   }
 
   const renderPage = () => {
+    if (!canAccessRoute(active, legacyUser.role)) {
+      return (
+        <div className="page-head">
+          <div>
+            <h1 className="page-title">ไม่มีสิทธิ์เข้าถึง</h1>
+            <div className="page-sub">บัญชีของคุณไม่มีสิทธิ์ดูหน้านี้ — กรุณาติดต่อผู้ดูแลระบบ</div>
+          </div>
+        </div>
+      )
+    }
     switch (active) {
       case 'dashboard':
         return <Dashboard user={legacyUser} setActive={setActive} />
