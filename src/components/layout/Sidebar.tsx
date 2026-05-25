@@ -15,6 +15,7 @@ interface SubMenuItem {
   id: string
   label: string
   emoji?: string
+  icon?: string
 }
 
 const MENU: MenuItem[] = [
@@ -38,7 +39,7 @@ const MENU: MenuItem[] = [
     id: 'tires', label: 'ระบบยาง', icon: 'tire', roles: ['admin', 'manager'],
     sub: [
       { id: 'tires', label: 'รายการยางทั้งหมด', emoji: '📋' },
-      { id: 'tires.layout', label: 'ผังยางปัจจุบัน', emoji: '🛞' },
+      { id: 'tires.layout', label: 'ผังยางปัจจุบัน', icon: 'tire' },
       { id: 'tires.manage', label: 'จัดการและสลับยาง', emoji: '🔄' },
       { id: 'tires.history', label: 'ประวัติยางรายเส้น', emoji: '🕘' },
       { id: 'tires.scrapped', label: 'ยางหมดสภาพ', emoji: '🗑️' },
@@ -203,7 +204,9 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
                       className={`subnav-item ${active === s.id ? 'active' : ''}`}
                       onClick={() => setActive(s.id)}
                     >
-                      {s.emoji && <span className="emoji">{s.emoji}</span>}
+                      {s.icon
+                        ? <span className="emoji"><Icon name={s.icon} size={15} color="#0F172A" /></span>
+                        : s.emoji && <span className="emoji">{s.emoji}</span>}
                       <span>{s.label}</span>
                     </div>
                   ))}
