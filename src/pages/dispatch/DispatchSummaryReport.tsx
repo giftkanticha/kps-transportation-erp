@@ -165,14 +165,13 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   )
 
   const selVehicle = vehicles.find(v => v.id === vehicleId)
-  const hideOnPrint = vehicleId ? ' no-print' : ''
   const numFmt = (v: number | null | undefined) => (v != null && v !== 0 ? db.fmt(v) : '–')
   const priceFmt = (v: number | null | undefined) =>
     v != null && v !== 0 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '–'
 
   return (
     <div>
-      <div className={`page-head${hideOnPrint}`}>
+      <div className="page-head">
         <div>
           <h1 className="page-title">รายงานสรุปงานขนส่ง</h1>
           <div className="page-sub">รายงาน P&amp;L ต่อรอบ พร้อม highlight KM/L &lt; {DSP_KMPL_THRESHOLD}</div>
@@ -218,7 +217,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
       </div>
 
       {/* KPI strip */}
-      <div className={`grid-4${hideOnPrint}`} style={{ marginBottom: 16, gap: 12 }}>
+      <div className="grid-4" style={{ marginBottom: 16, gap: 12 }}>
         <div className="card kpi">
           <div className="label">รายได้รวม</div>
           <div className="row"><div className="icn-box green"><Icon name="money" size={18} /></div>
@@ -247,7 +246,6 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
 
       {abnormal.length > 0 && (
         <div
-          className={hideOnPrint.trim()}
           style={{
             padding: 12, marginBottom: 14, borderRadius: 8,
             background: '#FEE2E2', border: '1px solid #EF4444', fontSize: 13,
@@ -258,7 +256,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
       )}
 
       {/* Table */}
-      <div className={`card${hideOnPrint}`}>
+      <div className="card">
         <div className="head">
           <h3>รายการรอบงาน ({rows.length} รอบ · {months} เดือน)</h3>
         </div>
