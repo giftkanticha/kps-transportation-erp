@@ -100,6 +100,8 @@ export interface DispatchLeg {
   perDiem?: number
   notes?: string
   closed?: boolean
+  dispatchId?: string
+  sortOrder?: number
 }
 
 export interface OtherExpense {

@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
-import type { Dispatch, Vehicle } from '../../types'
+import { useList } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
+import type { Vehicle, Employee } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 const THAI_MONTHS = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']
@@ -28,10 +30,11 @@ export function DispatchFuelReport() {
   const [year, setYear] = useState(today.getFullYear())
   const [vehicleId, setVehicleId] = useState('')
 
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: dispatches = [] } = useDispatches()
+  const { data: employees = [] } = useList<Employee>('employees')
 
   const rows = useMemo<FuelRow[]>(() => {
-    const dispatches = db.getAll<Dispatch>('dispatch')
     return dispatches
       .filter(d => d.status === 'completed' && d.distance != null && d.liters != null)
       .filter(d => {
@@ -52,7 +55,7 @@ export function DispatchFuelReport() {
           date: d.date,
           vehicleId: d.vehicleId ?? '',
           plate: v?.plate ?? '—',
-          driverName: db.nameOf('employees', d.driverId ?? ''),
+          driverName: employees.find(e => e.id === d.driverId)?.name ?? '—',
           cargo: d.legs?.[0]?.cargo ?? '—',
           distance,
           liters,
@@ -62,7 +65,7 @@ export function DispatchFuelReport() {
         }
       })
       .sort((a, b) => b.date.localeCompare(a.date))
-  }, [month, year, vehicleId, vehicles])
+  }, [month, year, vehicleId, vehicles, dispatches, employees])
 
   const totals = useMemo(() => {
     const totalDistance = rows.reduce((s, r) => s + r.distance, 0)
