@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
+import { usePrint } from '../../hooks/usePrint'
 import type { Vehicle, Employee, Dispatch, FuelRound } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -45,6 +46,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   const { data: dispatch = [] } = useDispatches()
   const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
   const drivers = employees.filter(e => e.position === 'คนขับ')
+  const { print } = usePrint()
 
   const rows = useMemo<Row[]>(() => {
     const rounds = dispatch
@@ -111,15 +113,72 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
     return ms.size
   }, [rows])
 
+  // Per-leg "legacy form" rows — only when a single vehicle is selected.
+  const legRows = useMemo(() => {
+    if (!vehicleId) return []
+    const sorted = [...rows].sort((a, b) =>
+      (a.round.depart || a.round.date || '').localeCompare(b.round.depart || b.round.date || ''))
+    const out: {
+      key: string; date: string; plate: string; cargo: string
+      weight: number | null; deliveredWeight: number | null; price: number | null
+      amount: number; perDiem: number | null
+      liters: number | null; endOdometer: number | null; kmPerL: number | null
+    }[] = []
+    sorted.forEach(r => {
+      const date = (r.round.depart || r.round.date || '').slice(0, 10)
+      const plate = r.vehicle?.plate ?? '—'
+      const legs = r.round.legs ?? []
+      if (legs.length === 0) {
+        out.push({
+          key: r.round.id, date, plate, cargo: '—',
+          weight: null, deliveredWeight: null, price: null,
+          amount: r.revenue, perDiem: r.perDiemTotal,
+          liters: r.round.liters, endOdometer: r.round.endOdometer, kmPerL: r.kmPerL,
+        })
+        return
+      }
+      legs.forEach((l, i) => {
+        out.push({
+          key: `${r.round.id}-${i}`, date, plate,
+          cargo: l.cargo || [l.origin, l.destination].filter(Boolean).join('-') || '—',
+          weight: l.weight ?? null,
+          deliveredWeight: l.deliveredWeight ?? null,
+          price: l.price ?? null,
+          amount: l.amount || 0,
+          perDiem: l.perDiem ?? null,
+          liters: i === 0 ? r.round.liters : null,
+          endOdometer: i === 0 ? r.round.endOdometer : null,
+          kmPerL: i === 0 ? r.kmPerL : null,
+        })
+      })
+    })
+    return out
+  }, [rows, vehicleId])
+
+  const formTotals = legRows.reduce(
+    (a, r) => ({
+      amount: a.amount + (r.amount || 0),
+      perDiem: a.perDiem + (r.perDiem || 0),
+      liters: a.liters + (r.liters || 0),
+    }),
+    { amount: 0, perDiem: 0, liters: 0 },
+  )
+
+  const selVehicle = vehicles.find(v => v.id === vehicleId)
+  const hideOnPrint = vehicleId ? ' no-print' : ''
+  const numFmt = (v: number | null | undefined) => (v != null && v !== 0 ? db.fmt(v) : '–')
+  const priceFmt = (v: number | null | undefined) =>
+    v != null && v !== 0 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '–'
+
   return (
     <div>
-      <div className="page-head">
+      <div className={`page-head${hideOnPrint}`}>
         <div>
           <h1 className="page-title">รายงานสรุปงานขนส่ง</h1>
           <div className="page-sub">รายงาน P&amp;L ต่อรอบ พร้อม highlight KM/L &lt; {DSP_KMPL_THRESHOLD}</div>
         </div>
         <div className="actions no-print">
-          <button className="btn" onClick={() => window.print()}>
+          <button className="btn" onClick={() => print('landscape')}>
             <Icon name="download" size={15} /> พิมพ์ / PDF
           </button>
         </div>
@@ -159,7 +218,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
       </div>
 
       {/* KPI strip */}
-      <div className="grid-4" style={{ marginBottom: 16, gap: 12 }}>
+      <div className={`grid-4${hideOnPrint}`} style={{ marginBottom: 16, gap: 12 }}>
         <div className="card kpi">
           <div className="label">รายได้รวม</div>
           <div className="row"><div className="icn-box green"><Icon name="money" size={18} /></div>
@@ -188,6 +247,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
 
       {abnormal.length > 0 && (
         <div
+          className={hideOnPrint.trim()}
           style={{
             padding: 12, marginBottom: 14, borderRadius: 8,
             background: '#FEE2E2', border: '1px solid #EF4444', fontSize: 13,
@@ -198,7 +258,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
       )}
 
       {/* Table */}
-      <div className="card">
+      <div className={`card${hideOnPrint}`}>
         <div className="head">
           <h3>รายการรอบงาน ({rows.length} รอบ · {months} เดือน)</h3>
         </div>
@@ -295,6 +355,77 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
           </table>
         </div>
       </div>
+
+      {/* Legacy per-trip form — only when a single vehicle is selected */}
+      {vehicleId && (
+        <>
+          <div className="print-only" style={{ marginBottom: 12 }}>
+            <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>รายงานรายเที่ยว</div>
+            <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
+              KPS Transportation ERP · ทะเบียน {selVehicle?.plate ?? '—'} · {from} – {to} · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())}
+            </div>
+          </div>
+
+          <div className="card print-area">
+            <div className="head no-print">
+              <h3>แบบฟอร์มรายเที่ยว — {selVehicle?.plate ?? '—'} ({legRows.length} เที่ยว)</h3>
+            </div>
+            <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+              <table className="tbl print-compact">
+                <thead>
+                  <tr>
+                    <th>วันที่</th>
+                    <th>ทะเบียน</th>
+                    <th>รายการ</th>
+                    <th className="num">น.น.ต้นทาง</th>
+                    <th className="num">น.น.ปลายทาง</th>
+                    <th className="num">ค่าบรรทุก</th>
+                    <th className="num">จำนวนเงิน</th>
+                    <th className="num">เบี้ยเลี้ยง</th>
+                    <th className="num">น้ำมันที่เติม</th>
+                    <th className="num">เข็มไมล์</th>
+                    <th className="num">อัตราการวิ่ง</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {legRows.map(r => (
+                    <tr key={r.key}>
+                      <td className="num muted">{r.date}</td>
+                      <td className="mono">{r.plate}</td>
+                      <td>{r.cargo}</td>
+                      <td className="num">{numFmt(r.weight)}</td>
+                      <td className="num">{numFmt(r.deliveredWeight)}</td>
+                      <td className="num">{priceFmt(r.price)}</td>
+                      <td className="num">{db.fmt(r.amount)}</td>
+                      <td className="num">{numFmt(r.perDiem)}</td>
+                      <td className="num">{numFmt(r.liters)}</td>
+                      <td className="num">{numFmt(r.endOdometer)}</td>
+                      <td className="num">{r.kmPerL != null ? r.kmPerL.toFixed(2) : '–'}</td>
+                    </tr>
+                  ))}
+                  {legRows.length === 0 && (
+                    <tr>
+                      <td colSpan={11} style={{ textAlign: 'center', padding: 24, color: 'var(--text-2)' }}>
+                        ไม่พบเที่ยวในช่วงเวลาที่เลือก
+                      </td>
+                    </tr>
+                  )}
+                  {legRows.length > 0 && (
+                    <tr style={{ fontWeight: 600, background: 'var(--bg)' }}>
+                      <td colSpan={6} className="right">รวม {legRows.length} เที่ยว</td>
+                      <td className="num">{db.fmt(formTotals.amount)}</td>
+                      <td className="num">{db.fmt(formTotals.perDiem)}</td>
+                      <td className="num">{db.fmt(formTotals.liters)}</td>
+                      <td></td>
+                      <td></td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }
