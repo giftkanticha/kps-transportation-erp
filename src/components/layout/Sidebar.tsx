@@ -39,7 +39,7 @@ const MENU: MenuItem[] = [
     sub: [
       { id: 'tires', label: 'รายการยางทั้งหมด', icon: 'list' },
       { id: 'tires.layout', label: 'ผังยางปัจจุบัน', icon: 'wheel' },
-      { id: 'tires.manage', label: 'จัดการและสลับยาง', icon: 'wrench' },
+      { id: 'tires.manage', label: 'จัดการและสลับยาง', icon: 'swap' },
       { id: 'tires.history', label: 'ประวัติยางรายเส้น', icon: 'history' },
       { id: 'tires.scrapped', label: 'ยางหมดสภาพ', icon: 'trash' },
     ],
