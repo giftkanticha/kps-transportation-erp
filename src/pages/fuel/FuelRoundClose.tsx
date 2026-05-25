@@ -1,5 +1,7 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { db, uid, HOME_BASE, DSP_KMPL_THRESHOLD } from '../../lib/db'
+import { useList, useUpdate } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
 import type { Vehicle, FuelRound, FuelRefill, Dispatch } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -38,8 +40,9 @@ function nowLocal(): string {
 }
 
 function OpenRoundsPicker({ setSubject }: { setSubject: (s: unknown) => void }) {
-  const rounds = db.getAll<FuelRound>('fuelRounds').filter(r => r.status === 'open')
-  const vehicles = db.getAll<Vehicle>('vehicles')
+  const { data: allRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const rounds = allRounds.filter(r => r.status === 'open')
   return (
     <div>
       <div className="page-head">
@@ -104,11 +107,15 @@ function CloseForm({
   setActive,
   setSubject,
 }: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
-  const [tick, setTick] = useState(0)
-  const round = useMemo(() => db.get<FuelRound>('fuelRounds', roundId), [roundId, tick])
-  const vehicle = round ? db.get<Vehicle>('vehicles', round.vehicleId) : undefined
+  const { data: allRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: dispatches = [] } = useDispatches()
+  const updateRound = useUpdate<FuelRound>('fuel_rounds')
+  const updateDispatch = useUpdate<Dispatch>('dispatch')
+  const round = allRounds.find(r => r.id === roundId)
+  const vehicle = round ? vehicles.find(v => v.id === round.vehicleId) : undefined
   const linkedDispatch = round?.dispatchRoundId
-    ? db.get<Dispatch>('dispatch', round.dispatchRoundId)
+    ? dispatches.find(d => d.id === round.dispatchRoundId) ?? null
     : null
 
   const [endMileage, setEndMileage] = useState('')
@@ -165,7 +172,7 @@ function CloseForm({
     .reduce((s, r) => s + r.cost, 0)
   const totalFuelCost = intermediateCost + endCost
 
-  const submit = () => {
+  const submit = async () => {
     if (saving) return
     if (!endMileage || isNaN(em)) return setToast({ kind: 'error', msg: 'เลขไมล์ไม่ถูกต้อง' })
     if (em <= startMileage) return setToast({ kind: 'error', msg: 'เลขไมล์ปลายต้องมากกว่าไมล์เริ่ม' })
@@ -187,21 +194,19 @@ function CloseForm({
         at: endAt,
         notes: notes.trim() || undefined,
       }
-      db.update<FuelRound>('fuelRounds', round.id, {
-        refills: [...round.refills, endRefill],
-        status: 'closed',
+      await updateRound.mutateAsync({
+        id: round.id,
+        patch: { refills: [...round.refills, endRefill], status: 'closed' },
       })
 
       // If linked dispatch round exists, update its cost field with fuel cost
       if (linkedDispatch) {
-        db.update<Dispatch>('dispatch', linkedDispatch.id, {
-          cost: totalFuelCost,
-          liters: consumed,
-          kmPerL: efficiency,
+        await updateDispatch.mutateAsync({
+          id: linkedDispatch.id,
+          patch: { cost: totalFuelCost, liters: consumed, kmPerL: efficiency },
         })
       }
 
-      setTick(t => t + 1)
       setToast({ kind: 'success', msg: `✅ ปิดรอบ ${round.code} เรียบร้อย` })
       setTimeout(() => {
         setSubject(null)

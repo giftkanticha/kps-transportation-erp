@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { db } from '../../lib/db'
+import { useList, useInsert } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
 import type { Vehicle, Employee, Dispatch, User } from '../../types'
 import { Icon, StatusBadge, Field } from '../../components/ui'
 
@@ -38,12 +40,13 @@ function nowLocal(): string {
 }
 
 export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
-  const [tick, setTick] = useState(0)
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
-  const employees = useMemo(() => db.getAll<Employee>('employees'), [])
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: dispatches = [] } = useDispatches()
+  const insertDispatch = useInsert<Dispatch>('dispatch')
   const drafts = useMemo(
-    () => db.getAll<Dispatch>('dispatch').filter(d => d.roundStatus === 'draft'),
-    [tick],
+    () => dispatches.filter(d => d.roundStatus === 'draft'),
+    [dispatches],
   )
 
   const drivers = employees.filter(e => e.position === 'คนขับ')
@@ -56,14 +59,14 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
   const [toast, setToast] = useState<ToastState | null>(null)
 
   const vehicle = vehicles.find(v => v.id === vehicleId)
-  const lastMileage = vehicleId ? db.lastClosedMileage(vehicleId) : null
+  const lastMileage = vehicleId ? db.lastClosedMileage(vehicleId, dispatches) : null
   const lastClosedRound = useMemo(() => {
     if (!vehicleId) return null
-    const closed = db.getAll<Dispatch>('dispatch')
+    const closed = dispatches
       .filter(d => d.vehicleId === vehicleId && d.roundStatus === 'closed')
       .sort((a, b) => (b.returnAt || b.depart || '').localeCompare(a.returnAt || a.depart || ''))
     return closed[0] ?? null
-  }, [vehicleId, tick])
+  }, [vehicleId, dispatches])
 
   // Auto-fill start mileage when vehicle changes
   useEffect(() => {
@@ -92,42 +95,44 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
     return null
   }
 
-  const createRound = (gotoDetail: boolean) => {
+  const createRound = async (gotoDetail: boolean) => {
     const err = validate()
     if (err) { setToast({ kind: 'error', msg: err }); return }
-    const round = db.add<Partial<Dispatch>>('dispatch', {
-      code: db.nextRoundCode(),
-      customerId: '',
-      driverId,
-      vehicleId,
-      subcontractorId: null,
-      date: departAt.slice(0, 10),
-      depart: departAt,
-      eta: '',
-      status: 'scheduled',
-      progress: 0,
-      startOdometer: Number(startMileage),
-      endOdometer: null,
-      distance: null,
-      liters: null,
-      kmPerL: null,
-      perDiem: null,
-      notes,
-      legs: [],
-      totalAmount: 0,
-      revenue: 0,
-      cost: 0,
-      roundStatus: 'draft',
-      otherExpenses: [],
-    })
-    setTick(t => t + 1)
-    setToast({ kind: 'success', msg: `✅ เปิดรอบ ${round.code} เรียบร้อย` })
-    if (gotoDetail) {
-      setSubject({ type: 'round', id: round.id })
-      setActive('dispatch.round')
-    } else {
-      setVehicleId(''); setDriverId(user.role === 'driver' ? user.id : '')
-      setStartMileage(''); setNotes(''); setDepartAt(nowLocal())
+    try {
+      const round = await insertDispatch.mutateAsync({
+        code: db.nextRoundCode(dispatches),
+        customerId: null,
+        driverId,
+        vehicleId,
+        subcontractorId: null,
+        date: departAt.slice(0, 10),
+        depart: departAt,
+        eta: '',
+        status: 'scheduled',
+        progress: 0,
+        startOdometer: Number(startMileage),
+        endOdometer: null,
+        distance: null,
+        liters: null,
+        kmPerL: null,
+        perDiem: null,
+        notes,
+        totalAmount: 0,
+        revenue: 0,
+        cost: 0,
+        roundStatus: 'draft',
+        otherExpenses: [],
+      })
+      setToast({ kind: 'success', msg: `✅ เปิดรอบ ${round.code} เรียบร้อย` })
+      if (gotoDetail) {
+        setSubject({ type: 'round', id: round.id })
+        setActive('dispatch.round')
+      } else {
+        setVehicleId(''); setDriverId(user.role === 'driver' ? user.id : '')
+        setStartMileage(''); setNotes(''); setDepartAt(nowLocal())
+      }
+    } catch (e) {
+      setToast({ kind: 'error', msg: '❌ บันทึกไม่สำเร็จ: ' + (e as Error).message })
     }
   }
 

@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
-import { db, uid } from '../../lib/db'
-import { useList } from '../../hooks/useTable'
-import type { User, Vehicle, Employee, Dispatch, Tire, Expense, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner } from '../../types'
+import { db } from '../../lib/db'
+import { useList, useInsert } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
+import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
 
 // ─── Mock data ─────────────────────────────────────────────────────────────────
@@ -52,6 +53,7 @@ function RegistrationModal({ reg, onClose }: { reg: RegItem; onClose: () => void
     nextDate: '', nextNotes: '',
   })
   const [saving, setSaving] = useState(false)
+  const insertReg = useInsert<{ data: Record<string, unknown> }>('vehicle_registrations')
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const sectionStyle = { background: '#F8FAFC', borderRadius: 10, padding: '14px 16px', marginBottom: 14 }
@@ -59,27 +61,30 @@ function RegistrationModal({ reg, onClose }: { reg: RegItem; onClose: () => void
   const inputStyle = { width: '100%', height: 34, padding: '0 10px', border: '1px solid var(--line)', borderRadius: 7, fontSize: 13, boxSizing: 'border-box' as const, background: '#fff' }
   const labelStyle = { fontSize: 12, color: 'var(--text-muted)', display: 'block' as const, marginBottom: 5 }
 
-  const save = () => {
+  const save = async () => {
     if (!form.cost || !form.date) return
     setSaving(true)
-    db.add('vehicleRegistrations', {
-      id: uid('vreg'),
-      plate: reg.plate,
-      label: reg.label,
-      date: form.date,
-      type: form.type,
-      duration: form.duration,
-      cost: Number(form.cost),
-      notes: form.notes,
-      payDate: form.payDate,
-      payMethod: form.payMethod,
-      payRef: form.payRef,
-      nextDate: form.nextDate,
-      nextNotes: form.nextNotes,
-      createdAt: new Date().toISOString(),
-    })
-    setSaving(false)
-    onClose()
+    try {
+      await insertReg.mutateAsync({
+        data: {
+          plate: reg.plate,
+          label: reg.label,
+          date: form.date,
+          type: form.type,
+          duration: form.duration,
+          cost: Number(form.cost),
+          notes: form.notes,
+          payDate: form.payDate,
+          payMethod: form.payMethod,
+          payRef: form.payRef,
+          nextDate: form.nextDate,
+          nextNotes: form.nextNotes,
+        },
+      })
+      onClose()
+    } catch {
+      setSaving(false)
+    }
   }
 
   return (
@@ -190,25 +195,30 @@ function RegistrationModal({ reg, onClose }: { reg: RegItem; onClose: () => void
 function ApprovalModal({ req, onClose }: { req: ReqItem; onClose: () => void }) {
   const [form, setForm] = useState({ status: 'approved', notes: '', autoUpdate: false, updateData: '' })
   const [saving, setSaving] = useState(false)
+  const insertRA = useInsert<{ data: Record<string, unknown> }>('request_approvals')
   const set = (k: string, v: string | boolean) => setForm(f => ({ ...f, [k]: v }))
 
   const pColor = P_COLOR[req.priority]
   const pBg    = P_BG[req.priority]
 
-  const save = () => {
+  const save = async () => {
     setSaving(true)
-    db.add('requestApprovals', {
-      id: uid('ra'),
-      requestId: req.id,
-      title: req.title,
-      status: form.status,
-      notes: form.notes,
-      autoUpdate: form.autoUpdate,
-      updateData: form.updateData,
-      approvedAt: new Date().toISOString(),
-    })
-    setSaving(false)
-    onClose()
+    try {
+      await insertRA.mutateAsync({
+        data: {
+          requestId: req.id,
+          title: req.title,
+          status: form.status,
+          notes: form.notes,
+          autoUpdate: form.autoUpdate,
+          updateData: form.updateData,
+          approvedAt: new Date().toISOString(),
+        },
+      })
+      onClose()
+    } catch {
+      setSaving(false)
+    }
   }
 
   return (
@@ -278,14 +288,13 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const [approvalModal, setApprovalModal] = useState<ReqItem | null>(null)
   const [dismissedReqs, setDismissedReqs] = useState<Set<number>>(new Set())
 
-  const vehicles  = db.getAll<Vehicle>('vehicles')
-  const employees = db.getAll<Employee>('employees')
-  const dispatch  = db.getAll<Dispatch>('dispatch')
-  const customers = db.getAll<Customer>('customers')
-  const tires     = db.getAll<Tire>('tires')
-  const expenses  = db.getAll<Expense>('expenses')
-  const activity  = db.getAll<ActivityLog>('activity')
-  const stock     = db.getAll<StockItem>('stock')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: dispatch = [] } = useDispatches()
+  const { data: customers = [] } = useList<Customer>('customers')
+  const { data: tires = [] } = useList<Tire>('tires')
+  const { data: activity = [] } = useList<ActivityLog>('activity_logs')
+  const { data: stock = [] } = useList<StockItem>('stock_items')
   const { data: subJobs = [] } = useList<SubJob>('sub_jobs')
 
   const netOf = (j: SubJob) => (j.total || 0) - (j.wht ? (j.total || 0) * 0.01 : 0)
@@ -293,11 +302,10 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const subUnpaidTotal = useMemo(() => subUnpaid.reduce((s, j) => s + netOf(j), 0), [subUnpaid])
 
   const { data: expHeaders = [] } = useList<ExpenseHeader>('expense_headers')
-  const { data: sbVehicles = [] } = useList<Vehicle>('vehicles')
   const { data: sbPartners = [] } = useList<Partner>('partners')
   const expUnpaid      = useMemo(() => expHeaders.filter(h => !h.paid), [expHeaders])
   const expUnpaidTotal = useMemo(() => expUnpaid.reduce((s, h) => s + (h.total || 0), 0), [expUnpaid])
-  const plateOf   = (id: string) => sbVehicles.find(v => v.id === id)?.plate ?? '—'
+  const plateOf   = (id: string) => vehicles.find(v => v.id === id)?.plate ?? '—'
   const vendorOf  = (id: string) => sbPartners.find(p => p.id === id)?.name ?? '—'
 
   const onTrip    = useMemo(() => dispatch.filter(t => t.status === 'in-progress'), [dispatch])
@@ -306,8 +314,8 @@ export function Dashboard({ user, setActive }: DashboardProps) {
 
   const revenueThisMonth = useMemo(() => dispatch.reduce((s, t) => s + db.amountOf(t), 0), [dispatch])
   const costThisMonth    = useMemo(
-    () => dispatch.reduce((s, t) => s + (t.cost || 0), 0) + expenses.reduce((s, x) => s + (x.amount || 0), 0),
-    [dispatch, expenses],
+    () => dispatch.reduce((s, t) => s + (t.cost || 0), 0) + expHeaders.reduce((s, h) => s + (h.total || 0), 0),
+    [dispatch, expHeaders],
   )
 
   const idleVehicles        = vehicles.filter(v => v.status === 'available').length

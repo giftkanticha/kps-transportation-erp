@@ -100,6 +100,8 @@ export interface DispatchLeg {
   perDiem?: number
   notes?: string
   closed?: boolean
+  dispatchId?: string
+  sortOrder?: number
 }
 
 export interface OtherExpense {
@@ -111,7 +113,7 @@ export interface OtherExpense {
 export interface Dispatch {
   id: string
   code: string
-  customerId: string
+  customerId: string | null
   driverId: string | null
   vehicleId: string | null
   subcontractorId: string | null
@@ -134,6 +136,10 @@ export interface Dispatch {
   roundStatus?: 'draft' | 'closed'
   returnAt?: string
   otherExpenses?: OtherExpense[]
+  // End-of-round fuel entered on the close screen, persisted on draft so it
+  // survives reopen. The TRIP_CLOSING ledger entry is created on actual close.
+  closingFuelLiters?: number | null
+  closingFuelPrice?: number | null
 }
 
 export interface Maintenance {
@@ -192,7 +198,7 @@ export interface FuelRecord {
   id: string
   code: string
   vehicleId: string
-  driverId: string
+  driverId: string | null
   station: string
   liters: number
   pricePerL: number

@@ -106,8 +106,8 @@ export const db = {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  nameOf(table: keyof AppState, id: string): string {
-    const r = db.get<Record<string, string>>(table, id)
+  nameOf(table: keyof AppState, id: string, rows?: Array<Record<string, string>>): string {
+    const r = rows ? rows.find((x) => (x as { id: string }).id === id) : db.get<Record<string, string>>(table, id)
     if (!r) return '—'
     return r['name'] ?? r['plate'] ?? r['code'] ?? id
   },
@@ -174,22 +174,22 @@ export const db = {
 
   // ── Round helpers ─────────────────────────────────────────────────────────
 
-  lastClosedMileage(vehicleId: string): number | null {
+  lastClosedMileage(vehicleId: string, dispatches?: Dispatch[]): number | null {
     if (!vehicleId) return null
-    const rounds = db.getAll<Dispatch>('dispatch')
+    const rounds = (dispatches ?? db.getAll<Dispatch>('dispatch'))
       .filter(d => d.vehicleId === vehicleId && d.roundStatus === 'closed' && d.endOdometer != null)
     if (!rounds.length) return null
     return Math.max(...rounds.map(d => d.endOdometer ?? 0))
   },
 
-  nextRoundCode(): string {
+  nextRoundCode(dispatches?: Dispatch[]): string {
     const today = new Date()
     const ymd =
       today.getFullYear().toString() +
       String(today.getMonth() + 1).padStart(2, '0') +
       String(today.getDate()).padStart(2, '0')
     const prefix = `DSP-${ymd}-`
-    const todays = db.getAll<Dispatch>('dispatch').filter(d => d.code?.startsWith(prefix))
+    const todays = (dispatches ?? db.getAll<Dispatch>('dispatch')).filter(d => d.code?.startsWith(prefix))
     const seq = String(todays.length + 1).padStart(3, '0')
     return prefix + seq
   },
@@ -213,27 +213,27 @@ export const db = {
 
   // ── Fuel round helpers ────────────────────────────────────────────────────
 
-  nextFuelRoundCode(): string {
+  nextFuelRoundCode(rounds?: FuelRound[]): string {
     const today = new Date()
     const ymd =
       today.getFullYear().toString() +
       String(today.getMonth() + 1).padStart(2, '0') +
       String(today.getDate()).padStart(2, '0')
     const prefix = `RUND-${ymd}-`
-    const todays = db.getAll<FuelRound>('fuelRounds').filter(r => r.code?.startsWith(prefix))
+    const todays = (rounds ?? db.getAll<FuelRound>('fuelRounds')).filter(r => r.code?.startsWith(prefix))
     const seq = String(todays.length + 1).padStart(3, '0')
     return prefix + seq
   },
 
-  activeFuelRoundForVehicle(vehicleId: string): FuelRound | null {
+  activeFuelRoundForVehicle(vehicleId: string, rounds?: FuelRound[]): FuelRound | null {
     if (!vehicleId) return null
-    return db.getAll<FuelRound>('fuelRounds')
+    return (rounds ?? db.getAll<FuelRound>('fuelRounds'))
       .find(r => r.vehicleId === vehicleId && r.status === 'open') ?? null
   },
 
-  fuelRoundOfDispatch(dispatchRoundId: string): FuelRound | null {
+  fuelRoundOfDispatch(dispatchRoundId: string, rounds?: FuelRound[]): FuelRound | null {
     if (!dispatchRoundId) return null
-    return db.getAll<FuelRound>('fuelRounds')
+    return (rounds ?? db.getAll<FuelRound>('fuelRounds'))
       .find(r => r.dispatchRoundId === dispatchRoundId) ?? null
   },
 

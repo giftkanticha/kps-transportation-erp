@@ -1,6 +1,8 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, OtherExpense, FuelTransaction } from '../../types'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
+import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction, FuelStock } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -90,9 +92,10 @@ function tonToDwInput(weightTon: number | null | undefined, mode: DispatchLeg['p
 function DraftRoundsList({
   setSubject,
 }: { setSubject: (s: unknown) => void }) {
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const employees = db.getAll<Employee>('employees')
-  const drafts = db.getAll<Dispatch>('dispatch').filter(d => d.roundStatus === 'draft')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: dispatches = [] } = useDispatches()
+  const drafts = dispatches.filter(d => d.roundStatus === 'draft')
 
   return (
     <div>
@@ -168,10 +171,19 @@ function CloseForm({
   setActive,
   setSubject,
 }: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
-  const [tick, setTick] = useState(0)
-  const round = useMemo(() => db.get<Dispatch>('dispatch', roundId), [roundId, tick])
-  const vehicle = round ? db.get<Vehicle>('vehicles', round.vehicleId ?? '') : undefined
-  const driver = round ? db.get<Employee>('employees', round.driverId ?? '') : undefined
+  const { data: dispatches = [] } = useDispatches()
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: customers = [] } = useList<Customer>('customers')
+  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: allFuelStock = [] } = useList<FuelStock>('fuel_stock')
+  const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
+  const updateDispatch = useUpdate<Dispatch>('dispatch')
+  const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
+  const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
+  const round = useMemo(() => dispatches.find(d => d.id === roundId), [dispatches, roundId])
+  const vehicle = vehicles.find(v => v.id === round?.vehicleId)
+  const driver = employees.find(e => e.id === round?.driverId)
 
   const legs = round?.legs ?? []
   const [legStates, setLegStates] = useState<LegCloseState[]>([])
@@ -180,40 +192,77 @@ function CloseForm({
   const [otherExp, setOtherExp] = useState<OtherExpense[]>([])
   const [roundNotes, setRoundNotes] = useState('')
   const [closingFuelLiters, setClosingFuelLiters] = useState('')
+  const [closingFuelPrice, setClosingFuelPrice] = useState('')
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
+  const initedRef = useRef<string | null>(null)
+  const legsInitedRef = useRef<string | null>(null)
 
-  // Fuel transactions linked to this round
+  // Fuel transactions linked to this round (Supabase ledger).
   const linkedFuelTxs = useMemo(
-    () => db.getAll<FuelTransaction>('fuelTransactions')
-      .filter(t => t.tripId === roundId && t.status !== 'REVERSED'),
-    [roundId, tick],
+    () => allFuelTxs.filter(t => t.tripId === roundId && t.status !== 'REVERSED'),
+    [allFuelTxs, roundId],
   )
   const fuelOpening = linkedFuelTxs.filter(t => t.tripFuelRole === 'TRIP_OPENING')
   const fuelIntermediate = linkedFuelTxs.filter(t => t.tripFuelRole === 'INTERMEDIATE')
   const fuelClosing = linkedFuelTxs.filter(t => t.tripFuelRole === 'TRIP_CLOSING')
+  // Split closing fills by owner: the one dispatch close manages (TRIP_CLOSE) vs.
+  // any recorded by the fuel module. The fuel-module ones are the source of truth
+  // and shown read-only; our own is editable and persisted on draft + close.
+  const ownClosingTx = fuelClosing.find(t => t.entryMethod === 'TRIP_CLOSE') ?? null
+  const externalClosing = fuelClosing.filter(t => t.entryMethod !== 'TRIP_CLOSE')
+  const hasExternalClosing = externalClosing.length > 0
   const fuelNormal = linkedFuelTxs.filter(t => t.tripFuelRole === 'NORMAL')
   const sumIntermediate = fuelIntermediate.reduce((s, t) => s + t.liters, 0)
   const sumNormal = fuelNormal.reduce((s, t) => s + t.liters, 0)
 
-  // Initialize form from round
+  // Default closing-fuel price comes from the fuel ledger (latest stock purchase,
+  // else latest non-reversed transaction) — never a hardcoded number. Editable.
+  const ledgerFuelPrice = useMemo(() => {
+    const stocks = allFuelStock.filter(s => (s.pricePerL || 0) > 0)
+    if (stocks.length) return [...stocks].sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0].pricePerL
+    const txs = allFuelTxs.filter(t => (t.pricePerL || 0) > 0 && t.status !== 'REVERSED')
+    if (txs.length) return [...txs].sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))[0].pricePerL
+    return null
+  }, [allFuelTxs, allFuelStock])
+
+  // Initialize form once the round's data is available (it loads asynchronously
+  // from Supabase). Scalar fields init once per round so background refetches
+  // don't wipe in-progress edits. Leg states re-sync whenever the set of legs
+  // changes — `dispatch_legs` is a separate query that often resolves AFTER the
+  // dispatch row, and a one-shot guard used to lock in an empty leg list, leaving
+  // the close form with no editable rows.
   useEffect(() => {
     if (!round) return
-    setLegStates(
-      (round.legs ?? []).map(l => ({
-        id: l.id || uid('lg'),
-        // legState.deliveredWeight is the USER-input value in the leg's display unit
-        // (กก. for per_kg, ตัน otherwise). Convert from canonical ตัน at load.
-        deliveredWeight: tonToDwInput(l.deliveredWeight ?? null, l.priceMode),
-        perDiem: l.perDiem != null ? String(l.perDiem) : '',
-        notes: l.notes || '',
-      })),
-    )
-    setEndMileage(round.endOdometer != null ? String(round.endOdometer) : '')
-    setReturnAt(round.returnAt || nowLocal())
-    setOtherExp(round.otherExpenses ?? [])
-    setRoundNotes(round.notes || '')
-  }, [roundId])
+    const rl = round.legs ?? []
+    const legSig = `${round.id}|${rl.map(l => l.id).join(',')}`
+
+    if (initedRef.current !== round.id) {
+      initedRef.current = round.id
+      setEndMileage(round.endOdometer != null ? String(round.endOdometer) : '')
+      setReturnAt(round.returnAt || nowLocal())
+      setOtherExp(round.otherExpenses ?? [])
+      setRoundNotes(round.notes || '')
+      // Restore the closing fuel saved on a previous draft (persisted on the
+      // dispatch row itself, so it survives reopen reliably).
+      setClosingFuelLiters(round.closingFuelLiters != null ? String(round.closingFuelLiters) : '')
+      setClosingFuelPrice(round.closingFuelPrice != null ? String(round.closingFuelPrice) : '')
+    }
+
+    if (legsInitedRef.current !== legSig) {
+      legsInitedRef.current = legSig
+      setLegStates(
+        rl.map(l => ({
+          id: l.id || uid('lg'),
+          // legState.deliveredWeight is the USER-input value in the leg's display unit
+          // (กก. for per_kg, ตัน otherwise). Convert from canonical ตัน at load.
+          deliveredWeight: tonToDwInput(l.deliveredWeight ?? null, l.priceMode),
+          perDiem: l.perDiem != null ? String(l.perDiem) : '',
+          notes: l.notes || '',
+        })),
+      )
+    }
+  }, [round])
 
   if (!round) {
     return (
@@ -250,12 +299,22 @@ function CloseForm({
   const distance = endMileage && round.startOdometer != null
     ? Math.max(0, Number(endMileage) - round.startOdometer)
     : 0
-  const fuelCost = round.cost || 0
-  const profit = revenue - fuelCost - perDiemTotal - otherTotal
 
-  // New KM/L calc: INTERMEDIATE + TRIP_CLOSING input (TRIP_OPENING excluded)
+  // KM/L uses INTERMEDIATE + NORMAL + the closing fill (TRIP_OPENING excluded)
   const closingL = parseFloat(closingFuelLiters) || 0
   const totalFuelForKmpl = sumIntermediate + sumNormal + closingL
+
+  // Fuel cost for THIS round = intermediate + normal + closing fills. TRIP_OPENING
+  // is the previous round's closing fill, so it's excluded. Include the closing
+  // fill being entered now so the net profit reflects it before saving.
+  // Price for the closing fill: user-entered, else the latest ledger price.
+  const closingPrice = parseFloat(closingFuelPrice) || ledgerFuelPrice || 0
+  const recordedFuelCost = linkedFuelTxs
+    .filter(t => t.tripFuelRole !== 'TRIP_OPENING')
+    .reduce((s, t) => s + (t.total ?? t.liters * (t.pricePerL || 0)), 0)
+  const fuelCost = recordedFuelCost + (fuelClosing.length > 0 ? 0 : closingL * closingPrice)
+  const profit = revenue - fuelCost - perDiemTotal - otherTotal
+
   const kmPerL = distance > 0 && totalFuelForKmpl > 0
     ? distance / totalFuelForKmpl
     : round.liters && distance ? distance / round.liters : null
@@ -297,16 +356,13 @@ function CloseForm({
       if (l.priceMode === 'lump' && (l.weight || 0) === 0) continue
       if (l.deliveredWeight == null || isNaN(l.deliveredWeight))
         return `ขา ${i + 1}: กรุณากรอกน้ำหนักปลายทาง`
-      if (l.deliveredWeight > (l.weight || 0))
-        return `ขา ${i + 1}: น้ำหนักปลาย (${l.deliveredWeight}) เกินน้ำหนักต้น (${l.weight})`
-      const lossKg = ((l.weight || 0) - l.deliveredWeight) * 1000
-      if (lossKg > MAX_WEIGHT_LOSS_KG)
-        return `ขา ${i + 1}: น้ำหนักหาย ${lossKg.toFixed(0)} กก. เกินกำหนด ${MAX_WEIGHT_LOSS_KG} กก.`
+      // Overweight (delivered > loaded) and over-threshold loss are both real
+      // possibilities (re-weigh, moisture). They warn at close time, not block.
     }
     return null
   }
 
-  const submit = (mode: 'draft' | 'close') => {
+  const submit = async (mode: 'draft' | 'close') => {
     if (saving) return
     setSaving(true)
     try {
@@ -314,6 +370,22 @@ function CloseForm({
       if (mode === 'close') {
         const err = validateClose(newLegs)
         if (err) throw new Error(err)
+        // Over-threshold loss and overweight (delivered > loaded) are both allowed
+        // but must be confirmed — they may be the real re-weighed delivery.
+        const anomalyLines = newLegs.flatMap(l => {
+          if (l.legType === 'return' || l.deliveredWeight == null) return []
+          const diffKg = ((l.weight || 0) - l.deliveredWeight) * 1000
+          const n = newLegs.indexOf(l) + 1
+          if (diffKg > MAX_WEIGHT_LOSS_KG) return [`ขา ${n}: หาย ${diffKg.toFixed(0)} กก.`]
+          if (diffKg < 0) return [`ขา ${n}: ปลายเกินต้น ${(-diffKg).toFixed(0)} กก.`]
+          return []
+        })
+        if (anomalyLines.length > 0) {
+          if (!window.confirm(`⚠️ น้ำหนักผิดปกติ\n${anomalyLines.join('\n')}\n\nยืนยันปิดงานด้วยน้ำหนักจริงนี้หรือไม่?`)) {
+            setSaving(false)
+            return
+          }
+        }
       }
       const em = endMileage ? Number(endMileage) : null
       const dist = em != null && round.startOdometer != null ? Math.max(0, em - round.startOdometer) : null
@@ -322,48 +394,78 @@ function CloseForm({
       let finalKmPerL: number | null = null
 
       if (mode === 'close') {
-        // Create TRIP_CLOSING fuel transaction if liters provided
-        if (closingL > 0) {
-          db.add<FuelTransaction>('fuelTransactions', {
-            id: uid('ftx'),
-            date: new Date().toISOString().slice(0, 10),
-            vehicleId: round.vehicleId ?? '',
-            liters: closingL,
-            pricePerL: 35,
-            total: closingL * 35,
-            source: 'FACTORY_TANK',
-            tripId: round.id,
-            status: 'TRIP_LINKED',
-            tripFuelRole: 'TRIP_CLOSING',
-            entryMethod: 'TRIP_CLOSE',
-            createdAt: new Date().toISOString(),
-            reversedAt: null,
-            reversalOf: null,
-            note: `TRIP_CLOSING สำหรับรอบ ${round.code}`,
-          })
+        // On actual close, write the closing fuel into the ledger as a single
+        // TRIP_CLOSING entry (the fuel module's source of truth). Skip when the
+        // fuel module already recorded one. Draft never touches the ledger — its
+        // liters/price live on the dispatch row (below) and convert here on close.
+        if (!hasExternalClosing) {
+          if (closingL > 0 && !ownClosingTx) {
+            await insertFuelTx.mutateAsync({
+              id: uid('ftx'),
+              date: new Date().toISOString().slice(0, 10),
+              vehicleId: round.vehicleId ?? '',
+              liters: closingL,
+              pricePerL: closingPrice,
+              total: closingL * closingPrice,
+              source: 'FACTORY_TANK',
+              tripId: round.id,
+              status: 'TRIP_LINKED',
+              tripFuelRole: 'TRIP_CLOSING',
+              entryMethod: 'TRIP_CLOSE',
+              createdAt: new Date().toISOString(),
+              reversedAt: null,
+              reversalOf: null,
+              note: `TRIP_CLOSING สำหรับรอบ ${round.code}`,
+            })
+          } else if (closingL > 0 && ownClosingTx) {
+            await updateFuelTx.mutateAsync({
+              id: ownClosingTx.id,
+              patch: { liters: closingL, pricePerL: closingPrice, total: closingL * closingPrice },
+            })
+          }
         }
         // Final fuel = INTERMEDIATE + NORMAL + TRIP_CLOSING (NOT TRIP_OPENING)
         finalLiters = totalFuelForKmpl > 0 ? totalFuelForKmpl : round.liters
         finalKmPerL = dist && finalLiters ? dist / finalLiters : null
       }
 
-      db.update<Dispatch>('dispatch', round.id, {
-        legs: newLegs,
-        endOdometer: em,
-        distance: dist,
-        returnAt,
-        otherExpenses: otherExp.filter(e => e.label.trim() && (e.amount || 0) !== 0),
-        notes: roundNotes,
-        perDiem: perDiemTotal,
-        revenue,
-        totalAmount: revenue,
-        liters: finalLiters,
-        kmPerL: finalKmPerL,
-        roundStatus: mode === 'close' ? 'closed' : 'draft',
-        status: mode === 'close' ? 'completed' : round.status,
-        progress: mode === 'close' ? 100 : round.progress,
+      // Persist each leg's closing data to its dispatch_legs row.
+      await Promise.all(
+        newLegs.map(l =>
+          updateLeg.mutateAsync({
+            id: l.id as string,
+            patch: {
+              deliveredWeight: l.deliveredWeight,
+              amount: l.amount,
+              perDiem: l.perDiem,
+              notes: l.notes,
+              closed: l.closed,
+            } as Partial<DispatchLeg>,
+          }),
+        ),
+      )
+
+      await updateDispatch.mutateAsync({
+        id: round.id,
+        patch: {
+          endOdometer: em,
+          distance: dist,
+          returnAt,
+          otherExpenses: otherExp.filter(e => e.label.trim() && (e.amount || 0) !== 0),
+          notes: roundNotes,
+          perDiem: perDiemTotal,
+          revenue,
+          totalAmount: revenue,
+          cost: mode === 'close' ? fuelCost : round.cost,
+          liters: finalLiters,
+          kmPerL: finalKmPerL,
+          closingFuelLiters: closingL > 0 ? closingL : null,
+          closingFuelPrice: closingL > 0 ? closingPrice : null,
+          roundStatus: mode === 'close' ? 'closed' : 'draft',
+          status: mode === 'close' ? 'completed' : round.status,
+          progress: mode === 'close' ? 100 : round.progress,
+        },
       })
-      setTick(t => t + 1)
       if (mode === 'close') {
         setToast({ kind: 'success', msg: `✅ ปิดรอบ ${round.code} เรียบร้อย${finalKmPerL ? ` · KM/L = ${finalKmPerL.toFixed(2)}` : ''}` })
         setTimeout(() => {
@@ -455,7 +557,7 @@ function CloseForm({
                     ขา {i + 1} — {l.origin} → {l.destination}
                   </div>
                   <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                    {l.customerId ? db.nameOf('customers', l.customerId) : '—'}
+                    {l.customerId ? (customers.find(c => c.id === l.customerId)?.name ?? '—') : '—'}
                     {' • '}{l.cargoType || '—'}
                     {' • '}<span className="badge" style={{ fontSize: 10.5 }}>{legTypeLabel(l.legType)}</span>
                     {' • '}<span className="badge" style={{ fontSize: 10.5 }}>
@@ -481,6 +583,13 @@ function CloseForm({
                     disabled
                     style={{ background: 'var(--bg)' }}
                   />
+                  {!isPerKg && (l.weight || 0) > 0 && (
+                    (l.weight || 0) > 100
+                      ? <div style={{ fontSize: 11, marginTop: 4, color: 'var(--red)', fontWeight: 600 }}>
+                          ⚠️ {(l.weight || 0).toLocaleString()} ตัน สูงผิดปกติ — น่าจะกรอกจากใบชั่ง (กก.) ผิดหน่วยตอนเพิ่มขา
+                        </div>
+                      : <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>= {((l.weight || 0) * 1000).toLocaleString()} กก.</div>
+                  )}
                 </Field>
                 {!isReturn && (
                   <Field label={`น้ำหนักปลายทาง (${wUnit})${isLump ? '' : ' *'}`}>
@@ -511,7 +620,7 @@ function CloseForm({
                   <div className="row" style={{ justifyContent: 'space-between', fontSize: 12.5, marginBottom: 6 }}>
                     <span className="muted">
                       {overweight
-                        ? <span style={{ color: 'var(--red)' }}>❌ น้ำหนักปลายเกินต้น ({((dwTon - (l.weight || 0)) * 1000).toFixed(0)} กก.)</span>
+                        ? <span style={{ color: 'var(--amber)' }}>⚠️ น้ำหนักปลายเกินต้น {((dwTon - (l.weight || 0)) * 1000).toFixed(0)} กก. (ปิดงานได้)</span>
                         : lossKg === 0
                           ? <span style={{ color: 'var(--green)' }}>✓ ส่งครบ {loadedWeightDisplay.toLocaleString()} {wUnit}</span>
                           : exceeds
@@ -726,8 +835,8 @@ function CloseForm({
           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
             เติมปลายรอบ (TRIP_CLOSING) — นับในการคำนวณ
           </div>
-          {fuelClosing.length > 0 ? (
-            fuelClosing.map(t => (
+          {hasExternalClosing ? (
+            externalClosing.map(t => (
               <div
                 key={t.id}
                 style={{
@@ -735,23 +844,54 @@ function CloseForm({
                   padding: '7px 12px', background: '#F0FDF4', borderRadius: 7, marginBottom: 4,
                 }}
               >
-                <span style={{ fontSize: 12 }}>บันทึกแล้ว · {db.thaiDate(t.date)}</span>
+                <span style={{ fontSize: 12 }}>บันทึกจากโมดูลน้ำมัน · {db.thaiDate(t.date)}</span>
                 <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: 'var(--green)' }}>
                   {t.liters.toFixed(2)} L ✓
                 </span>
               </div>
             ))
           ) : (
-            <Field label="จำนวนน้ำมันเติมปลายรอบ (ลิตร)">
-              <input
-                type="number"
-                step="0.01"
-                value={closingFuelLiters}
-                onChange={e => setClosingFuelLiters(e.target.value)}
-                placeholder="0.00"
-                disabled={isClosed}
-              />
-            </Field>
+            <>
+              <div className="grid-2" style={{ gap: 12 }}>
+                <Field label="จำนวนน้ำมันเติมปลายรอบ (ลิตร)">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={closingFuelLiters}
+                    onChange={e => setClosingFuelLiters(e.target.value)}
+                    placeholder="0.00"
+                    disabled={isClosed}
+                  />
+                </Field>
+                <Field label="ราคา (฿/ลิตร)">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={closingFuelPrice}
+                    onChange={e => setClosingFuelPrice(e.target.value)}
+                    placeholder={ledgerFuelPrice != null ? ledgerFuelPrice.toFixed(2) : '0.00'}
+                    disabled={isClosed}
+                  />
+                  <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                    {ledgerFuelPrice != null
+                      ? <>ค่าเริ่มต้นจากราคาน้ำมันล่าสุดในระบบ {ledgerFuelPrice.toFixed(2)} ฿/ลิตร (แก้ไขได้)</>
+                      : <>ยังไม่มีราคาน้ำมันในระบบ — กรุณากรอกราคา</>}
+                  </div>
+                </Field>
+              </div>
+              {closingL > 0 && (
+                <div style={{ fontSize: 12, marginTop: 6, color: closingPrice > 0 ? 'var(--text-muted)' : 'var(--red)', fontWeight: closingPrice > 0 ? 400 : 600 }}>
+                  {closingPrice > 0
+                    ? <>ต้นทุนน้ำมันปลายรอบ = {closingL.toFixed(2)} ลิตร × {closingPrice.toFixed(2)} = <span className="mono" style={{ fontWeight: 600 }}>{db.thb(closingL * closingPrice)}</span></>
+                    : <>⚠️ ยังไม่มีราคาน้ำมัน — ต้นทุนจะเป็น 0 กรุณากรอกราคา/ลิตร</>}
+                </div>
+              )}
+              {(round.closingFuelLiters ?? 0) > 0 && (
+                <div style={{ fontSize: 11, marginTop: 4, color: 'var(--green)' }}>
+                  ✓ บันทึกไว้แล้ว · แก้ไขแล้วกดบันทึกซ้ำได้
+                </div>
+              )}
+            </>
           )}
         </div>
 

@@ -1,5 +1,7 @@
 import { useState, useMemo } from 'react'
-import { db, uid } from '../../lib/db'
+import { uid } from '../../lib/db'
+import { useList, useInsert } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
 import type { Vehicle, FuelRecord, FuelTransaction, FuelStock } from '../../types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -12,17 +14,19 @@ const isFactory = (f: FuelRecord) =>
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function FuelReconciliation() {
-  const [tick, setTick] = useState(0)
   const [syncing, setSyncing] = useState(false)
   const [syncLog, setSyncLog] = useState<string[]>([])
 
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
-  const legacyRecords = useMemo(() => db.getAll<FuelRecord>('fuel'), [tick])
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: dispatches = [] } = useDispatches()
+  const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
+  const { data: legacyRecords = [] } = useList<FuelRecord>('fuel_records')
+  const { data: fuelStock = [] } = useList<FuelStock>('fuel_stock')
   const fuelTxs = useMemo(
-    () => db.getAll<FuelTransaction>('fuelTransactions').filter(t => t.status !== 'REVERSED'),
-    [tick],
+    () => allFuelTxs.filter(t => t.status !== 'REVERSED'),
+    [allFuelTxs],
   )
-  const fuelStock = useMemo(() => db.getAll<FuelStock>('fuelStock'), [tick])
 
   // ── Per-vehicle comparison ─────────────────────────────────────────────────
 
@@ -71,13 +75,13 @@ export function FuelReconciliation() {
 
   // ── Sync: create FuelTransactions for legacy-only records ─────────────────
 
-  const handleSync = () => {
+  const handleSync = async () => {
     if (!confirm(`ซิงค์ ${legacyOnly.length} รายการ?\nระบบจะสร้าง FuelTransaction สำหรับรายการที่ยังไม่ได้ migrate`)) return
 
     setSyncing(true)
     const log: string[] = []
 
-    legacyOnly.forEach(lr => {
+    for (const lr of legacyOnly) {
       const vehicle = vehicles.find(v => v.id === lr.vehicleId)
       const isFactoryFuel = isFactory(lr)
       const source = isFactoryFuel ? 'FACTORY_TANK' : 'EXTERNAL_PUMP'
@@ -87,8 +91,6 @@ export function FuelReconciliation() {
       if (group === 'INTERNAL') {
         status = 'INTERNAL_DEDUCTED'
       } else {
-        // Try to find a matching dispatch on the same date
-        const dispatches = db.getAll('dispatch') as Array<{ id: string; vehicleId: string; date: string; code: string; status: string }>
         const match = dispatches.find(d =>
           d.vehicleId === lr.vehicleId &&
           d.date?.slice(0, 10) === lr.date?.slice(0, 10) &&
@@ -97,9 +99,8 @@ export function FuelReconciliation() {
         if (match) status = 'TRIP_LINKED'
       }
 
-      const txId = uid('ftx')
-      db.add<FuelTransaction>('fuelTransactions', {
-        id: txId,
+      await insertFuelTx.mutateAsync({
+        id: uid('ftx'),
         date: lr.date,
         vehicleId: lr.vehicleId,
         liters: lr.liters,
@@ -117,11 +118,10 @@ export function FuelReconciliation() {
       })
 
       log.push(`✅ ${vehicle?.plate ?? lr.vehicleId} · ${lr.date} · ${lr.liters} ล. → ${status}`)
-    })
+    }
 
     setSyncLog(log)
     setSyncing(false)
-    setTick(t => t + 1)
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

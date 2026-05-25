@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react'
-import { db } from '../../lib/db'
-import type { FuelTransaction, Dispatch as DispatchJob, Vehicle } from '../../types'
+import { useState } from 'react'
+import { useList, useUpdate } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
+import type { FuelTransaction, Vehicle } from '../../types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -22,17 +23,17 @@ const STATUS_LABEL: Record<string, string> = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function FloatingFuel() {
-  const [tick, setTick] = useState(0)
   const [linkTx, setLinkTx] = useState<FuelTransaction | null>(null)
   const [selectedDispatch, setSelectedDispatch] = useState('')
 
-  const floatingTxs = useMemo(
-    () => db.getAll<FuelTransaction>('fuelTransactions').filter(t => t.status === 'FLOATING')
-      .sort((a, b) => b.date.localeCompare(a.date)),
-    [tick],
-  )
-  const allDispatches = useMemo(() => db.getAll<DispatchJob>('dispatch'), [tick])
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
+  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: allDispatches = [] } = useDispatches()
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const linkFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
+
+  const floatingTxs = [...allFuelTxs]
+    .filter(t => t.status === 'FLOATING')
+    .sort((a, b) => b.date.localeCompare(a.date))
 
   const openModal = (tx: FuelTransaction) => {
     const candidates = allDispatches
@@ -46,15 +47,14 @@ export function FloatingFuel() {
     setSelectedDispatch(candidates[0]?.id ?? '')
   }
 
-  const doLink = () => {
+  const doLink = async () => {
     if (!linkTx || !selectedDispatch) return
-    db.update<FuelTransaction>('fuelTransactions', linkTx.id, {
-      tripId: selectedDispatch,
-      status: 'TRIP_LINKED',
+    await linkFuelTx.mutateAsync({
+      id: linkTx.id,
+      patch: { tripId: selectedDispatch, status: 'TRIP_LINKED' },
     })
     setLinkTx(null)
     setSelectedDispatch('')
-    setTick(t => t + 1)
   }
 
   if (floatingTxs.length === 0) {

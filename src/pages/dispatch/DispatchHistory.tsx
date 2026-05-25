@@ -1,5 +1,7 @@
 import { useState, useMemo } from 'react'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
+import { useList } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
 import type { Vehicle, Employee, Dispatch } from '../../types'
 import { Icon } from '../../components/ui'
 
@@ -24,14 +26,15 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
   const [status, setStatus] = useState<StatusFilter>('all')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const employees = db.getAll<Employee>('employees')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: dispatch = [] } = useDispatches()
   const rounds = useMemo(() => {
-    const all = db.getAll<Dispatch>('dispatch')
+    const all = dispatch
       .filter(d => d.roundStatus === 'draft' || d.roundStatus === 'closed' || d.status === 'completed')
       .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
     return all
-  }, [])
+  }, [dispatch])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()

@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
-import type { FuelStock, FuelTransaction, Vehicle, Dispatch, User } from '../../types'
+import { useList, useInsert, useDelete } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
+import type { FuelStock, FuelTransaction, Vehicle, User } from '../../types'
 import { Icon, Field, PrintButton } from '../../components/ui'
 
 const FUEL_SUPPLIERS = [
@@ -44,27 +46,32 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
   })
   const [err, setErr] = useState('')
   const [saving, setSaving] = useState(false)
+  const insertStock = useInsert<FuelStock>('fuel_stock')
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
   const total = (Number(form.liters) || 0) * (Number(form.pricePerL) || 0)
   const isBackdated = form.date < todayISO
 
-  const save = () => {
+  const save = async () => {
     if (!form.liters || Number(form.liters) <= 0) return setErr('กรุณาระบุจำนวนลิตร (> 0)')
     if (!form.supplier) return setErr('กรุณาเลือกแหล่งที่มา')
     if (form.date > todayISO) return setErr('วันที่เกิดเหตุไม่สามารถเป็นอนาคตได้')
     setSaving(true)
-    db.add<FuelStock>('fuelStock', {
-      id: uid('fs'),
-      date: form.date,
-      recordedAt: new Date().toISOString(),
-      supplier: form.supplier,
-      liters: Number(form.liters),
-      pricePerL: Number(form.pricePerL) || 0,
-      invoiceNo: form.invoiceNo,
-      total,
-    })
-    setSaving(false)
-    onSaved()
+    try {
+      await insertStock.mutateAsync({
+        id: uid('fs'),
+        date: form.date,
+        recordedAt: new Date().toISOString(),
+        supplier: form.supplier,
+        liters: Number(form.liters),
+        pricePerL: Number(form.pricePerL) || 0,
+        invoiceNo: form.invoiceNo,
+        total,
+      })
+      onSaved()
+    } catch (e) {
+      setErr('บันทึกไม่สำเร็จ: ' + (e as Error).message)
+      setSaving(false)
+    }
   }
 
   return (
@@ -155,11 +162,11 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
   const [filterVehicle, setFilterVehicle] = useState('')
   const [filterSupplier, setFilterSupplier] = useState('')
 
-  const allFuelStock = db.getAll<FuelStock>('fuelStock')
-  const factoryTxs = db.getAll<FuelTransaction>('fuelTransactions')
-    .filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED')
-  const vehicles = db.getAll<Vehicle>('vehicles')
-  const dispatches = db.getAll<Dispatch>('dispatch')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: dispatches = [] } = useDispatches()
+  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: allFuelStock = [] } = useList<FuelStock>('fuel_stock')
+  const factoryTxs = allFuelTxs.filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED')
 
   const rows = type === 'in'
     ? [...allFuelStock].sort((a, b) => b.date.localeCompare(a.date))
@@ -365,7 +372,6 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export function FuelStockDashboard() {
-  const [tick, setTick] = useState(0)
   const [showAddModal, setShowAddModal] = useState(false)
   const [historyType, setHistoryType] = useState<'in' | 'out' | null>(null)
 
@@ -373,14 +379,15 @@ export function FuelStockDashboard() {
   const canAdd = user?.role !== 'driver'
   const canDelete = user?.role === 'admin'
 
-  const allFuelStock = useMemo(() => db.getAll<FuelStock>('fuelStock'), [tick])
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: dispatches = [] } = useDispatches()
+  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: allFuelStock = [] } = useList<FuelStock>('fuel_stock')
+  const deleteStock = useDelete('fuel_stock')
   const factoryTxs = useMemo(
-    () => db.getAll<FuelTransaction>('fuelTransactions')
-      .filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED'),
-    [tick],
+    () => allFuelTxs.filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED'),
+    [allFuelTxs],
   )
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [])
-  const dispatches = useMemo(() => db.getAll<Dispatch>('dispatch'), [])
 
   // Running balance per record
   const balanceMap = useMemo<Record<string, number>>(() => {
@@ -416,10 +423,9 @@ export function FuelStockDashboard() {
     [factoryTxs],
   )
 
-  const deleteStockIn = (id: string) => {
+  const deleteStockIn = async (id: string) => {
     if (!confirm('ลบรายการน้ำมันเข้านี้?')) return
-    db.remove('fuelStock', id)
-    setTick(t => t + 1)
+    await deleteStock.mutateAsync(id)
   }
 
   return (
@@ -586,7 +592,7 @@ export function FuelStockDashboard() {
         )}
       </div>
 
-      {showAddModal && <AddStockModal onClose={() => setShowAddModal(false)} onSaved={() => { setShowAddModal(false); setTick(t => t + 1) }} />}
+      {showAddModal && <AddStockModal onClose={() => setShowAddModal(false)} onSaved={() => setShowAddModal(false)} />}
       {historyType && <StockHistoryModal type={historyType} balanceMap={balanceMap} onClose={() => setHistoryType(null)} />}
     </div>
   )

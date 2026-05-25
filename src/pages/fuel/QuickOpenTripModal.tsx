@@ -1,6 +1,8 @@
-import { useState, useMemo } from 'react'
-import { db, uid } from '../../lib/db'
-import type { Vehicle, Employee, Dispatch as DispatchJob, FuelTransaction } from '../../types'
+import { useState } from 'react'
+import { db } from '../../lib/db'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
+import type { Vehicle, Employee, Dispatch as DispatchJob, DispatchLeg, FuelTransaction } from '../../types'
 
 interface Props {
   vehicleId: string
@@ -16,22 +18,17 @@ function thaiDate(iso: string) {
   return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear() + 543}`
 }
 
-function nextCode(): string {
-  const dispatches = db.getAll<DispatchJob>('dispatch')
-  const nums = dispatches
-    .map(d => parseInt(d.code.replace(/\D/g, ''), 10))
-    .filter(n => !isNaN(n))
-  const max = nums.length > 0 ? Math.max(...nums) : 0
-  return `DSP-${String(max + 1).padStart(4, '0')}`
-}
-
 export function QuickOpenTripModal({ vehicleId, date, floatingTxId, onClose, onSuccess }: Props) {
-  const vehicle = useMemo(() => db.get<Vehicle>('vehicles', vehicleId), [vehicleId])
-  const driver = useMemo(
-    () => vehicle?.driverId ? db.get<Employee>('employees', vehicle.driverId) : null,
-    [vehicle],
-  )
-  const lastMileage = useMemo(() => db.lastClosedMileage(vehicleId), [vehicleId])
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: employees = [] } = useList<Employee>('employees')
+  const { data: dispatches = [] } = useDispatches()
+  const insertDispatch = useInsert<DispatchJob>('dispatch')
+  const insertLeg = useInsert<DispatchLeg>('dispatch_legs')
+  const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
+
+  const vehicle = vehicles.find(v => v.id === vehicleId) ?? null
+  const driver = vehicle?.driverId ? employees.find(e => e.id === vehicle.driverId) ?? null : null
+  const lastMileage = db.lastClosedMileage(vehicleId, dispatches)
   const minMileage = lastMileage ?? 0
 
   const [odometer, setOdometer] = useState(lastMileage != null ? String(lastMileage) : '')
@@ -40,7 +37,7 @@ export function QuickOpenTripModal({ vehicleId, date, floatingTxId, onClose, onS
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (saving) return
     const odo = odometer.trim() === '' ? NaN : Number(odometer)
     if (!odometer || isNaN(odo) || odo < 0) {
@@ -54,53 +51,63 @@ export function QuickOpenTripModal({ vehicleId, date, floatingTxId, onClose, onS
     setError(null)
     setSaving(true)
 
-    const code = nextCode()
-    const newTrip: DispatchJob = {
-      id: uid('dsp'),
-      code,
-      customerId: '',
-      driverId: vehicle?.driverId ?? null,
-      vehicleId,
-      subcontractorId: null,
-      date,
-      depart: `${date}T06:00`,
-      eta: `${date}T18:00`,
-      status: 'scheduled',
-      progress: 0,
-      startOdometer: odo,
-      endOdometer: null,
-      distance: null,
-      liters: null,
-      kmPerL: null,
-      perDiem: null,
-      notes: 'เปิดจาก QuickOpenTripModal (Express Fuel Log)',
-      legs: destination
-        ? [{
-            origin,
-            destination,
-            cargo: '',
-            cargoType: '',
-            priceMode: 'lump',
-            weight: 0,
-            price: 0,
-            amount: 0,
-          }]
-        : [],
-      totalAmount: 0,
-      revenue: 0,
-      cost: 0,
-      roundStatus: 'draft',
+    try {
+      const code = db.nextRoundCode(dispatches)
+      const created = await insertDispatch.mutateAsync({
+        code,
+        customerId: null,
+        driverId: vehicle?.driverId ?? null,
+        vehicleId,
+        subcontractorId: null,
+        date,
+        depart: `${date}T06:00`,
+        eta: `${date}T18:00`,
+        status: 'scheduled',
+        progress: 0,
+        startOdometer: odo,
+        endOdometer: null,
+        distance: null,
+        liters: null,
+        kmPerL: null,
+        perDiem: null,
+        notes: 'เปิดจาก QuickOpenTripModal (Express Fuel Log)',
+        totalAmount: 0,
+        revenue: 0,
+        cost: 0,
+        roundStatus: 'draft',
+        otherExpenses: [],
+      })
+
+      if (destination) {
+        await insertLeg.mutateAsync({
+          dispatchId: created.id,
+          sortOrder: 0,
+          origin,
+          destination,
+          cargo: '',
+          cargoType: '',
+          priceMode: 'lump',
+          weight: 0,
+          price: 0,
+          amount: 0,
+          legType: 'outbound',
+          deliveredWeight: null,
+          perDiem: 0,
+          closed: false,
+        })
+      }
+
+      // Link the floating FuelTransaction to this new trip
+      await updateFuelTx.mutateAsync({
+        id: floatingTxId,
+        patch: { tripId: created.id, status: 'TRIP_LINKED' },
+      })
+
+      onSuccess(code)
+    } catch (e) {
+      setError('บันทึกไม่สำเร็จ: ' + (e as Error).message)
+      setSaving(false)
     }
-
-    db.add<DispatchJob>('dispatch', newTrip)
-
-    // Link the floating FuelTransaction to this new trip
-    db.update<FuelTransaction>('fuelTransactions', floatingTxId, {
-      tripId: newTrip.id,
-      status: 'TRIP_LINKED',
-    })
-
-    onSuccess(code)
   }
 
   return (

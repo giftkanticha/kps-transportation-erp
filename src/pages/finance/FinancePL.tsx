@@ -1,8 +1,10 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
 import { Icon } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
-import type { Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance, Expense, Employee } from '../../types'
+import type { Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance, Expense, ExpenseHeader, Employee } from '../../types'
 
 /* ─────────────────────────────────────────────────── helpers ── */
 
@@ -54,6 +56,7 @@ function computeRows(
   fuelRounds: FuelRound[],
   maint: Maintenance[],
   expenses: Expense[],
+  expenseHeaders: ExpenseHeader[],
   employees: Employee[],
   ym: string,
 ): VehicleRow[] {
@@ -89,9 +92,9 @@ function computeRows(
     const maintTotal = maint
       .filter(m => m.vehicleId === v.id && ymKey(m.startDate) === ym)
       .reduce((s, m) => s + (m.cost ?? 0), 0)
-    const expTotal = expenses
-      .filter(x => x.vehicleId === v.id && ymKey(x.date) === ym && x.category !== 'ดอกเบี้ย')
-      .reduce((s, x) => s + (x.amount ?? 0), 0)
+    const expTotal = expenseHeaders
+      .filter(h => h.vehicleId === v.id && ymKey(h.date) === ym)
+      .reduce((s, h) => s + (h.total ?? 0), 0)
 
     const interest = expenses
       .filter(x => x.vehicleId === v.id && ymKey(x.date) === ym && x.category === 'ดอกเบี้ย')
@@ -172,6 +175,9 @@ function InterestCell({ vehicleId, plate, ym, value, onSaved }: {
   const [editing, setEditing] = useState(false)
   const [input, setInput] = useState('')
   const ref = useRef<HTMLInputElement>(null)
+  const { data: flatExpenses = [] } = useList<Expense>('expenses')
+  const insertExpense = useInsert<Expense>('expenses')
+  const updateExpense = useUpdate<Expense>('expenses')
 
   useEffect(() => {
     if (editing) {
@@ -180,31 +186,32 @@ function InterestCell({ vehicleId, plate, ym, value, onSaved }: {
     }
   }, [editing, value])
 
-  const save = () => {
+  const save = async () => {
     const amount = parseFloat(input) || 0
-    const allExp = db.getAll<Expense>('expenses')
-    const existing = allExp.find(e =>
+    const existing = flatExpenses.find(e =>
       e.vehicleId === vehicleId &&
       ymKey(e.date) === ym &&
       e.category === 'ดอกเบี้ย',
     )
-    if (existing) {
-      db.update<Expense>('expenses', existing.id, { amount })
-    } else if (amount > 0) {
-      db.add<Partial<Expense>>('expenses', {
-        code: `INT-${ym}-${vehicleId}`,
-        vehicleId,
-        category: 'ดอกเบี้ย',
-        note: `ดอกเบี้ย ${plate}`,
-        amount,
-        paidBy: 'company',
-        date: `${ym}-01`,
-        driverId: null,
-        status: 'paid',
-      })
-    }
     setEditing(false)
-    onSaved()
+    try {
+      if (existing) {
+        await updateExpense.mutateAsync({ id: existing.id, patch: { amount } })
+      } else if (amount > 0) {
+        await insertExpense.mutateAsync({
+          code: `INT-${ym}-${vehicleId}`,
+          vehicleId,
+          category: 'ดอกเบี้ย',
+          note: `ดอกเบี้ย ${plate}`,
+          amount,
+          paidBy: 'company',
+          date: `${ym}-01`,
+          driverId: null,
+          status: 'paid',
+        })
+      }
+      onSaved()
+    } catch { /* keep prior value on failure */ }
   }
 
   if (editing) {
@@ -439,12 +446,24 @@ export function FinancePL() {
   const [year, setYear]       = useState(today.getFullYear())
   const [month, setMonth]     = useState(today.getMonth())
   const [viewMode, setViewMode] = useState<ViewMode>('monthly')
-  const [tick, setTick]       = useState(0)
 
-  const allVehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
-  const [picked, setPicked] = useState<Set<string>>(
-    () => new Set(db.getAll<Vehicle>('vehicles').map(v => v.id)),
-  )
+  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: dispatches = [] } = useDispatches()
+  const { data: fuel = [] } = useList<FuelRecord>('fuel_records')
+  const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: maint = [] } = useList<Maintenance>('maintenance')
+  const { data: expenses = [] } = useList<Expense>('expenses')
+  const { data: expenseHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: employees = [] } = useList<Employee>('employees')
+
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const pickedInited = useRef(false)
+  useEffect(() => {
+    if (!pickedInited.current && allVehicles.length) {
+      setPicked(new Set(allVehicles.map(v => v.id)))
+      pickedInited.current = true
+    }
+  }, [allVehicles])
 
   const ym = `${year}-${String(month + 1).padStart(2, '0')}`
   const yearOptions = useMemo(() => Array.from({ length: 11 }, (_, i) => 2025 + i), [])
@@ -452,20 +471,12 @@ export function FinancePL() {
   /* ── Data computation ── */
   const { allRows, allYearlyRows, allMonthlyData } = useMemo(() => {
     try {
-      const vehicles   = db.getAll<Vehicle>('vehicles')
-      const dispatches = db.getAll<Dispatch>('dispatch')
-      const fuel       = db.getAll<FuelRecord>('fuel')
-      const fuelRounds = db.getAll<FuelRound>('fuelRounds')
-      const maint      = db.getAll<Maintenance>('maintenance')
-      const expenses   = db.getAll<Expense>('expenses')
-      const employees  = db.getAll<Employee>('employees')
-
-      const allRows = computeRows(vehicles, dispatches, fuel, fuelRounds, maint, expenses, employees, ym)
+      const allRows = computeRows(allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, ym)
 
       // Compute all 12 months for yearly view
       const allMonthlyData = Array.from({ length: 12 }, (_, m) => {
         const mYm = `${year}-${String(m + 1).padStart(2, '0')}`
-        return { m, ym: mYm, rows: computeRows(vehicles, dispatches, fuel, fuelRounds, maint, expenses, employees, mYm) }
+        return { m, ym: mYm, rows: computeRows(allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, mYm) }
       })
 
       // Sum per vehicle across 12 months
@@ -482,7 +493,7 @@ export function FinancePL() {
           }
         }
       }
-      const allYearlyRows = vehicles.map(v => acc[v.id] ?? {
+      const allYearlyRows = allVehicles.map(v => acc[v.id] ?? {
         v, driverName: '—', rev: 0, fuelIn: 0, fuelOut: 0,
         allowance: 0, salary: 0, expense: 0, interest: 0, totalCost: 0, profit: 0,
       })
@@ -492,7 +503,7 @@ export function FinancePL() {
       console.error('FinancePL aggregation failed', err)
       return { allRows: [], allYearlyRows: [], allMonthlyData: [] }
     }
-  }, [ym, year, tick])
+  }, [ym, year, allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees])
 
   // Filter by picked vehicles
   const rows        = useMemo(() => allRows.filter(r => picked.has(r.v.id)), [allRows, picked])
@@ -696,7 +707,7 @@ export function FinancePL() {
                 totals={activeTotals}
                 ym={ym}
                 viewMode={viewMode}
-                onInterestSaved={() => setTick(t => t + 1)}
+                onInterestSaved={() => {}}
               />
             )}
           </div>

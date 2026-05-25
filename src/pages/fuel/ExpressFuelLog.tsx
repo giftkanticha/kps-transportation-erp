@@ -1,9 +1,14 @@
 import React, { useState, useMemo } from 'react'
-import { db, uid } from '../../lib/db'
+import { uid } from '../../lib/db'
+import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
 import { Icon } from '../../components/ui/Icon'
 import { QuickOpenTripModal } from './QuickOpenTripModal'
 import type { CSSProperties } from 'react'
 import type { Vehicle, Dispatch as DispatchJob, FuelRecord, FuelStock, FuelTransaction } from '../../types'
+
+type InsertFuelTx = ReturnType<typeof useInsert<FuelTransaction>>
+type InsertFuelRec = ReturnType<typeof useInsert<FuelRecord>>
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,9 +57,9 @@ function makeRow(): GridRow {
   }
 }
 
-function getFactoryBalance(): number {
-  const stockIn = db.getAll<FuelStock>('fuelStock').reduce((s, r) => s + (r.liters || 0), 0)
-  const stockOut = db.getAll<FuelRecord>('fuel')
+function getFactoryBalance(stocks: FuelStock[], fuelRecords: FuelRecord[]): number {
+  const stockIn = stocks.reduce((s, r) => s + (r.liters || 0), 0)
+  const stockOut = fuelRecords
     .filter(f => !['PTT', 'Shell', 'Bangchak', 'Esso'].some(b => f.station?.includes(b)))
     .reduce((s, r) => s + (r.liters || 0), 0)
   return Math.max(0, stockIn - stockOut)
@@ -65,13 +70,17 @@ function autoRoute(
   date: string,
   source: FuelSource,
   liters: number,
+  vehicles: Vehicle[],
+  dispatches: DispatchJob[],
+  stocks: FuelStock[],
+  fuelRecords: FuelRecord[],
 ): { status: RowStatus; statusLabel: string; tripId: string | null; error: string } {
-  const vehicle = db.get<Vehicle>('vehicles', vehicleId)
+  const vehicle = vehicles.find(v => v.id === vehicleId)
   if (!vehicle) return { status: 'ERROR', statusLabel: '❌ ไม่พบทะเบียนในระบบ', tripId: null, error: 'ไม่พบทะเบียน' }
   if (liters <= 0) return { status: 'ERROR', statusLabel: '❌ กรุณาระบุปริมาณน้ำมัน', tripId: null, error: 'ปริมาณต้องมากกว่า 0' }
 
   if (source === 'FACTORY_TANK') {
-    const balance = getFactoryBalance()
+    const balance = getFactoryBalance(stocks, fuelRecords)
     if (liters > balance) {
       return {
         status: 'ERROR',
@@ -87,29 +96,34 @@ function autoRoute(
     return { status: 'INTERNAL_DEDUCTED', statusLabel: '🟢 ตัดสต็อค (รถโรงงาน)', tripId: null, error: '' }
   }
 
-  const dispatches = db.getAll<DispatchJob>('dispatch').filter(d =>
+  const matches = dispatches.filter(d =>
     d.vehicleId === vehicleId &&
     d.date?.slice(0, 10) === date &&
     (d.status === 'scheduled' || d.status === 'in-progress'),
   )
 
-  if (dispatches.length > 0) {
-    const trip = dispatches[0]
+  if (matches.length > 0) {
+    const trip = matches[0]
     return { status: 'TRIP_LINKED', statusLabel: `🔵 ผูกรอบ ${trip.code}`, tripId: trip.id, error: '' }
   }
 
   return { status: 'FLOATING', statusLabel: '🟡 น้ำมันลอย — ยังไม่มีรอบงาน', tripId: null, error: '' }
 }
 
-function persistRow(row: GridRow): { txId: string; fuelRecId: string } {
-  const vehicle = db.get<Vehicle>('vehicles', row.vehicleId)
+async function persistRow(
+  row: GridRow,
+  vehicles: Vehicle[],
+  insertFuelTx: InsertFuelTx,
+  insertFuelRec: InsertFuelRec,
+): Promise<{ txId: string; fuelRecId: string }> {
+  const vehicle = vehicles.find(v => v.id === row.vehicleId)
   const liters = parseFloat(row.liters)
   const pricePerL = parseFloat(row.pricePerL) || 35
   const total = liters * pricePerL
   const txId = uid('ftx')
   const fuelRecId = uid('f')
 
-  db.add<FuelTransaction>('fuelTransactions', {
+  await insertFuelTx.mutateAsync({
     id: txId,
     date: row.date,
     vehicleId: row.vehicleId,
@@ -126,11 +140,11 @@ function persistRow(row: GridRow): { txId: string; fuelRecId: string } {
     reversalOf: null,
   })
 
-  db.add<FuelRecord>('fuel', {
+  await insertFuelRec.mutateAsync({
     id: fuelRecId,
-    code: `EXP-${row.date.replace(/-/g, '')}`,
+    code: `EXP-${row.date.replace(/-/g, '')}-${fuelRecId.slice(-6)}`,
     vehicleId: row.vehicleId,
-    driverId: vehicle?.driverId ?? '',
+    driverId: vehicle?.driverId || null,
     station: row.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
     liters,
     pricePerL,
@@ -230,7 +244,6 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
   const [rows, setRows] = useState<GridRow[]>([makeRow()])
   const [toast, setToast] = useState<FloatingToast | null>(null)
   const [quickOpenCtx, setQuickOpenCtx] = useState<{ vehicleId: string; date: string; floatingTxId: string } | null>(null)
-  const [tick, setTick] = useState(0)
 
   // Edit state
   const [editingKey, setEditingKey] = useState<string | null>(null)
@@ -241,14 +254,18 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
   // Reverse confirm
   const [reverseTarget, setReverseTarget] = useState<GridRow | null>(null)
 
-  const vehicles = useMemo(() => db.getAll<Vehicle>('vehicles'), [tick])
-  const balance = useMemo(() => getFactoryBalance(), [tick])
-  const floatingCount = useMemo(
-    () => db.getAll<FuelTransaction>('fuelTransactions').filter(t => t.status === 'FLOATING').length,
-    [tick],
-  )
-
-  const refresh = () => setTick(t => t + 1)
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: dispatches = [] } = useDispatches()
+  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: fuelStock = [] } = useList<FuelStock>('fuel_stock')
+  const { data: fuelRecords = [] } = useList<FuelRecord>('fuel_records')
+  const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
+  const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
+  const insertFuelRec = useInsert<FuelRecord>('fuel_records')
+  const updateFuelRec = useUpdate<FuelRecord>('fuel_records')
+  const deleteFuelRec = useDelete('fuel_records')
+  const balance = useMemo(() => getFactoryBalance(fuelStock, fuelRecords), [fuelStock, fuelRecords])
+  const floatingCount = allFuelTxs.filter(t => t.status === 'FLOATING').length
 
   const patchRow = (i: number, patch: Partial<GridRow>) =>
     setRows(prev => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r))
@@ -258,7 +275,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     patchRow(i, { plateTerm: val, vehicleId: found?.id ?? '' })
   }
 
-  const commitAndAdvance = (i: number) => {
+  const commitAndAdvance = async (i: number) => {
     const row = rows[i]
     if (row.committed) {
       document.getElementById(`cell-${i + 1}-0`)?.focus()
@@ -269,14 +286,13 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
       return
     }
 
-    const result = autoRoute(row.vehicleId, row.date, row.source, parseFloat(row.liters))
+    const result = autoRoute(row.vehicleId, row.date, row.source, parseFloat(row.liters), vehicles, dispatches, fuelStock, fuelRecords)
     const updated: GridRow = { ...row, ...result, committed: result.status !== 'ERROR' }
 
     if (updated.committed) {
-      const { txId, fuelRecId } = persistRow(updated)
+      const { txId, fuelRecId } = await persistRow(updated, vehicles, insertFuelTx, insertFuelRec)
       updated.txId = txId
       updated.fuelRecId = fuelRecId
-      refresh()
       if (result.status === 'FLOATING') {
         setToast({
           message: `🟡 รถ ${row.plateTerm} — บันทึกแล้ว (น้ำมันลอย)`,
@@ -335,38 +351,44 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
 
   const cancelEdit = () => setEditingKey(null)
 
-  const saveEdit = (row: GridRow, i: number) => {
+  const saveEdit = async (row: GridRow, i: number) => {
     const foundVehicle = vehicles.find(v => v.plate.toLowerCase() === editDraft.plateTerm.trim().toLowerCase())
     const vehicleId = foundVehicle?.id ?? row.vehicleId
     const liters = parseFloat(editDraft.liters)
     const pricePerL = parseFloat(editDraft.pricePerL) || 35
     const total = liters * pricePerL
 
-    const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters)
+    const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
 
     // Update FuelTransaction
     if (row.txId) {
-      db.update<FuelTransaction>('fuelTransactions', row.txId, {
-        date: editDraft.date,
-        vehicleId,
-        liters,
-        pricePerL,
-        total,
-        source: editDraft.source,
-        tripId: result.tripId,
-        status: result.status as FuelTransaction['status'],
+      await updateFuelTx.mutateAsync({
+        id: row.txId,
+        patch: {
+          date: editDraft.date,
+          vehicleId,
+          liters,
+          pricePerL,
+          total,
+          source: editDraft.source,
+          tripId: result.tripId,
+          status: result.status as FuelTransaction['status'],
+        },
       })
     }
 
     // Update FuelRecord (backward compat)
     if (row.fuelRecId) {
-      db.update<FuelRecord>('fuel', row.fuelRecId, {
-        date: editDraft.date,
-        vehicleId,
-        liters,
-        pricePerL,
-        total,
-        station: editDraft.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
+      await updateFuelRec.mutateAsync({
+        id: row.fuelRecId,
+        patch: {
+          date: editDraft.date,
+          vehicleId,
+          liters,
+          pricePerL,
+          total,
+          station: editDraft.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
+        },
       })
     }
 
@@ -383,23 +405,22 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     })
 
     setEditingKey(null)
-    refresh()
   }
 
   // ── Reverse ──────────────────────────────────────────────────────────────────
 
-  const confirmReverse = (row: GridRow) => {
+  const confirmReverse = async (row: GridRow) => {
     // Mark FuelTransaction as REVERSED
     if (row.txId) {
-      db.update<FuelTransaction>('fuelTransactions', row.txId, {
-        status: 'REVERSED',
-        reversedAt: new Date().toISOString(),
+      await updateFuelTx.mutateAsync({
+        id: row.txId,
+        patch: { status: 'REVERSED', reversedAt: new Date().toISOString() },
       })
     }
 
     // Remove FuelRecord so factory balance is restored
     if (row.fuelRecId) {
-      try { db.remove('fuel', row.fuelRecId) } catch { /* already deleted */ }
+      try { await deleteFuelRec.mutateAsync(row.fuelRecId) } catch { /* already deleted */ }
     }
 
     setRows(prev => prev.map(r =>
@@ -408,7 +429,6 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
         : r,
     ))
     setReverseTarget(null)
-    refresh()
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -515,7 +535,6 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
           onClose={() => setQuickOpenCtx(null)}
           onSuccess={(code) => {
             setQuickOpenCtx(null)
-            refresh()
             // Update row status in grid
             setRows(prev => prev.map(r =>
               r.txId === quickOpenCtx.floatingTxId
@@ -831,7 +850,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
               บันทึกทั้งหมด ({uncommitted})
             </button>
           )}
-          <button className="btn" onClick={() => { setRows([makeRow()]); refresh() }} style={{ fontSize: 13 }}>
+          <button className="btn" onClick={() => setRows([makeRow()])} style={{ fontSize: 13 }}>
             ล้างตาราง
           </button>
         </div>
