@@ -332,10 +332,8 @@ function CloseForm({
       if (l.priceMode === 'lump' && (l.weight || 0) === 0) continue
       if (l.deliveredWeight == null || isNaN(l.deliveredWeight))
         return `ขา ${i + 1}: กรุณากรอกน้ำหนักปลายทาง`
-      if (l.deliveredWeight > (l.weight || 0))
-        return `ขา ${i + 1}: น้ำหนักปลาย (${l.deliveredWeight}) เกินน้ำหนักต้น (${l.weight})`
-      // Weight loss over the threshold is allowed (it may be the real delivered
-      // weight). It triggers a confirm at close time instead of blocking here.
+      // Overweight (delivered > loaded) and over-threshold loss are both real
+      // possibilities (re-weigh, moisture). They warn at close time, not block.
     }
     return null
   }
@@ -348,16 +346,18 @@ function CloseForm({
       if (mode === 'close') {
         const err = validateClose(newLegs)
         if (err) throw new Error(err)
-        // Weight loss beyond the threshold is allowed but must be confirmed.
-        const lossy = newLegs.filter(l =>
-          l.legType !== 'return' && l.deliveredWeight != null &&
-          ((l.weight || 0) - l.deliveredWeight) * 1000 > MAX_WEIGHT_LOSS_KG,
-        )
-        if (lossy.length > 0) {
-          const detail = lossy
-            .map(l => `ขา ${newLegs.indexOf(l) + 1}: หาย ${(((l.weight || 0) - (l.deliveredWeight ?? 0)) * 1000).toFixed(0)} กก.`)
-            .join('\n')
-          if (!window.confirm(`⚠️ น้ำหนักหายเกิน ${MAX_WEIGHT_LOSS_KG} กก.\n${detail}\n\nยืนยันปิดงานด้วยน้ำหนักจริงนี้หรือไม่?`)) {
+        // Over-threshold loss and overweight (delivered > loaded) are both allowed
+        // but must be confirmed — they may be the real re-weighed delivery.
+        const anomalyLines = newLegs.flatMap(l => {
+          if (l.legType === 'return' || l.deliveredWeight == null) return []
+          const diffKg = ((l.weight || 0) - l.deliveredWeight) * 1000
+          const n = newLegs.indexOf(l) + 1
+          if (diffKg > MAX_WEIGHT_LOSS_KG) return [`ขา ${n}: หาย ${diffKg.toFixed(0)} กก.`]
+          if (diffKg < 0) return [`ขา ${n}: ปลายเกินต้น ${(-diffKg).toFixed(0)} กก.`]
+          return []
+        })
+        if (anomalyLines.length > 0) {
+          if (!window.confirm(`⚠️ น้ำหนักผิดปกติ\n${anomalyLines.join('\n')}\n\nยืนยันปิดงานด้วยน้ำหนักจริงนี้หรือไม่?`)) {
             setSaving(false)
             return
           }
@@ -588,7 +588,7 @@ function CloseForm({
                   <div className="row" style={{ justifyContent: 'space-between', fontSize: 12.5, marginBottom: 6 }}>
                     <span className="muted">
                       {overweight
-                        ? <span style={{ color: 'var(--red)' }}>❌ น้ำหนักปลายเกินต้น ({((dwTon - (l.weight || 0)) * 1000).toFixed(0)} กก.)</span>
+                        ? <span style={{ color: 'var(--amber)' }}>⚠️ น้ำหนักปลายเกินต้น {((dwTon - (l.weight || 0)) * 1000).toFixed(0)} กก. (ปิดงานได้)</span>
                         : lossKg === 0
                           ? <span style={{ color: 'var(--green)' }}>✓ ส่งครบ {loadedWeightDisplay.toLocaleString()} {wUnit}</span>
                           : exceeds
