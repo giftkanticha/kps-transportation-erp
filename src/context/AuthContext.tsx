@@ -109,10 +109,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => { mounted = false; subscription.unsubscribe() }
   }, [])
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (identifier: string, password: string) => {
     if (BYPASS_AUTH) return
+    let email = identifier.trim()
+    // Allow logging in with a username: resolve it to the account email first.
+    if (!email.includes('@')) {
+      const { data: resolved, error: rpcErr } = await supabase.rpc('email_for_username', { p_username: email })
+      if (rpcErr) throw new Error(rpcErr.message)
+      if (!resolved) throw new Error('ไม่พบชื่อผู้ใช้นี้')
+      email = resolved as string
+    }
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Email หรือ password ไม่ถูกต้อง' : error.message)
+    if (error) throw new Error(error.message === 'Invalid login credentials' ? 'ชื่อผู้ใช้/อีเมล หรือรหัสผ่านไม่ถูกต้อง' : error.message)
     const p = await fetchProfile(data.user.id)
     if (p?.status === 'PENDING_APPROVAL') {
       await supabase.auth.signOut()
