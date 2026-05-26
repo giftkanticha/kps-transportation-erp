@@ -254,20 +254,51 @@ function EditProfileModal({ user, isSelf, onClose }: {
 
   const save = async () => {
     setErr(null)
-    const u = username.trim().toLowerCase()
-    const e = email.trim().toLowerCase()
-    if (!displayName.trim()) return setErr('กรุณากรอกชื่อ-นามสกุล')
-    if (u && !/^[a-z0-9_.]{3,}$/.test(u)) return setErr('ชื่อผู้ใช้ต้องเป็น a-z 0-9 _ . อย่างน้อย 3 ตัว')
-    if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return setErr('อีเมลไม่ถูกต้อง')
-    if (isSelf && (pw || pw2)) {
-      if (pw.length < 6) return setErr('รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร')
-      if (pw !== pw2) return setErr('รหัสผ่านยืนยันไม่ตรงกัน')
+    const dn = displayName.trim()
+    const u  = username.trim().toLowerCase()
+    const e  = email.trim().toLowerCase()
+    const ph = phone.trim()
+
+    const prevUsername = (user.username ?? '').toLowerCase()
+    const prevEmail    = (user.email ?? '').toLowerCase()
+
+    // Only validate / send the fields the admin actually changed.
+    const patch: Partial<Profile> = {}
+    if (dn !== user.display_name) {
+      if (!dn) return setErr('ชื่อ-นามสกุลห้ามว่าง')
+      patch.display_name = dn
     }
+    if (u !== prevUsername) {
+      if (u && !/^[a-z0-9_.]{3,}$/.test(u)) {
+        return setErr('ชื่อผู้ใช้ต้องเป็น a-z 0-9 _ . อย่างน้อย 3 ตัว')
+      }
+      patch.username = u || null
+    }
+    if (ph !== user.phone) {
+      patch.phone = ph
+    }
+
+    const emailChanged = e !== prevEmail
+    if (emailChanged) {
+      if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) {
+        return setErr('อีเมลไม่ถูกต้อง')
+      }
+    }
+
+    const pwChanged = isSelf && (pw.length > 0 || pw2.length > 0)
+    if (pwChanged) {
+      if (pw.length < 6) return setErr('รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร')
+      if (pw !== pw2)    return setErr('รหัสผ่านยืนยันไม่ตรงกัน')
+    }
+
+    // No-op — close without hitting the API.
+    if (Object.keys(patch).length === 0 && !emailChanged && !pwChanged) {
+      onClose()
+      return
+    }
+
     setBusy(true)
     try {
-      // Email changes require updating auth.users too — done by an admin-only
-      // SECURITY DEFINER RPC. Profile-only fields go through the normal update.
-      const emailChanged = e !== (user.email ?? '').toLowerCase()
       if (emailChanged) {
         const { error } = await supabase.rpc('admin_set_user_email', {
           p_user_id: user.id,
@@ -275,15 +306,10 @@ function EditProfileModal({ user, isSelf, onClose }: {
         })
         if (error) throw new Error(error.message)
       }
-      await updateProfile.mutateAsync({
-        id: user.id,
-        patch: {
-          display_name: displayName.trim(),
-          username: u || null,
-          phone: phone.trim(),
-        } as Partial<Profile>,
-      })
-      if (isSelf && pw) {
+      if (Object.keys(patch).length > 0) {
+        await updateProfile.mutateAsync({ id: user.id, patch })
+      }
+      if (pwChanged) {
         const { error } = await supabase.auth.updateUser({ password: pw })
         if (error) throw new Error(error.message)
       }
@@ -300,8 +326,11 @@ function EditProfileModal({ user, isSelf, onClose }: {
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="head"><h3>แก้ไขข้อมูลผู้ใช้</h3></div>
         <div className="body">
+          <div className="muted" style={{ fontSize: 12, marginBottom: 14 }}>
+            แก้เฉพาะช่องที่ต้องการเปลี่ยน — ช่องที่ไม่ได้แตะจะคงค่าเดิม
+          </div>
           <div className="field" style={{ marginBottom: 14 }}>
-            <label>ชื่อ-นามสกุล *</label>
+            <label>ชื่อ-นามสกุล</label>
             <input value={displayName} onChange={e => setDisplayName(e.target.value)} autoFocus />
           </div>
           <div className="field" style={{ marginBottom: 14 }}>
@@ -309,7 +338,7 @@ function EditProfileModal({ user, isSelf, onClose }: {
             <input value={username} onChange={e => setUsername(e.target.value.toLowerCase())} placeholder="เช่น somchai" autoComplete="username" />
           </div>
           <div className="field" style={{ marginBottom: 14 }}>
-            <label>อีเมล *</label>
+            <label>อีเมล</label>
             <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@example.com" autoComplete="email" />
             <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>ใช้สำหรับเข้าระบบและรับลิงก์รีเซตรหัสผ่าน</div>
           </div>
