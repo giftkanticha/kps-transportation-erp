@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { db } from './lib/db'
 import { useAuth } from './context/AuthContext'
 import { canAccessRoute } from './lib/permissions'
 import { LoginScreen } from './pages/auth/LoginScreen'
@@ -103,13 +102,6 @@ export default function App() {
   if (!legacyUser) return <LoginScreen />
 
   const handleLogout = () => logout()
-
-  const handleReset = () => {
-    if (confirm('รีเซ็ตข้อมูลทั้งหมดและกลับไปค่าเริ่มต้น?')) {
-      db.reset()
-      window.location.reload()
-    }
-  }
 
   const renderPage = () => {
     if (!canAccessRoute(active, legacyUser.role)) {
@@ -249,7 +241,6 @@ export default function App() {
           user={legacyUser}
           crumb={crumbMap[active] ?? 'Dashboard'}
           onLogout={handleLogout}
-          onReset={handleReset}
           onOpenAlerts={() => setActive('alerts')}
         />
         <div className="content">{renderPage()}</div>

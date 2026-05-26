@@ -7,11 +7,10 @@ interface TopbarProps {
   user: User
   crumb: string
   onLogout: () => void
-  onReset: () => void
   onOpenAlerts: () => void
 }
 
-export function Topbar({ user, crumb, onLogout, onReset, onOpenAlerts }: TopbarProps) {
+export function Topbar({ user, crumb, onLogout, onOpenAlerts }: TopbarProps) {
   const [open, setOpen] = useState(false)
   const [showChangePw, setShowChangePw] = useState(false)
 
@@ -80,16 +79,6 @@ export function Topbar({ user, crumb, onLogout, onReset, onOpenAlerts }: TopbarP
               onClick={() => { setOpen(false); setShowChangePw(true) }}
             >
               <Icon name="settings" size={15} /> เปลี่ยนรหัสผ่าน
-            </div>
-            <div className="sep" />
-            <div
-              className="item"
-              onClick={() => {
-                setOpen(false)
-                onReset()
-              }}
-            >
-              <Icon name="trash" size={15} /> รีเซ็ตข้อมูลตัวอย่าง
             </div>
             <div className="sep" />
             <div

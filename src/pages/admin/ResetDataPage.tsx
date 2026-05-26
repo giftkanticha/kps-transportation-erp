@@ -28,31 +28,95 @@ export function ResetDataPage() {
   const doReset = async () => {
     if (confirm !== 'DELETE') return
     setLoading(true)
-    try {
-      const raw = JSON.parse(localStorage.getItem('kps_erp_v5') || '{}')
-      const counts = {
-        expenses: opts.expenses ? (raw.expenses?.length||0) : 0,
-        trips:    opts.trips    ? (raw.dispatch?.length||0)  : 0,
-        fuel:     opts.fuel     ? ((raw.fuel?.length||0)+(raw.fuelStock?.length||0)) : 0,
-      }
-      if (opts.expenses) { raw.expenses = []; raw.vendorExpenses = [] }
-      if (opts.trips)    { raw.dispatch = []; raw.fuelRounds = [] }
-      if (opts.fuel)     { raw.fuel = []; raw.fuelStock = []; raw.fuelRecords = [] }
-      if (opts.tires)    { raw.tires = []; raw.tireEvents = []; raw.tire_events = []; raw.tire_scrap_sales = [] }
-      localStorage.setItem('kps_erp_v5', JSON.stringify(raw))
 
+    const head = async (table: string): Promise<number> => {
+      const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true })
+      if (error) throw new Error(`${table}: ${error.message}`)
+      return count ?? 0
+    }
+    const wipe = async (table: string) => {
+      // PostgREST requires an explicit filter on .delete(); `id` is never null.
+      const { error } = await supabase.from(table).delete().not('id', 'is', null)
+      if (error) throw new Error(`${table}: ${error.message}`)
+    }
+
+    try {
+      // Count first (so the success message + audit log are accurate).
+      const c: Record<string, number> = {}
+      if (opts.expenses) {
+        c.expenseHeaders = await head('expense_headers')
+        c.expensesFlat   = await head('expenses')
+      }
+      if (opts.trips) {
+        c.dispatch   = await head('dispatch')
+        c.fuelRounds = await head('fuel_rounds')
+      }
+      if (opts.fuel) {
+        c.fuelRecords      = await head('fuel_records')
+        c.fuelStock        = await head('fuel_stock')
+        c.fuelTransactions = await head('fuel_transactions')
+      }
+      if (opts.tires) {
+        c.tires = await head('tires')
+      }
+
+      // Delete — FK CASCADE handles dispatch_legs / expense_lines / tire_events
+      // / tire_scrap_sales; we only need to wipe parents.
+      if (opts.expenses) {
+        await wipe('expense_headers')
+        await wipe('expenses')
+      }
+      if (opts.trips) {
+        await wipe('dispatch')
+        await wipe('fuel_rounds')
+      }
+      if (opts.fuel) {
+        await wipe('fuel_records')
+        await wipe('fuel_stock')
+        await wipe('fuel_transactions')
+      }
+      if (opts.tires) {
+        await wipe('tires')
+      }
+
+      // Mirror the wipe into the legacy localStorage cache too, so any code
+      // path that still touches `kps_erp_v5` doesn't re-surface stale data.
+      try {
+        const raw = JSON.parse(localStorage.getItem('kps_erp_v5') || '{}')
+        if (opts.expenses) { raw.expenses = []; raw.vendorExpenses = [] }
+        if (opts.trips)    { raw.dispatch = []; raw.fuelRounds = [] }
+        if (opts.fuel)     { raw.fuel = []; raw.fuelStock = []; raw.fuelRecords = [] }
+        if (opts.tires)    { raw.tires = []; raw.tireEvents = []; raw.tire_events = []; raw.tire_scrap_sales = [] }
+        localStorage.setItem('kps_erp_v5', JSON.stringify(raw))
+      } catch { /* localStorage unavailable / empty — ignore */ }
+
+      const counts = {
+        expenses: (c.expenseHeaders ?? 0) + (c.expensesFlat ?? 0),
+        trips:    (c.dispatch ?? 0) + (c.fuelRounds ?? 0),
+        fuel:     (c.fuelRecords ?? 0) + (c.fuelStock ?? 0) + (c.fuelTransactions ?? 0),
+      }
       const parts: string[] = []
       if (opts.expenses) parts.push(`expenses:${counts.expenses}`)
       if (opts.trips)    parts.push(`trips:${counts.trips}`)
       if (opts.fuel)     parts.push(`fuel:${counts.fuel}`)
-      if (opts.tires)    parts.push('tires:all')
+      if (opts.tires)    parts.push(`tires:${c.tires ?? 0}`)
 
       await supabase.from('data_reset_log').insert({
-        reset_by: profile!.id, details: parts.join(', '), status:'COMPLETED', completed_at: new Date().toISOString()
+        reset_by: profile!.id, details: parts.join(', '),
+        status: 'COMPLETED', completed_at: new Date().toISOString(),
       })
-      setDone(counts); setStep(1); setConfirm(''); setOpts({ expenses:false, trips:false, fuel:false, tires:false, all:false })
-    } catch (e) { alert('เกิดข้อผิดพลาด: ' + (e as Error).message) }
-    finally { setLoading(false) }
+      setDone(counts)
+      setStep(1); setConfirm('')
+      setOpts({ expenses: false, trips: false, fuel: false, tires: false, all: false })
+    } catch (e) {
+      const msg = (e as Error).message
+      await supabase.from('data_reset_log').insert({
+        reset_by: profile!.id, details: `error: ${msg}`, status: 'FAILED',
+      })
+      alert('เกิดข้อผิดพลาด: ' + msg)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
