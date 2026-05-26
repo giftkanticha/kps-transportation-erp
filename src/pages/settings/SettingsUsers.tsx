@@ -23,6 +23,34 @@ const STATUS_BADGE: Record<string, string> = {
   PENDING_APPROVAL: 'amber', ACTIVE: 'green', INACTIVE: 'gray', LOCKED: 'red',
 }
 
+// Role pill colors (matching the .badge palette in src/styles/index.css)
+const ROLE_TONE: Record<string, { bg: string; fg: string; chevron: string }> = {
+  SUPER_ADMIN: { bg: '#FEE2E2', fg: '#991B1B', chevron: '%23991B1B' },
+  ADMIN:       { bg: '#DBEAFE', fg: '#1D4ED8', chevron: '%231D4ED8' },
+  MANAGER:     { bg: '#FEF3C7', fg: '#92400E', chevron: '%2392400E' },
+  EMPLOYEE:    { bg: '#F1F5F9', fg: '#475569', chevron: '%23475569' },
+}
+
+const rolePillStyle = (role: string, disabled: boolean) => {
+  const t = ROLE_TONE[role] ?? ROLE_TONE.EMPLOYEE
+  return {
+    appearance: 'none' as const,
+    WebkitAppearance: 'none' as const,
+    MozAppearance: 'none' as const,
+    background: `${t.bg} url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none' stroke='${t.chevron}' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M1 1l4 4 4-4'/></svg>") no-repeat right 10px center`,
+    color: t.fg,
+    border: 'none',
+    borderRadius: 999,
+    padding: '5px 26px 5px 12px',
+    fontSize: 12,
+    fontWeight: 600,
+    fontFamily: 'inherit',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.6 : 1,
+    minWidth: 130,
+  }
+}
+
 export function SettingsUsers() {
   const { profile, isAdmin } = useAuth()
   const { data: users = [], isLoading } = useList<Profile>('user_profiles')
@@ -93,7 +121,7 @@ export function SettingsUsers() {
                       value={u.role}
                       disabled={disabled}
                       onChange={e => act(u.id, { role: e.target.value })}
-                      style={{ fontSize: 12, padding: '3px 6px' }}
+                      style={rolePillStyle(u.role, disabled)}
                     >
                       {ROLES.map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                     </select>
