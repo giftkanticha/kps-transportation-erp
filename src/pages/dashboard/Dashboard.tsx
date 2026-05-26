@@ -13,19 +13,22 @@ interface ReqItem {
   id: number; title: string; desc: string; time: string; priority: 'critical' | 'warning' | 'info'
 }
 
-const MOCK_REGISTRATIONS: RegItem[] = [
-  { id: 1, plate: '70-2451', label: 'RR2', type: 'ต่อภาษีรถ', dueDate: '28 พ.ค. 69', status: 'warning' },
-  { id: 2, plate: '70-4567', label: 'FL2', type: 'ต่อประกันภัยรถ', dueDate: '15 มิ.ย. 69', status: 'warning' },
-  { id: 3, plate: '70-7890', label: 'RR5', type: 'ต่อใบขับขี่', dueDate: 'วันนี้ ⚠️', status: 'critical' },
-]
-
-const MOCK_EMP_REQUESTS: ReqItem[] = [
-  { id: 1, title: 'ขอเปลี่ยนยาง - สนาม ด.', desc: 'ยาง 4 เส้น รถ 70-2451', time: '2 ชม.', priority: 'critical' },
-  { id: 2, title: 'ขอ OT ไปกลับ - วิทย์ น.', desc: 'เพิ่มเวลา 4 ชม.', time: '30 นาที', priority: 'warning' },
-  { id: 3, title: 'ขออาหารเสริม - บุญส่วน ร.', desc: 'ขอเบี้ยเลี้ยง 300 บาท', time: '1.5 ชม.', priority: 'info' },
-  { id: 4, title: 'ขอวันลา - สมศรี', desc: 'ลาป่วย 1 วัน', time: '45 นาที', priority: 'warning' },
-  { id: 5, title: 'ขอแก้เลขบัญชี - ณัฐ พ.', desc: 'เปลี่ยนบัญชีโอน', time: '3.5 ชม.', priority: 'info' },
-]
+// Renewals + employee requests used to be hard-coded demo data — kept the
+// types but the arrays are now computed from real DB rows below.
+const TODAY_ISO = new Date().toISOString().slice(0, 10)
+function daysTo(date: string | null | undefined): number | null {
+  if (!date) return null
+  const d = new Date(date)
+  if (Number.isNaN(d.getTime())) return null
+  const today = new Date(TODAY_ISO)
+  return Math.round((d.getTime() - today.getTime()) / 86_400_000)
+}
+function thaiShortDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+  return `${d.getDate()} ${months[d.getMonth()]} ${(d.getFullYear() + 543).toString().slice(-2)}`
+}
 
 // ─── Priority helpers ──────────────────────────────────────────────────────────
 const P_COLOR = { critical: '#EF4444', warning: '#F59E0B', info: '#3B82F6', success: '#10B981' } as const
@@ -328,7 +331,37 @@ export function Dashboard({ user, setActive }: DashboardProps) {
     ? Math.round(((revenueThisMonth - costThisMonth) / revenueThisMonth) * 100) : 0
 
   const canApprove    = user.role === 'admin' || user.role === 'manager'
-  const pendingRequests = MOCK_EMP_REQUESTS.filter(r => !dismissedReqs.has(r.id))
+
+  // Vehicle document renewals due within 60 days, computed from real data.
+  const renewals = useMemo<RegItem[]>(() => {
+    const out: RegItem[] = []
+    let id = 0
+    const checks: { key: 'tax' | 'insurance' | 'dispatchPermit'; label: string }[] = [
+      { key: 'tax',            label: 'ต่อภาษีรถ' },
+      { key: 'insurance',      label: 'ต่อประกันภัยรถ' },
+      { key: 'dispatchPermit', label: 'ต่อใบอนุญาตขนส่ง' },
+    ]
+    vehicles.forEach(v => {
+      checks.forEach(c => {
+        const dateStr = String(v[c.key] ?? '')
+        const days = daysTo(dateStr)
+        if (days === null || days > 60) return
+        out.push({
+          id: ++id,
+          plate: v.plate,
+          label: v.brand || v.type || '',
+          type: c.label,
+          dueDate: days < 0 ? `หมดอายุแล้ว (${thaiShortDate(dateStr)})` : `${thaiShortDate(dateStr)} (${days} วัน)`,
+          status: days <= 7 ? 'critical' : 'warning',
+        })
+      })
+    })
+    return out.sort((a, b) => (a.status === 'critical' ? -1 : 1) - (b.status === 'critical' ? -1 : 1))
+  }, [vehicles])
+
+  // No employee-request feature in the system yet — render an empty queue.
+  const pendingRequests: ReqItem[] = []
+  void dismissedReqs // keep state hook intact for future use
 
   const iconMap:  Record<string, string> = { trip: 'package', alert: 'alert', create: 'plus', approve: 'check', invoice: 'money', fuel: 'fuel' }
   const colorMap: Record<string, string> = { alert: 'red', approve: 'green', fuel: 'amber' }
@@ -541,10 +574,13 @@ export function Dashboard({ user, setActive }: DashboardProps) {
           <div className="card">
             <div className="head">
               <h3>ต่อทะเบียน / ภาษีรถ</h3>
-              <span className="badge amber mono">{MOCK_REGISTRATIONS.length}</span>
+              {renewals.length > 0 && <span className="badge amber mono">{renewals.length}</span>}
             </div>
             <div style={{ padding: '10px 0 6px' }}>
-              {MOCK_REGISTRATIONS.map(reg => {
+              {renewals.length === 0 && (
+                <div className="empty" style={{ padding: '28px 18px' }}>ไม่มีเอกสารใกล้หมดอายุใน 60 วัน ✅</div>
+              )}
+              {renewals.map(reg => {
                 const isCritical = reg.status === 'critical'
                 return (
                   <div
