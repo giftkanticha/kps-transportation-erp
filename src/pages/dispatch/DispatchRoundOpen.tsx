@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
@@ -68,15 +68,26 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
     return closed[0] ?? null
   }, [vehicleId, dispatches])
 
-  // Auto-fill start mileage when vehicle changes
+  // Auto-fill start mileage from the most recent closed round (or vehicle.odometer
+  // fallback). Re-runs when dispatch data loads in late, but never clobbers a
+  // value the user has manually edited.
+  const autoFillRef = useRef<{ vehicleId: string; value: string } | null>(null)
   useEffect(() => {
-    if (!vehicleId) { setStartMileage(''); return }
-    if (lastMileage != null) {
-      setStartMileage(String(lastMileage))
-    } else if (vehicle) {
-      setStartMileage(String(vehicle.odometer || ''))
+    if (!vehicleId) {
+      setStartMileage('')
+      autoFillRef.current = null
+      return
     }
-  }, [vehicleId])
+    const next = lastMileage != null
+      ? String(lastMileage)
+      : vehicle ? String(vehicle.odometer || '') : ''
+    const prev = autoFillRef.current
+    const userTouched = prev != null && prev.vehicleId === vehicleId && prev.value !== startMileage
+    if (!userTouched) {
+      setStartMileage(next)
+      autoFillRef.current = { vehicleId, value: next }
+    }
+  }, [vehicleId, lastMileage, vehicle?.odometer])
 
   // Auto-sync driver from vehicle.driverId whenever vehicle changes (overwrites).
   // Vehicle has a "คนขับประจำ" relationship that's the source of truth.
