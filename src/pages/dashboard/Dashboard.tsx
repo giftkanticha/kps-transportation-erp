@@ -337,7 +337,9 @@ export function Dashboard({ user, setActive }: DashboardProps) {
     )
   }, [vehicles])
   const lowStockItems = useMemo(() => stock.filter(s => s.qty <= s.reorderAt), [stock])
-  const totalAlerts = criticalTireVehicles.length + maintenanceDueVehicles.length + lowStockItems.length
+  const customersWithDebt = useMemo(() => customers.filter(c => (c.openInvoice ?? 0) > 0), [customers])
+  const totalOpenInvoice  = useMemo(() => customersWithDebt.reduce((s, c) => s + (c.openInvoice ?? 0), 0), [customersWithDebt])
+  const totalAlerts = criticalTireVehicles.length + maintenanceDueVehicles.length + lowStockItems.length + customersWithDebt.length
 
   const marginPct = revenueThisMonth > 0
     ? Math.round(((revenueThisMonth - costThisMonth) / revenueThisMonth) * 100) : 0
@@ -499,6 +501,23 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                         <div className="txt">
                           {lowStockItems.slice(0, 3).map(s => s.name).join(', ')}
                           {lowStockItems.length > 3 && ` และอีก ${lowStockItems.length - 3}`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {customersWithDebt.length > 0 && (
+                    <div className="feed-item">
+                      <div className="ic"><Icon name="money" size={16} /></div>
+                      <div className="body">
+                        <div className="who">ลูกหนี้คงค้าง {customersWithDebt.length} ราย · รวม {db.thb(totalOpenInvoice)}</div>
+                        <div className="txt">
+                          {customersWithDebt
+                            .slice()
+                            .sort((a, b) => (b.openInvoice ?? 0) - (a.openInvoice ?? 0))
+                            .slice(0, 3)
+                            .map(c => `${c.name} ${db.thb(c.openInvoice)}`)
+                            .join(' · ')}
+                          {customersWithDebt.length > 3 && ` และอีก ${customersWithDebt.length - 3}`}
                         </div>
                       </div>
                     </div>
