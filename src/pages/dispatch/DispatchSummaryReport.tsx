@@ -4,7 +4,7 @@ import { useList } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { usePrint } from '../../hooks/usePrint'
 import type { Vehicle, Employee, Dispatch, FuelRound } from '../../types'
-import { Icon, Field } from '../../components/ui'
+import { Icon, Field, SegmentedFilter } from '../../components/ui'
 
 interface Props {
   setActive: (id: string) => void
@@ -40,6 +40,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   const [vehicleId, setVehicleId] = useState('')
   const [driverId, setDriverId] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
+  const [printScope, setPrintScope] = useState<'both' | 'summary' | 'form'>('both')
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
@@ -165,6 +166,10 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   )
 
   const selVehicle = vehicles.find(v => v.id === vehicleId)
+  // Print scope (only meaningful when a vehicle is selected, i.e. the form exists)
+  const summaryPrintCls = vehicleId && printScope === 'form' ? ' no-print' : ''
+  const formPrintCls = printScope === 'summary' ? ' no-print' : ''
+  const formBreakCls = vehicleId && printScope === 'both' ? ' print-break' : ''
   const numFmt = (v: number | null | undefined) => (v != null && v !== 0 ? db.fmt(v) : '–')
   const priceFmt = (v: number | null | undefined) =>
     v != null && v !== 0 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '–'
@@ -176,7 +181,18 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
           <h1 className="page-title">รายงานสรุปงานขนส่ง</h1>
           <div className="page-sub">รายงาน P&amp;L ต่อรอบ พร้อม highlight KM/L &lt; {DSP_KMPL_THRESHOLD}</div>
         </div>
-        <div className="actions no-print">
+        <div className="actions no-print" style={{ alignItems: 'center' }}>
+          {vehicleId && (
+            <SegmentedFilter
+              value={printScope}
+              onChange={setPrintScope}
+              options={[
+                { value: 'both', label: 'พิมพ์ทั้งหมด' },
+                { value: 'summary', label: 'เฉพาะตารางสรุป' },
+                { value: 'form', label: 'เฉพาะแบบฟอร์ม' },
+              ]}
+            />
+          )}
           <button className="btn" onClick={() => print('landscape')}>
             <Icon name="download" size={15} /> พิมพ์ / PDF
           </button>
@@ -217,7 +233,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
       </div>
 
       {/* KPI strip */}
-      <div className="grid-4" style={{ marginBottom: 16, gap: 12 }}>
+      <div className={`grid-4${summaryPrintCls}`} style={{ marginBottom: 16, gap: 12 }}>
         <div className="card kpi">
           <div className="label">รายได้รวม</div>
           <div className="row"><div className="icn-box green"><Icon name="money" size={18} /></div>
@@ -246,6 +262,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
 
       {abnormal.length > 0 && (
         <div
+          className={summaryPrintCls.trim()}
           style={{
             padding: 12, marginBottom: 14, borderRadius: 8,
             background: '#FEE2E2', border: '1px solid #EF4444', fontSize: 13,
@@ -256,7 +273,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
       )}
 
       {/* Table */}
-      <div className="card">
+      <div className={`card${summaryPrintCls}`}>
         <div className="head">
           <h3>รายการรอบงาน ({rows.length} รอบ · {months} เดือน)</h3>
         </div>
@@ -357,14 +374,14 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
       {/* Legacy per-trip form — only when a single vehicle is selected */}
       {vehicleId && (
         <>
-          <div className="print-only" style={{ marginBottom: 12 }}>
+          <div className={`print-only${formBreakCls}${formPrintCls}`} style={{ marginBottom: 12 }}>
             <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>รายงานรายเที่ยว</div>
             <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
               KPS Transportation ERP · ทะเบียน {selVehicle?.plate ?? '—'} · {from} – {to} · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())}
             </div>
           </div>
 
-          <div className="card print-area">
+          <div className={`card print-area${formPrintCls}`}>
             <div className="head no-print">
               <h3>แบบฟอร์มรายเที่ยว — {selVehicle?.plate ?? '—'} ({legRows.length} เที่ยว)</h3>
             </div>
