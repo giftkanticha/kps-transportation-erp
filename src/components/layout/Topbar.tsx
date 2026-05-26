@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { User } from '../../types'
 import { Icon } from '../ui'
+import { ChangePasswordModal } from '../auth/ChangePasswordModal'
 
 interface TopbarProps {
   user: User
@@ -12,6 +13,7 @@ interface TopbarProps {
 
 export function Topbar({ user, crumb, onLogout, onReset, onOpenAlerts }: TopbarProps) {
   const [open, setOpen] = useState(false)
+  const [showChangePw, setShowChangePw] = useState(false)
 
   const roleLabel =
     user.role === 'admin'
@@ -73,11 +75,11 @@ export function Topbar({ user, crumb, onLogout, onReset, onOpenAlerts }: TopbarP
             style={{ top: 'calc(100% + 6px)' }}
             onClick={e => e.stopPropagation()}
           >
-            <div className="item" onClick={() => setOpen(false)}>
-              <Icon name="user" size={15} /> โปรไฟล์
-            </div>
-            <div className="item" onClick={() => setOpen(false)}>
-              <Icon name="settings" size={15} /> ตั้งค่า
+            <div
+              className="item"
+              onClick={() => { setOpen(false); setShowChangePw(true) }}
+            >
+              <Icon name="settings" size={15} /> เปลี่ยนรหัสผ่าน
             </div>
             <div className="sep" />
             <div
@@ -102,6 +104,8 @@ export function Topbar({ user, crumb, onLogout, onReset, onOpenAlerts }: TopbarP
           </div>
         )}
       </div>
+
+      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
     </div>
   )
 }
