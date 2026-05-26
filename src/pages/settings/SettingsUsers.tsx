@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useList, useUpdate } from '../../hooks/useTable'
+import { useList, useUpdate, useDelete } from '../../hooks/useTable'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { Icon } from '../../components/ui'
@@ -57,6 +57,7 @@ export function SettingsUsers() {
   const { profile, isAdmin } = useAuth()
   const { data: users = [], isLoading } = useList<Profile>('user_profiles')
   const updateProfile = useUpdate<Profile>('user_profiles')
+  const deleteProfile = useDelete('user_profiles')
   const [busy, setBusy] = useState<string | null>(null)
   const [editing, setEditing] = useState<Profile | null>(null)
 
@@ -64,6 +65,14 @@ export function SettingsUsers() {
     setBusy(id)
     try { await updateProfile.mutateAsync({ id, patch }) }
     catch (e) { alert(e instanceof Error ? e.message : 'ดำเนินการไม่สำเร็จ') }
+    finally { setBusy(null) }
+  }
+
+  const del = async (id: string, name: string) => {
+    if (!confirm(`ลบผู้ใช้ "${name}" ออกจากระบบถาวร?\n(บัญชี auth ใน Supabase จะคงอยู่ — admin ลบเพิ่มได้ที่ Supabase Studio ถ้าต้องการ)`)) return
+    setBusy(id)
+    try { await deleteProfile.mutateAsync(id) }
+    catch (e) { alert(e instanceof Error ? e.message : 'ลบไม่สำเร็จ') }
     finally { setBusy(null) }
   }
 
@@ -154,9 +163,16 @@ export function SettingsUsers() {
                         </button>
                       )}
                       {(u.status === 'INACTIVE' || u.status === 'LOCKED') && (
-                        <button className="btn sm" disabled={busy === u.id} onClick={() => act(u.id, { status: 'ACTIVE' })}>
-                          เปิดใช้งาน
-                        </button>
+                        <>
+                          <button className="btn sm" disabled={busy === u.id} onClick={() => act(u.id, { status: 'ACTIVE' })}>
+                            เปิดใช้งาน
+                          </button>
+                          {!self && (
+                            <button className="btn sm danger" disabled={busy === u.id} onClick={() => del(u.id, u.display_name)}>
+                              <Icon name="trash" size={13} /> ลบผู้ใช้
+                            </button>
+                          )}
+                        </>
                       )}
                       {self && u.status === 'ACTIVE' && <span className="muted" style={{ fontSize: 11 }}>—</span>}
                     </div>
