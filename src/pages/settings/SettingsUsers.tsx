@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useList, useUpdate } from '../../hooks/useTable'
 import { useAuth } from '../../context/AuthContext'
+import { supabase } from '../../lib/supabase'
+import { Icon } from '../../components/ui'
 
 interface Profile {
   id: string
@@ -56,6 +58,7 @@ export function SettingsUsers() {
   const { data: users = [], isLoading } = useList<Profile>('user_profiles')
   const updateProfile = useUpdate<Profile>('user_profiles')
   const [busy, setBusy] = useState<string | null>(null)
+  const [editing, setEditing] = useState<Profile | null>(null)
 
   const act = async (id: string, patch: Partial<Profile>) => {
     setBusy(id)
@@ -133,6 +136,13 @@ export function SettingsUsers() {
                   </td>
                   <td>
                     <div className="row" style={{ gap: 6 }}>
+                      <button
+                        className="btn ghost icon sm"
+                        title="แก้ไขโปรไฟล์"
+                        onClick={() => setEditing(u)}
+                      >
+                        <Icon name="edit" size={14} />
+                      </button>
                       {u.status === 'PENDING_APPROVAL' && (
                         <button className="btn primary sm" disabled={busy === u.id} onClick={() => act(u.id, { status: 'ACTIVE' })}>
                           อนุมัติ
@@ -159,6 +169,108 @@ export function SettingsUsers() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {editing && (
+        <EditProfileModal
+          user={editing}
+          isSelf={editing.id === profile?.id}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function EditProfileModal({ user, isSelf, onClose }: {
+  user: Profile
+  isSelf: boolean
+  onClose: () => void
+}) {
+  const updateProfile = useUpdate<Profile>('user_profiles')
+  const [displayName, setDisplayName] = useState(user.display_name)
+  const [username, setUsername] = useState(user.username ?? '')
+  const [phone, setPhone] = useState(user.phone)
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const save = async () => {
+    setErr(null)
+    const u = username.trim().toLowerCase()
+    if (!displayName.trim()) return setErr('กรุณากรอกชื่อ-นามสกุล')
+    if (u && !/^[a-z0-9_.]{3,}$/.test(u)) return setErr('ชื่อผู้ใช้ต้องเป็น a-z 0-9 _ . อย่างน้อย 3 ตัว')
+    if (isSelf && (pw || pw2)) {
+      if (pw.length < 6) return setErr('รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร')
+      if (pw !== pw2) return setErr('รหัสผ่านยืนยันไม่ตรงกัน')
+    }
+    setBusy(true)
+    try {
+      await updateProfile.mutateAsync({
+        id: user.id,
+        patch: {
+          display_name: displayName.trim(),
+          username: u || null,
+          phone: phone.trim(),
+        } as Partial<Profile>,
+      })
+      if (isSelf && pw) {
+        const { error } = await supabase.auth.updateUser({ password: pw })
+        if (error) throw new Error(error.message)
+      }
+      onClose()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="head"><h3>แก้ไขข้อมูลผู้ใช้</h3></div>
+        <div className="body">
+          <div className="field" style={{ marginBottom: 14 }}>
+            <label>ชื่อ-นามสกุล *</label>
+            <input value={displayName} onChange={e => setDisplayName(e.target.value)} autoFocus />
+          </div>
+          <div className="field" style={{ marginBottom: 14 }}>
+            <label>ชื่อผู้ใช้ (login)</label>
+            <input value={username} onChange={e => setUsername(e.target.value.toLowerCase())} placeholder="เช่น somchai" autoComplete="username" />
+          </div>
+          <div className="field" style={{ marginBottom: 4 }}>
+            <label>เบอร์โทร</label>
+            <input value={phone} onChange={e => setPhone(e.target.value)} />
+          </div>
+          {isSelf && (
+            <>
+              <div style={{ borderTop: '1px solid var(--line)', margin: '20px 0 14px' }} />
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', marginBottom: 4 }}>เปลี่ยนรหัสผ่าน</div>
+              <div className="muted" style={{ fontSize: 11.5, marginBottom: 12 }}>เว้นว่างถ้าไม่ต้องการเปลี่ยน</div>
+              <div className="field" style={{ marginBottom: 14 }}>
+                <label>รหัสผ่านใหม่</label>
+                <input type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="อย่างน้อย 6 ตัวอักษร" autoComplete="new-password" />
+              </div>
+              <div className="field">
+                <label>ยืนยันรหัสผ่านใหม่</label>
+                <input type="password" value={pw2} onChange={e => setPw2(e.target.value)} autoComplete="new-password" />
+              </div>
+            </>
+          )}
+          {err && (
+            <div style={{ marginTop: 14, padding: '8px 12px', background: 'var(--red-50)', color: '#991b1b', borderRadius: 6, fontSize: 13 }}>
+              {err}
+            </div>
+          )}
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" onClick={save} disabled={busy}>
+            {busy ? 'กำลังบันทึก…' : 'บันทึก'}
+          </button>
+        </div>
       </div>
     </div>
   )
