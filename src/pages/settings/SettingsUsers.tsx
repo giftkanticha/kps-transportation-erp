@@ -258,47 +258,27 @@ function EditProfileModal({ user, isSelf, onClose }: {
     const u  = username.trim().toLowerCase()
     const e  = email.trim().toLowerCase()
     const ph = phone.trim()
+    const prevEmail = (user.email ?? '').toLowerCase()
 
-    const prevUsername = (user.username ?? '').toLowerCase()
-    const prevEmail    = (user.email ?? '').toLowerCase()
-
-    // Only validate / send the fields the admin actually changed.
-    const patch: Partial<Profile> = {}
-    if (dn !== user.display_name) {
-      if (!dn) return setErr('ชื่อ-นามสกุลห้ามว่าง')
-      patch.display_name = dn
+    // Format checks (only on invalid values — empty username is allowed).
+    if (!dn) return setErr('ชื่อ-นามสกุลห้ามว่าง')
+    if (u && !/^[a-z0-9_.]{3,}$/.test(u)) {
+      return setErr('ชื่อผู้ใช้ต้องเป็น a-z 0-9 _ . อย่างน้อย 3 ตัว')
     }
-    if (u !== prevUsername) {
-      if (u && !/^[a-z0-9_.]{3,}$/.test(u)) {
-        return setErr('ชื่อผู้ใช้ต้องเป็น a-z 0-9 _ . อย่างน้อย 3 ตัว')
-      }
-      patch.username = u || null
-    }
-    if (ph !== user.phone) {
-      patch.phone = ph
+    if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) {
+      return setErr('อีเมลไม่ถูกต้อง')
     }
 
     const emailChanged = e !== prevEmail
-    if (emailChanged) {
-      if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) {
-        return setErr('อีเมลไม่ถูกต้อง')
-      }
-    }
-
     const pwChanged = isSelf && (pw.length > 0 || pw2.length > 0)
     if (pwChanged) {
       if (pw.length < 6) return setErr('รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร')
       if (pw !== pw2)    return setErr('รหัสผ่านยืนยันไม่ตรงกัน')
     }
 
-    // No-op — close without hitting the API.
-    if (Object.keys(patch).length === 0 && !emailChanged && !pwChanged) {
-      onClose()
-      return
-    }
-
     setBusy(true)
     try {
+      // Email lives on auth.users — must go through the admin RPC.
       if (emailChanged) {
         const { error } = await supabase.rpc('admin_set_user_email', {
           p_user_id: user.id,
@@ -306,9 +286,16 @@ function EditProfileModal({ user, isSelf, onClose }: {
         })
         if (error) throw new Error(error.message)
       }
-      if (Object.keys(patch).length > 0) {
-        await updateProfile.mutateAsync({ id: user.id, patch })
-      }
+      // Profile fields: always save the current form values (cheap; rows are
+      // pre-filled with the existing values so no real damage if unchanged).
+      await updateProfile.mutateAsync({
+        id: user.id,
+        patch: {
+          display_name: dn,
+          username: u || null,
+          phone: ph,
+        } as Partial<Profile>,
+      })
       if (pwChanged) {
         const { error } = await supabase.auth.updateUser({ password: pw })
         if (error) throw new Error(error.message)
