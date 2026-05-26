@@ -324,8 +324,20 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const idleVehicles        = vehicles.filter(v => v.status === 'available').length
   const activeVehicles      = vehicles.filter(v => v.status === 'on-trip').length
   const maintenanceVehicles = vehicles.filter(v => v.status === 'maintenance').length
-  const tireAlerts          = tires.filter(t => (t.status as string) === 'critical').length
-  const lowStock            = stock.filter(s => s.qty <= s.reorderAt).length
+
+  // Real notification feed — only items that actually exist in the DB.
+  const criticalTireVehicles = useMemo(() => {
+    const ids = new Set<string>()
+    tires.forEach(t => { if ((t.status as string) === 'critical' && t.vehicleId) ids.add(t.vehicleId) })
+    return vehicles.filter(v => ids.has(v.id)).map(v => v.plate)
+  }, [tires, vehicles])
+  const maintenanceDueVehicles = useMemo(() => {
+    return vehicles.filter(v =>
+      v.nextServiceKm > 0 && v.odometer > 0 && v.odometer >= v.nextServiceKm - 500,
+    )
+  }, [vehicles])
+  const lowStockItems = useMemo(() => stock.filter(s => s.qty <= s.reorderAt), [stock])
+  const totalAlerts = criticalTireVehicles.length + maintenanceDueVehicles.length + lowStockItems.length
 
   const marginPct = revenueThisMonth > 0
     ? Math.round(((revenueThisMonth - costThisMonth) / revenueThisMonth) * 100) : 0
@@ -448,43 +460,51 @@ export function Dashboard({ user, setActive }: DashboardProps) {
           <div className="card">
             <div className="head">
               <h3>การแจ้งเตือน</h3>
-              <span className="badge red mono">{tireAlerts + lowStock + 1 + subUnpaid.length}</span>
+              {totalAlerts > 0 && <span className="badge red mono">{totalAlerts}</span>}
             </div>
             <div style={{ padding: '8px 18px' }}>
-              <div className="feed">
-                <div className="feed-item">
-                  <div className="ic red"><Icon name="alert" size={16} /></div>
-                  <div className="body">
-                    <div className="who">ยางวิกฤติ {tireAlerts} เส้น</div>
-                    <div className="txt">รถ 70-2451 (RR2) และ 70-4029 (FR) ต่ำกว่าเกณฑ์</div>
-                    <div className="when">8 ชม.ที่แล้ว</div>
-                  </div>
+              {totalAlerts === 0 ? (
+                <div className="empty" style={{ padding: 24 }}>ไม่มีการแจ้งเตือนใหม่ ✅</div>
+              ) : (
+                <div className="feed">
+                  {criticalTireVehicles.length > 0 && (
+                    <div className="feed-item">
+                      <div className="ic red"><Icon name="alert" size={16} /></div>
+                      <div className="body">
+                        <div className="who">ยางวิกฤติ {criticalTireVehicles.length} คัน</div>
+                        <div className="txt">
+                          {criticalTireVehicles.slice(0, 3).join(', ')}
+                          {criticalTireVehicles.length > 3 && ` และอีก ${criticalTireVehicles.length - 3} คัน`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {maintenanceDueVehicles.length > 0 && (
+                    <div className="feed-item">
+                      <div className="ic amber"><Icon name="wrench" size={16} /></div>
+                      <div className="body">
+                        <div className="who">ครบกำหนดบำรุงรักษา {maintenanceDueVehicles.length} คัน</div>
+                        <div className="txt">
+                          {maintenanceDueVehicles.slice(0, 3).map(v => `${v.plate} (${db.fmt(v.odometer)}/${db.fmt(v.nextServiceKm)} km)`).join(', ')}
+                          {maintenanceDueVehicles.length > 3 && ` และอีก ${maintenanceDueVehicles.length - 3}`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {lowStockItems.length > 0 && (
+                    <div className="feed-item">
+                      <div className="ic amber"><Icon name="package" size={16} /></div>
+                      <div className="body">
+                        <div className="who">สต็อคใกล้หมด {lowStockItems.length} รายการ</div>
+                        <div className="txt">
+                          {lowStockItems.slice(0, 3).map(s => s.name).join(', ')}
+                          {lowStockItems.length > 3 && ` และอีก ${lowStockItems.length - 3}`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="feed-item">
-                  <div className="ic amber"><Icon name="wrench" size={16} /></div>
-                  <div className="body">
-                    <div className="who">ครบกำหนดบำรุงรักษา</div>
-                    <div className="txt">รถ 70-7890 ครบ 10,000 km</div>
-                    <div className="when">วันนี้</div>
-                  </div>
-                </div>
-                <div className="feed-item">
-                  <div className="ic amber"><Icon name="package" size={16} /></div>
-                  <div className="body">
-                    <div className="who">สต็อคใกล้หมด {lowStock} รายการ</div>
-                    <div className="txt">หลอดไฟหน้า H4, ผ้าเบรกหน้า</div>
-                    <div className="when">เมื่อวาน</div>
-                  </div>
-                </div>
-                <div className="feed-item">
-                  <div className="ic"><Icon name="money" size={16} /></div>
-                  <div className="body">
-                    <div className="who">ลูกหนี้เกินกำหนด</div>
-                    <div className="txt">PTT Global Chemical ฿1.24M (30+ วัน)</div>
-                    <div className="when">3 วันที่แล้ว</div>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
 
