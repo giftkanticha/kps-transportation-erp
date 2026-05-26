@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from './context/AuthContext'
 import { canAccessRoute } from './lib/permissions'
 import { LoginScreen } from './pages/auth/LoginScreen'
+import { ResetPasswordScreen } from './pages/auth/ResetPasswordScreen'
 import { Sidebar } from './components/layout/Sidebar'
 import { Topbar } from './components/layout/Topbar'
 import { UserManagementPage } from './pages/admin/UserManagementPage'
@@ -82,7 +83,7 @@ const crumbMap: Record<string, string> = {
 }
 
 export default function App() {
-  const { legacyUser, logout, isAdmin, loading } = useAuth()
+  const { legacyUser, logout, isAdmin, loading, recoveryMode } = useAuth()
   const [active, setActive] = useState('dashboard')
   const [subject, setSubject] = useState<unknown>(null)
   const [collapsed, setCollapsed] = useState(false)
@@ -99,6 +100,7 @@ export default function App() {
     )
   }
 
+  if (recoveryMode) return <ResetPasswordScreen />
   if (!legacyUser) return <LoginScreen />
 
   const handleLogout = () => logout()

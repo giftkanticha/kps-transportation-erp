@@ -83,6 +83,23 @@ export function SettingsUsers() {
     finally { setBusy(null) }
   }
 
+  const sendReset = async (id: string, email: string | null, name: string) => {
+    if (!email) { alert('ผู้ใช้นี้ไม่มีอีเมลในระบบ ส่งลิงก์รีเซตไม่ได้'); return }
+    if (!confirm(`ส่งลิงก์รีเซตรหัสผ่านให้ ${name} (${email})?`)) return
+    setBusy(id)
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      })
+      if (error) throw new Error(error.message)
+      alert(`ส่งลิงก์ไปที่ ${email} แล้ว — แจ้งให้ตรวจอีเมลและคลิกลิงก์เพื่อตั้งรหัสผ่านใหม่`)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'ส่งลิงก์ไม่สำเร็จ')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   if (!isAdmin) {
     return (
       <div className="page-head">
@@ -164,6 +181,16 @@ export function SettingsUsers() {
                       >
                         <Icon name="edit" size={14} />
                       </button>
+                      {!self && (
+                        <button
+                          className="btn ghost icon sm"
+                          title="ส่งลิงก์รีเซตรหัสผ่าน"
+                          disabled={busy === u.id || !u.email}
+                          onClick={() => sendReset(u.id, u.email, u.display_name)}
+                        >
+                          <Icon name="mail" size={14} />
+                        </button>
+                      )}
                       {u.status === 'PENDING_APPROVAL' && (
                         <button className="btn primary sm" disabled={busy === u.id} onClick={() => act(u.id, { status: 'ACTIVE' })}>
                           อนุมัติ

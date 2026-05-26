@@ -38,8 +38,10 @@ interface AuthContextValue {
   profile:    UserProfile | null
   legacyUser: User | null
   loading:    boolean
+  recoveryMode: boolean
   login:      (email: string, password: string) => Promise<void>
   logout:     () => Promise<void>
+  exitRecovery: () => void
   isAdmin:    boolean
   isSuperAdmin: boolean
 }
@@ -80,9 +82,10 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession]   = useState<Session | null>(null)
-  const [profile, setProfile]   = useState<UserProfile | null>(BYPASS_AUTH ? BYPASS_PROFILE : null)
-  const [loading, setLoading]   = useState(!BYPASS_AUTH)
+  const [session, setSession]       = useState<Session | null>(null)
+  const [profile, setProfile]       = useState<UserProfile | null>(BYPASS_AUTH ? BYPASS_PROFILE : null)
+  const [loading, setLoading]       = useState(!BYPASS_AUTH)
+  const [recoveryMode, setRecovery] = useState(false)
 
   useEffect(() => {
     if (BYPASS_AUTH) return
@@ -105,7 +108,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch(() => { /* offline / auth unreachable — fall through to login */ })
       .finally(() => { if (mounted) setLoading(false) })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, s) => {
+      // PASSWORD_RECOVERY fires when a user arrives via the password-reset
+      // email link — they hold a short-lived recovery session, so we route
+      // them to the ResetPasswordScreen until they set a new password.
+      if (event === 'PASSWORD_RECOVERY') setRecovery(true)
       void loadProfile(s)
     })
     return () => { mounted = false; subscription.unsubscribe() }
@@ -144,6 +151,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await supabase.auth.signOut()
   }, [])
 
+  const exitRecovery = useCallback(() => setRecovery(false), [])
+
   const legacyUser = BYPASS_AUTH
     ? BYPASS_USER
     : (session && profile && profile.status === 'ACTIVE'
@@ -152,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      session, profile, legacyUser, loading, login, logout,
+      session, profile, legacyUser, loading, recoveryMode, login, logout, exitRecovery,
       isAdmin:      BYPASS_AUTH || profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN',
       isSuperAdmin: BYPASS_AUTH || profile?.role === 'SUPER_ADMIN',
     }}>
