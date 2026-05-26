@@ -8,11 +8,11 @@ interface ResetEntry { id: string; details?: string; status: string; created_at:
 export function ResetDataPage() {
   const { profile } = useAuth()
   const [step, setStep]       = useState<1|2|3>(1)
-  const [opts, setOpts]       = useState({ expenses:false, trips:false, fuel:false, tires:false, stock:false, all:false })
+  const [opts, setOpts]       = useState({ expenses:false, trips:false, fuel:false, tires:false, stock:false, masters:false, all:false })
   const [confirm, setConfirm] = useState('')
   const [loading, setLoading] = useState(false)
   const [history, setHistory] = useState<ResetEntry[]>([])
-  const [done, setDone]       = useState<{expenses:number; trips:number; fuel:number; tires:number; stock:number} | null>(null)
+  const [done, setDone]       = useState<{expenses:number; trips:number; fuel:number; tires:number; stock:number; masters:number} | null>(null)
 
   useEffect(() => {
     supabase.from('data_reset_log').select('*').order('created_at', { ascending:false }).limit(20)
@@ -20,10 +20,10 @@ export function ResetDataPage() {
   }, [done])
 
   const toggle = (k: keyof typeof opts) => {
-    if (k === 'all') { const n = !opts.all; setOpts({ expenses:n, trips:n, fuel:n, tires:n, stock:n, all:n }) }
+    if (k === 'all') { const n = !opts.all; setOpts({ expenses:n, trips:n, fuel:n, tires:n, stock:n, masters:n, all:n }) }
     else setOpts(o => ({ ...o, [k]: !o[k], all:false }))
   }
-  const anySelected = opts.expenses || opts.trips || opts.fuel || opts.tires || opts.stock
+  const anySelected = opts.expenses || opts.trips || opts.fuel || opts.tires || opts.stock || opts.masters
 
   const doReset = async () => {
     if (confirm !== 'DELETE') return
@@ -37,10 +37,11 @@ export function ResetDataPage() {
         p_fuel:     opts.fuel,
         p_tires:    opts.tires,
         p_stock:    opts.stock,
+        p_masters:  opts.masters,
       })
       if (error) throw new Error(error.message)
-      const result = (data ?? { expenses: 0, trips: 0, fuel: 0, tires: 0, stock: 0 }) as {
-        expenses: number; trips: number; fuel: number; tires: number; stock: number
+      const result = (data ?? { expenses: 0, trips: 0, fuel: 0, tires: 0, stock: 0, masters: 0 }) as {
+        expenses: number; trips: number; fuel: number; tires: number; stock: number; masters: number
       }
 
       // Keep the legacy localStorage cache in sync (anything still reading it).
@@ -55,10 +56,10 @@ export function ResetDataPage() {
 
       setDone({
         expenses: result.expenses, trips: result.trips, fuel: result.fuel,
-        tires: result.tires, stock: result.stock,
+        tires: result.tires, stock: result.stock, masters: result.masters,
       })
       setStep(1); setConfirm('')
-      setOpts({ expenses: false, trips: false, fuel: false, tires: false, stock: false, all: false })
+      setOpts({ expenses: false, trips: false, fuel: false, tires: false, stock: false, masters: false, all: false })
     } catch (e) {
       const msg = (e as Error).message
       await supabase.from('data_reset_log').insert({
@@ -77,7 +78,10 @@ export function ResetDataPage() {
       {done && (
         <div className="card pad" style={{ marginBottom:18, background:'#f0fdf4', border:'1px solid #86efac' }}>
           <div style={{ fontWeight:700, color:'#166534', marginBottom:6 }}>✅ รีเซตข้อมูลสำเร็จ</div>
-          <div style={{ fontSize:13, color:'#166534' }}>ลบค่าใช้จ่าย {done.expenses} · ทริป {done.trips} · น้ำมัน {done.fuel} · ยาง {done.tires} · สต็อค {done.stock} รายการ</div>
+          <div style={{ fontSize:13, color:'#166534' }}>
+            ลบค่าใช้จ่าย {done.expenses} · ทริป {done.trips} · น้ำมัน {done.fuel} · ยาง {done.tires} · สต็อค {done.stock}
+            {done.masters > 0 && ` · ข้อมูลหลัก ${done.masters}`} รายการ
+          </div>
           <button className="btn sm" style={{ marginTop:10 }} onClick={() => setDone(null)}>ปิด</button>
         </div>
       )}
@@ -99,7 +103,7 @@ export function ResetDataPage() {
               <h3 style={{ margin:'0 0 6px', fontSize:16 }}>เลือกข้อมูลที่ต้องการลบ</h3>
               <p style={{ color:'var(--text-muted)', fontSize:13, marginBottom:18 }}>ข้อมูลที่เลือกจะถูกลบถาวร</p>
               <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
-                {[{k:'all',label:'ทั้งหมด',desc:'ลบข้อมูลทุกหมวด',danger:true},{k:'expenses',label:'ค่าใช้จ่าย',desc:'บันทึกค่าใช้จ่ายทั้งหมด'},{k:'trips',label:'ทริปงานขนส่ง',desc:'รายการงานขนส่งและรอบน้ำมัน'},{k:'fuel',label:'ข้อมูลน้ำมัน',desc:'บันทึกน้ำมันและสต็อก'},{k:'tires',label:'ประวัติยาง',desc:'ข้อมูลยางและประวัติการใช้งาน'},{k:'stock',label:'สต็อคคลัง KPS',desc:'รายการสินค้าและประวัติการรับเข้า'}].map(({k,label,desc,danger}) => (
+                {[{k:'all',label:'ทั้งหมด (เริ่มจากศูนย์)',desc:'ลบทุกอย่าง รวมพนักงาน/รถ/ลูกค้า — เหลือแค่ผู้ใช้ระบบ + ตั้งค่า',danger:true},{k:'masters',label:'ข้อมูลหลัก',desc:'พนักงาน, รถ, ลูกค้า, คู่ค้า, รถร่วม + log ทุกอย่าง',danger:true},{k:'expenses',label:'ค่าใช้จ่าย',desc:'บันทึกค่าใช้จ่ายทั้งหมด'},{k:'trips',label:'ทริปงานขนส่ง',desc:'รายการงานขนส่งและรอบน้ำมัน'},{k:'fuel',label:'ข้อมูลน้ำมัน',desc:'บันทึกน้ำมันและสต็อก'},{k:'tires',label:'ประวัติยาง',desc:'ข้อมูลยางและประวัติการใช้งาน'},{k:'stock',label:'สต็อคคลัง KPS',desc:'รายการสินค้าและประวัติการรับเข้า'}].map(({k,label,desc,danger}) => (
                   <label key={k} style={{ display:'flex', alignItems:'center', gap:12, padding:'12px 14px', borderRadius:8, cursor:'pointer',
                     background: opts[k as keyof typeof opts] ? (danger?'#fee2e2':'var(--primary-50)') : 'var(--bg-sunk)',
                     border: `1px solid ${opts[k as keyof typeof opts] ? (danger?'#fca5a5':'var(--primary-200)') : 'var(--line)'}` }}>
@@ -123,6 +127,7 @@ export function ResetDataPage() {
                   {opts.fuel && <li>บันทึกน้ำมันทั้งหมด</li>}
                   {opts.tires && <li>ประวัติยางทั้งหมด</li>}
                   {opts.stock && <li>สต็อคคลัง KPS ทั้งหมด</li>}
+                  {opts.masters && <li><strong>พนักงาน · รถ · ลูกค้า · คู่ค้า · รถร่วม + ข้อมูลปฏิบัติงานทั้งหมด</strong> (เริ่มจากศูนย์)</li>}
                 </ul>
               </div>
               <div style={{ display:'flex', gap:10 }}>
