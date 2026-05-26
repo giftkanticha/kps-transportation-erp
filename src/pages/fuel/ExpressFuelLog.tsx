@@ -352,83 +352,91 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
   const cancelEdit = () => setEditingKey(null)
 
   const saveEdit = async (row: GridRow, i: number) => {
-    const foundVehicle = vehicles.find(v => v.plate.toLowerCase() === editDraft.plateTerm.trim().toLowerCase())
-    const vehicleId = foundVehicle?.id ?? row.vehicleId
-    const liters = parseFloat(editDraft.liters)
-    const pricePerL = parseFloat(editDraft.pricePerL) || 35
-    const total = liters * pricePerL
+    try {
+      const foundVehicle = vehicles.find(v => v.plate.toLowerCase() === editDraft.plateTerm.trim().toLowerCase())
+      const vehicleId = foundVehicle?.id ?? row.vehicleId
+      const liters = parseFloat(editDraft.liters)
+      const pricePerL = parseFloat(editDraft.pricePerL) || 35
+      const total = liters * pricePerL
 
-    const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
+      const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
 
-    // Update FuelTransaction
-    if (row.txId) {
-      await updateFuelTx.mutateAsync({
-        id: row.txId,
-        patch: {
-          date: editDraft.date,
-          vehicleId,
-          liters,
-          pricePerL,
-          total,
-          source: editDraft.source,
-          tripId: result.tripId,
-          status: result.status as FuelTransaction['status'],
-        },
+      // Update FuelTransaction
+      if (row.txId) {
+        await updateFuelTx.mutateAsync({
+          id: row.txId,
+          patch: {
+            date: editDraft.date,
+            vehicleId,
+            liters,
+            pricePerL,
+            total,
+            source: editDraft.source,
+            tripId: result.tripId,
+            status: result.status as FuelTransaction['status'],
+          },
+        })
+      }
+
+      // Update FuelRecord (backward compat)
+      if (row.fuelRecId) {
+        await updateFuelRec.mutateAsync({
+          id: row.fuelRecId,
+          patch: {
+            date: editDraft.date,
+            vehicleId,
+            liters,
+            pricePerL,
+            total,
+            station: editDraft.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
+          },
+        })
+      }
+
+      patchRow(i, {
+        date: editDraft.date,
+        plateTerm: editDraft.plateTerm,
+        vehicleId,
+        liters: editDraft.liters,
+        pricePerL: editDraft.pricePerL,
+        source: editDraft.source,
+        status: result.status,
+        statusLabel: result.statusLabel,
+        tripId: result.tripId,
       })
+
+      setEditingKey(null)
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-
-    // Update FuelRecord (backward compat)
-    if (row.fuelRecId) {
-      await updateFuelRec.mutateAsync({
-        id: row.fuelRecId,
-        patch: {
-          date: editDraft.date,
-          vehicleId,
-          liters,
-          pricePerL,
-          total,
-          station: editDraft.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
-        },
-      })
-    }
-
-    patchRow(i, {
-      date: editDraft.date,
-      plateTerm: editDraft.plateTerm,
-      vehicleId,
-      liters: editDraft.liters,
-      pricePerL: editDraft.pricePerL,
-      source: editDraft.source,
-      status: result.status,
-      statusLabel: result.statusLabel,
-      tripId: result.tripId,
-    })
-
-    setEditingKey(null)
   }
 
   // ── Reverse ──────────────────────────────────────────────────────────────────
 
   const confirmReverse = async (row: GridRow) => {
-    // Mark FuelTransaction as REVERSED
-    if (row.txId) {
-      await updateFuelTx.mutateAsync({
-        id: row.txId,
-        patch: { status: 'REVERSED', reversedAt: new Date().toISOString() },
-      })
-    }
+    try {
+      // Mark FuelTransaction as REVERSED
+      if (row.txId) {
+        await updateFuelTx.mutateAsync({
+          id: row.txId,
+          patch: { status: 'REVERSED', reversedAt: new Date().toISOString() },
+        })
+      }
 
-    // Remove FuelRecord so factory balance is restored
-    if (row.fuelRecId) {
-      try { await deleteFuelRec.mutateAsync(row.fuelRecId) } catch { /* already deleted */ }
-    }
+      // Remove FuelRecord so factory balance is restored
+      if (row.fuelRecId) {
+        try { await deleteFuelRec.mutateAsync(row.fuelRecId) } catch { /* already deleted */ }
+      }
 
-    setRows(prev => prev.map(r =>
-      r.key === row.key
-        ? { ...r, reversed: true, status: 'REVERSED', statusLabel: '🚫 ยกเลิกแล้ว' }
-        : r,
-    ))
-    setReverseTarget(null)
+      setRows(prev => prev.map(r =>
+        r.key === row.key
+          ? { ...r, reversed: true, status: 'REVERSED', statusLabel: '🚫 ยกเลิกแล้ว' }
+          : r,
+      ))
+      setReverseTarget(null)
+    } catch (e) {
+      alert('ยกเลิกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

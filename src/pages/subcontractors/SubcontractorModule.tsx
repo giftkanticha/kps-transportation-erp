@@ -328,27 +328,31 @@ function SubOpenForm() {
     if (!form.destination.trim()) { alert('กรุณาระบุปลายทาง'); return }
     if (!form.price) { alert('กรุณากรอกค่าบรรทุก'); return }
     if (!picked) return
-    await insertJob.mutateAsync({
-      code: 'SUB-' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + String(Math.floor(Math.random() * 100)).padStart(2, '0'),
-      date: form.date,
-      subId: picked.subId,
-      driverId: picked.id,
-      plate: picked.plate,
-      driverName: picked.name,
-      category: form.category,
-      destination: form.destination.trim(),
-      origin: 'กรุงเทพ',
-      weight: weightKg,
-      finalWeight: 0,
-      mode: form.mode,
-      price: priceNum,
-      total,
-      status: 'open',
-      bank: `${picked.accountBank} ${picked.accountNo}`,
-    })
-    alert('เปิดงานเรียบร้อย')
-    setForm(blank)
-    setCategoryAutoFilled(false)
+    try {
+      await insertJob.mutateAsync({
+        code: 'SUB-' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + String(Math.floor(Math.random() * 100)).padStart(2, '0'),
+        date: form.date,
+        subId: picked.subId,
+        driverId: picked.id,
+        plate: picked.plate,
+        driverName: picked.name,
+        category: form.category,
+        destination: form.destination.trim(),
+        origin: 'กรุงเทพ',
+        weight: weightKg,
+        finalWeight: 0,
+        mode: form.mode,
+        price: priceNum,
+        total,
+        status: 'open',
+        bank: `${picked.accountBank} ${picked.accountNo}`,
+      })
+      alert('เปิดงานเรียบร้อย')
+      setForm(blank)
+      setCategoryAutoFilled(false)
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   const cancel = () => {

@@ -497,37 +497,41 @@ function ExpRecord() {
       alert('กรุณาเพิ่มรายการอย่างน้อย 1 รายการ')
       return
     }
-    const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
-    const h = await insertHeader.mutateAsync({
-      code: genExpCode(allHeaders),
-      date: hdr.date,
-      vehicleId: hdr.vehicleId,
-      partnerId: hdr.partnerId,
-      odometer: Number(hdr.odometer) || 0,
-      paid: hdr.paid === 'paid',
-      dueDate: hdr.dueDate,
-      total: netTotal,
-      lineCount: lines.length,
-      note: lines.map((l) => l.item).filter(Boolean).join(', '),
-    })
-    for (const l of lines) {
-      const { id: _id, ...rest } = l
-      void _id
-      await insertLine.mutateAsync({
-        ...rest,
-        headerId: h.id,
-        amount: (l.qty || 0) * (l.unitPrice || 0),
+    try {
+      const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
+      const h = await insertHeader.mutateAsync({
+        code: genExpCode(allHeaders),
+        date: hdr.date,
+        vehicleId: hdr.vehicleId,
+        partnerId: hdr.partnerId,
+        odometer: Number(hdr.odometer) || 0,
+        paid: hdr.paid === 'paid',
+        dueDate: hdr.dueDate,
+        total: netTotal,
+        lineCount: lines.length,
+        note: lines.map((l) => l.item).filter(Boolean).join(', '),
       })
-    }
-    // Apply stock deduction for KPS warehouse
-    if (isKPSPartner(hdr.partnerId, partners)) {
-      for (const d of buildStockDeltas(lines, -1, stocks)) {
-        await updateStock.mutateAsync(d)
+      for (const l of lines) {
+        const { id: _id, ...rest } = l
+        void _id
+        await insertLine.mutateAsync({
+          ...rest,
+          headerId: h.id,
+          amount: (l.qty || 0) * (l.unitPrice || 0),
+        })
       }
+      // Apply stock deduction for KPS warehouse
+      if (isKPSPartner(hdr.partnerId, partners)) {
+        for (const d of buildStockDeltas(lines, -1, stocks)) {
+          await updateStock.mutateAsync(d)
+        }
+      }
+      alert('บันทึกเรียบร้อย')
+      setHdr(emptyHeader())
+      setLines([emptyLine()])
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-    alert('บันทึกเรียบร้อย')
-    setHdr(emptyHeader())
-    setLines([emptyLine()])
   }
 
   const handleReset = () => {
@@ -691,54 +695,58 @@ function ExpenseEditModal({
       alert('กรุณาเลือกรถและช่าง/ร้านค้า')
       return
     }
-    const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
+    try {
+      const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
 
-    // Revert old stock impact
-    if (wasKPS) {
-      for (const d of buildStockDeltas(oldLines, +1, stocks)) {
-        await updateStock.mutateAsync(d)
+      // Revert old stock impact
+      if (wasKPS) {
+        for (const d of buildStockDeltas(oldLines, +1, stocks)) {
+          await updateStock.mutateAsync(d)
+        }
       }
-    }
 
-    // Remove old lines
-    for (const l of oldLines) {
-      await deleteLine.mutateAsync(l.id)
-    }
+      // Remove old lines
+      for (const l of oldLines) {
+        await deleteLine.mutateAsync(l.id)
+      }
 
-    // Update header
-    await updateHeader.mutateAsync({
-      id: header.id,
-      patch: {
-        ...hdr,
-        paid: hdr.paid === 'paid',
-        odometer: Number(hdr.odometer) || 0,
-        total: netTotal,
-        lineCount: lines.length,
-        note: lines.map((l) => l.item).filter(Boolean).join(', '),
-      },
-    })
-
-    // Add new lines
-    for (const l of lines) {
-      const { id: _id, ...rest } = l
-      void _id
-      await insertLine.mutateAsync({
-        ...rest,
-        headerId: header.id,
-        amount: (l.qty || 0) * (l.unitPrice || 0),
+      // Update header
+      await updateHeader.mutateAsync({
+        id: header.id,
+        patch: {
+          ...hdr,
+          paid: hdr.paid === 'paid',
+          odometer: Number(hdr.odometer) || 0,
+          total: netTotal,
+          lineCount: lines.length,
+          note: lines.map((l) => l.item).filter(Boolean).join(', '),
+        },
       })
-    }
 
-    // Apply new stock impact
-    if (isKPSPartner(hdr.partnerId, partners)) {
-      for (const d of buildStockDeltas(lines, -1, stocks)) {
-        await updateStock.mutateAsync(d)
+      // Add new lines
+      for (const l of lines) {
+        const { id: _id, ...rest } = l
+        void _id
+        await insertLine.mutateAsync({
+          ...rest,
+          headerId: header.id,
+          amount: (l.qty || 0) * (l.unitPrice || 0),
+        })
       }
-    }
 
-    alert('บันทึกการแก้ไขเรียบร้อย')
-    onSaved()
-    onClose()
+      // Apply new stock impact
+      if (isKPSPartner(hdr.partnerId, partners)) {
+        for (const d of buildStockDeltas(lines, -1, stocks)) {
+          await updateStock.mutateAsync(d)
+        }
+      }
+
+      alert('บันทึกการแก้ไขเรียบร้อย')
+      onSaved()
+      onClose()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   return (
@@ -1200,73 +1208,77 @@ function ExpStock() {
     const p = parseFloat(form.unitPrice) || 0
     if (q <= 0) { alert('กรุณากรอกจำนวน'); return }
     if (p <= 0) { alert('กรุณากรอกราคาต่อหน่วย'); return }
+    if (isNewPartner && !form.newPartnerName.trim()) { alert('กรุณากรอกชื่อคู่ค้าใหม่'); return }
+    if (isNewItem    && !form.newName.trim())        { alert('กรุณากรอกชื่อสินค้าใหม่'); return }
 
-    // New vendor: create it in the shared partners registry first.
-    let partnerId = form.partnerId
-    if (isNewPartner) {
-      if (!form.newPartnerName.trim()) { alert('กรุณากรอกชื่อคู่ค้าใหม่'); return }
-      const nextNum = allPartners.reduce((max, x) => {
-        const n = parseInt(x.code.replace(/\D/g, ''), 10)
-        return isNaN(n) ? max : Math.max(max, n)
-      }, 0) + 1
-      const createdPartner = await insertPartner.mutateAsync({
-        code: 'VND-' + String(nextNum).padStart(3, '0'),
-        name: form.newPartnerName.trim(),
-        type: form.newPartnerType,
-        status: 'active',
-      })
-      partnerId = createdPartner.id
-    }
+    try {
+      // New vendor: create it in the shared partners registry first.
+      let partnerId = form.partnerId
+      if (isNewPartner) {
+        const nextNum = allPartners.reduce((max, x) => {
+          const n = parseInt(x.code.replace(/\D/g, ''), 10)
+          return isNaN(n) ? max : Math.max(max, n)
+        }, 0) + 1
+        const createdPartner = await insertPartner.mutateAsync({
+          code: 'VND-' + String(nextNum).padStart(3, '0'),
+          name: form.newPartnerName.trim(),
+          type: form.newPartnerType,
+          status: 'active',
+        })
+        partnerId = createdPartner.id
+      }
 
-    // New stock item: create it first, then receive into it.
-    if (isNewItem) {
-      if (!form.newName.trim()) { alert('กรุณากรอกชื่อสินค้าใหม่'); return }
-      const created = await insertStock.mutateAsync({
-        code: 'ST-' + Date.now().toString().slice(-6),
-        name: form.newName.trim(),
-        category: form.newCategory,
-        unit: form.newUnit.trim() || 'ชิ้น',
-        qtyIn: q, qtyOut: 0, qty: q,
-        unitCost: p, reorderAt: 0,
+      // New stock item: create it first, then receive into it.
+      if (isNewItem) {
+        const created = await insertStock.mutateAsync({
+          code: 'ST-' + Date.now().toString().slice(-6),
+          name: form.newName.trim(),
+          category: form.newCategory,
+          unit: form.newUnit.trim() || 'ชิ้น',
+          qtyIn: q, qtyOut: 0, qty: q,
+          unitCost: p, reorderAt: 0,
+        })
+        await insertReceipt.mutateAsync({
+          date: form.date, partnerId, stockItemId: created.id,
+          qty: q, unitPrice: p, total: q * p,
+        })
+        alert('เพิ่มสินค้าใหม่และรับเข้าคลังเรียบร้อย')
+        setForm(emptyReceive)
+        return
+      }
+
+      const s = stock.find((x) => x.id === form.stockItemId)
+      if (!s) return
+
+      // Weighted average cost
+      const oldValue = s.qty * s.unitCost
+      const newValue = q * p
+      const newQty = s.qty + q
+      const newAvgCost = newQty > 0 ? (oldValue + newValue) / newQty : p
+
+      await updateStock.mutateAsync({
+        id: s.id,
+        patch: {
+          qty: newQty,
+          qtyIn: s.qtyIn + q,
+          unitCost: Math.round(newAvgCost * 100) / 100,
+        },
       })
+
       await insertReceipt.mutateAsync({
-        date: form.date, partnerId, stockItemId: created.id,
-        qty: q, unitPrice: p, total: q * p,
+        date: form.date,
+        partnerId,
+        stockItemId: s.id,
+        qty: q,
+        unitPrice: p,
+        total: q * p,
       })
-      alert('เพิ่มสินค้าใหม่และรับเข้าคลังเรียบร้อย')
+
+      alert('รับสินค้าเข้าคลังเรียบร้อย')
       setForm(emptyReceive)
-      return
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-
-    const s = stock.find((x) => x.id === form.stockItemId)
-    if (!s) return
-
-    // Weighted average cost
-    const oldValue = s.qty * s.unitCost
-    const newValue = q * p
-    const newQty = s.qty + q
-    const newAvgCost = newQty > 0 ? (oldValue + newValue) / newQty : p
-
-    await updateStock.mutateAsync({
-      id: s.id,
-      patch: {
-        qty: newQty,
-        qtyIn: s.qtyIn + q,
-        unitCost: Math.round(newAvgCost * 100) / 100,
-      },
-    })
-
-    await insertReceipt.mutateAsync({
-      date: form.date,
-      partnerId,
-      stockItemId: s.id,
-      qty: q,
-      unitPrice: p,
-      total: q * p,
-    })
-
-    alert('รับสินค้าเข้าคลังเรียบร้อย')
-    setForm(emptyReceive)
   }
 
   return (
@@ -1963,13 +1975,17 @@ function VendorEditModal({
 
   const save = async () => {
     if (!form.name.trim()) { alert('กรุณากรอกชื่อร้านค้า/ช่าง'); return }
-    if (isNew) {
-      await insertPartner.mutateAsync({ ...form, balance: 0 })
-    } else {
-      await updatePartner.mutateAsync({ id: partner!.id, patch: form })
+    try {
+      if (isNew) {
+        await insertPartner.mutateAsync({ ...form, balance: 0 })
+      } else {
+        await updatePartner.mutateAsync({ id: partner!.id, patch: form })
+      }
+      onSaved()
+      onClose()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-    onSaved()
-    onClose()
   }
 
   return (

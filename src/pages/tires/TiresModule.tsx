@@ -344,17 +344,21 @@ function InstallTireModal({ tire, onClose, onDone }: { tire: Tire; onClose: () =
     if (!vehicleId) { alert('กรุณาเลือกรถ'); return }
     if (!position) { alert('กรุณาเลือกตำแหน่ง'); return }
     if (occupied[position]) { alert('ตำแหน่งนี้มียางอยู่แล้ว — เลือกตำแหน่งว่าง หรือใช้ "สลับยาง"'); return }
-    const odo = vehicle?.odometer ?? 0
-    const today = new Date().toISOString().slice(0, 10)
-    await updateTire.mutateAsync({
-      id: tire.id,
-      patch: { status: 'in-use', vehicleId, position, installedDate: today, installedOdometer: odo },
-    })
-    await insertEvent.mutateAsync({
-      tireId: tire.id, vehicleId, eventType: 'install', date: today,
-      odometer: odo, fromPos: null, toPos: position, note: 'ติดตั้งจากคลัง', userId: 'e10',
-    })
-    onDone()
+    try {
+      const odo = vehicle?.odometer ?? 0
+      const today = new Date().toISOString().slice(0, 10)
+      await updateTire.mutateAsync({
+        id: tire.id,
+        patch: { status: 'in-use', vehicleId, position, installedDate: today, installedOdometer: odo },
+      })
+      await insertEvent.mutateAsync({
+        tireId: tire.id, vehicleId, eventType: 'install', date: today,
+        odometer: odo, fromPos: null, toPos: position, note: 'ติดตั้งจากคลัง', userId: 'e10',
+      })
+      onDone()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   return (
@@ -901,35 +905,39 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
       alert('กรุณาเลือกรถที่จะติดตั้งยาง')
       return
     }
-    const finalVehicleId = (form.status === 'in-use' || form.status === 'spare') ? (form.vehicleId || null) : null
-    const finalPosition = form.status === 'in-use' ? (form.position || null) : null
-    const newTire = await insertTire.mutateAsync({
-      serial: form.serial,
-      brand: form.brand === 'อื่นๆ' ? (form.customBrand.trim() || 'อื่นๆ') : form.brand,
-      model: form.model,
-      size: form.size,
-      installedDate: form.installedDate,
-      installedOdometer: +(form.installedOdometer) || 0,
-      accumulatedKm: 0,
-      status: form.status as Tire['status'],
-      vehicleId: finalVehicleId,
-      position: finalPosition,
-    })
-    if (form.status === 'in-use' && finalVehicleId) {
-      await insertEvent.mutateAsync({
-        tireId: newTire.id,
+    try {
+      const finalVehicleId = (form.status === 'in-use' || form.status === 'spare') ? (form.vehicleId || null) : null
+      const finalPosition = form.status === 'in-use' ? (form.position || null) : null
+      const newTire = await insertTire.mutateAsync({
+        serial: form.serial,
+        brand: form.brand === 'อื่นๆ' ? (form.customBrand.trim() || 'อื่นๆ') : form.brand,
+        model: form.model,
+        size: form.size,
+        installedDate: form.installedDate,
+        installedOdometer: +(form.installedOdometer) || 0,
+        accumulatedKm: 0,
+        status: form.status as Tire['status'],
         vehicleId: finalVehicleId,
-        eventType: 'install',
-        date: form.installedDate,
-        odometer: +(form.installedOdometer) || 0,
-        fromPos: null,
-        toPos: finalPosition,
-        note: 'ยางใหม่',
-        userId: 'e10',
+        position: finalPosition,
       })
+      if (form.status === 'in-use' && finalVehicleId) {
+        await insertEvent.mutateAsync({
+          tireId: newTire.id,
+          vehicleId: finalVehicleId,
+          eventType: 'install',
+          date: form.installedDate,
+          odometer: +(form.installedOdometer) || 0,
+          fromPos: null,
+          toPos: finalPosition,
+          note: 'ยางใหม่',
+          userId: 'e10',
+        })
+      }
+      alert('เพิ่มยางเรียบร้อย')
+      onClose()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-    alert('เพิ่มยางเรียบร้อย')
-    onClose()
   }
 
   return (
@@ -1640,25 +1648,29 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
 
   const confirm = async () => {
     if (!toPos || toPos === fromPos) return
-    const odometer = vehicle.odometer ?? 0
-    const km1 = computeAccumKm(tire, allVehicles)
-    await updateTire.mutateAsync({ id: tire.id, patch: { position: toPos, accumulatedKm: km1, installedOdometer: odometer } })
-    if (toTire) {
-      const km2 = computeAccumKm(toTire, allVehicles)
-      await updateTire.mutateAsync({ id: toTire.id, patch: { position: fromPos, accumulatedKm: km2, installedOdometer: odometer } })
+    try {
+      const odometer = vehicle.odometer ?? 0
+      const km1 = computeAccumKm(tire, allVehicles)
+      await updateTire.mutateAsync({ id: tire.id, patch: { position: toPos, accumulatedKm: km1, installedOdometer: odometer } })
+      if (toTire) {
+        const km2 = computeAccumKm(toTire, allVehicles)
+        await updateTire.mutateAsync({ id: toTire.id, patch: { position: fromPos, accumulatedKm: km2, installedOdometer: odometer } })
+      }
+      await insertEvent.mutateAsync({
+        tireId: tire.id,
+        vehicleId: vehicle.id,
+        eventType: 'swap',
+        date: new Date().toISOString().slice(0, 10),
+        odometer,
+        fromPos,
+        toPos,
+        note: note.trim() || (toTire ? `สลับกับ ${toTire.serial}` : 'ย้ายไปตำแหน่งว่าง'),
+        userId: 'e10',
+      })
+      onDone()
+    } catch (e) {
+      alert('สลับยางไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-    await insertEvent.mutateAsync({
-      tireId: tire.id,
-      vehicleId: vehicle.id,
-      eventType: 'swap',
-      date: new Date().toISOString().slice(0, 10),
-      odometer,
-      fromPos,
-      toPos,
-      note: note.trim() || (toTire ? `สลับกับ ${toTire.serial}` : 'ย้ายไปตำแหน่งว่าง'),
-      userId: 'e10',
-    })
-    onDone()
   }
 
   return (
@@ -2671,14 +2683,18 @@ function SellScrapModal({ tire, onClose, onSaved }: { tire: Tire; onClose: () =>
 
   const save = async () => {
     if (!buyer || !price) { alert('กรุณากรอกผู้ซื้อและราคา'); return }
-    await insertSale.mutateAsync({
-      tireId: tire.id, serial: tire.serial,
-      buyer: buyer.trim(), price: +price || 0,
-      date: new Date().toISOString().slice(0, 10), userId: 'e10',
-    })
-    await updateTire.mutateAsync({ id: tire.id, patch: { status: 'sold' } })
-    onSaved()
-    onClose()
+    try {
+      await insertSale.mutateAsync({
+        tireId: tire.id, serial: tire.serial,
+        buyer: buyer.trim(), price: +price || 0,
+        date: new Date().toISOString().slice(0, 10), userId: 'e10',
+      })
+      await updateTire.mutateAsync({ id: tire.id, patch: { status: 'sold' } })
+      onSaved()
+      onClose()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   return (

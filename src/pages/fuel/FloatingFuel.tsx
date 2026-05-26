@@ -49,12 +49,16 @@ export function FloatingFuel() {
 
   const doLink = async () => {
     if (!linkTx || !selectedDispatch) return
-    await linkFuelTx.mutateAsync({
-      id: linkTx.id,
-      patch: { tripId: selectedDispatch, status: 'TRIP_LINKED' },
-    })
-    setLinkTx(null)
-    setSelectedDispatch('')
+    try {
+      await linkFuelTx.mutateAsync({
+        id: linkTx.id,
+        patch: { tripId: selectedDispatch, status: 'TRIP_LINKED' },
+      })
+      setLinkTx(null)
+      setSelectedDispatch('')
+    } catch (e) {
+      alert('ผูกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   if (floatingTxs.length === 0) {
