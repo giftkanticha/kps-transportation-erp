@@ -4,6 +4,7 @@ import { useList, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
+import { canAccessRoute } from '../../lib/permissions'
 
 // ─── Mock data ─────────────────────────────────────────────────────────────────
 interface RegItem {
@@ -294,6 +295,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const [regModal, setRegModal]         = useState<RegItem | null>(null)
   const [approvalModal, setApprovalModal] = useState<ReqItem | null>(null)
   const [dismissedReqs, setDismissedReqs] = useState<Set<number>>(new Set())
+  const [showExport, setShowExport]       = useState(false)
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
@@ -424,7 +426,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
           <button className="btn" onClick={() => setActive('dispatch.open')}>
             <Icon name="plus" size={15} /> เปิดงานใหม่
           </button>
-          <button className="btn primary">
+          <button className="btn primary" onClick={() => setShowExport(true)}>
             <Icon name="download" size={15} /> ส่งออกรายงาน
           </button>
         </div>
@@ -802,6 +804,118 @@ export function Dashboard({ user, setActive }: DashboardProps) {
       {/* Modals */}
       {regModal      && <RegistrationModal reg={regModal}    onClose={() => setRegModal(null)} />}
       {approvalModal && <ApprovalModal     req={approvalModal} onClose={() => setApprovalModal(null)} />}
+      {showExport    && (
+        <ExportReportsModal
+          role={user.role}
+          onPick={id => { setShowExport(false); setActive(id) }}
+          onClose={() => setShowExport(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Export Reports shortcut ───────────────────────────────────────────────────
+const REPORT_GROUPS: { title: string; reports: { id: string; label: string; desc: string; icon: string }[] }[] = [
+  {
+    title: 'งานขนส่ง',
+    reports: [
+      { id: 'dispatch.report',  label: 'รายงานสรุปงานขนส่ง',     desc: 'KPI ต่อรอบ + แบบฟอร์มรายเที่ยว · พิมพ์ PDF', icon: 'chart' },
+      { id: 'dispatch.monthly', label: 'รายงานรายเดือน',          desc: 'สรุปงานขนส่งแยกตามเดือน',                  icon: 'calendar' },
+      { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน',       desc: 'ดูประวัติงานทั้งหมด',                       icon: 'history' },
+    ],
+  },
+  {
+    title: 'น้ำมัน',
+    reports: [
+      { id: 'fuel.report',  label: 'รายงานน้ำมันรายเดือน', desc: 'การใช้น้ำมันแยกตามเดือน/รถ', icon: 'chart' },
+      { id: 'fuel.summary', label: 'สรุปคลังน้ำมันรวม',     desc: 'สต๊อกคลังน้ำมัน + รับเข้า/จ่ายออก', icon: 'package' },
+    ],
+  },
+  {
+    title: 'ค่าใช้จ่าย',
+    reports: [
+      { id: 'expenses.report',  label: 'รายงานสรุปค่าใช้จ่าย', desc: 'ค่าใช้จ่ายแยกตามหมวด/รถ/ช่วงเวลา',     icon: 'chart' },
+      { id: 'expenses.finance', label: 'สถานะการเงิน',         desc: 'ยอดค้างจ่าย/ครบกำหนดของค่าใช้จ่าย',    icon: 'money' },
+    ],
+  },
+  {
+    title: 'การเงิน',
+    reports: [
+      { id: 'finance', label: 'P&L รายคัน', desc: 'กำไร/ขาดทุนต่อรถ', icon: 'chart' },
+    ],
+  },
+  {
+    title: 'ยาง',
+    reports: [
+      { id: 'tires.history',   label: 'ประวัติยางรายเส้น', desc: 'ค้นและดูประวัติยางรายเส้น', icon: 'history' },
+      { id: 'tires.scrapped',  label: 'ยางหมดสภาพ',        desc: 'รายการยางที่หมดสภาพ + ขายซาก', icon: 'trash' },
+    ],
+  },
+]
+
+function ExportReportsModal({
+  role, onPick, onClose,
+}: {
+  role: 'admin' | 'manager' | 'driver'
+  onPick: (id: string) => void
+  onClose: () => void
+}) {
+  const visibleGroups = REPORT_GROUPS
+    .map(g => ({ ...g, reports: g.reports.filter(r => canAccessRoute(r.id, role)) }))
+    .filter(g => g.reports.length > 0)
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal wide" onClick={e => e.stopPropagation()}>
+        <div className="head">
+          <h3>เลือกรายงานที่ต้องการดู/พิมพ์</h3>
+        </div>
+        <div className="body">
+          {visibleGroups.length === 0 ? (
+            <div className="empty" style={{ padding: 24 }}>ไม่มีรายงานที่บัญชีของคุณเข้าถึงได้</div>
+          ) : visibleGroups.map(group => (
+            <div key={group.title} style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 8 }}>
+                {group.title}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+                {group.reports.map(r => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => onPick(r.id)}
+                    style={{
+                      textAlign: 'left', padding: '12px 14px', borderRadius: 10,
+                      border: '1px solid var(--line)', background: '#fff', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 12, fontFamily: 'inherit',
+                      transition: 'border-color .15s, background .15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.background = 'var(--primary-50)' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--line)'; e.currentTarget.style.background = '#fff' }}
+                  >
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                      background: 'var(--primary-50)', color: 'var(--primary)',
+                      display: 'grid', placeItems: 'center',
+                    }}>
+                      <Icon name={r.icon} size={18} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{r.label}</div>
+                      <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{r.desc}</div>
+                    </div>
+                    <Icon name="chevron-right" size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose}>ปิด</button>
+        </div>
+      </div>
     </div>
   )
 }
