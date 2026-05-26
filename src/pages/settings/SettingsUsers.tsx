@@ -245,6 +245,7 @@ function EditProfileModal({ user, isSelf, onClose }: {
   const updateProfile = useUpdate<Profile>('user_profiles')
   const [displayName, setDisplayName] = useState(user.display_name)
   const [username, setUsername] = useState(user.username ?? '')
+  const [email, setEmail] = useState(user.email ?? '')
   const [phone, setPhone] = useState(user.phone)
   const [pw, setPw] = useState('')
   const [pw2, setPw2] = useState('')
@@ -254,14 +255,26 @@ function EditProfileModal({ user, isSelf, onClose }: {
   const save = async () => {
     setErr(null)
     const u = username.trim().toLowerCase()
+    const e = email.trim().toLowerCase()
     if (!displayName.trim()) return setErr('กรุณากรอกชื่อ-นามสกุล')
     if (u && !/^[a-z0-9_.]{3,}$/.test(u)) return setErr('ชื่อผู้ใช้ต้องเป็น a-z 0-9 _ . อย่างน้อย 3 ตัว')
+    if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) return setErr('อีเมลไม่ถูกต้อง')
     if (isSelf && (pw || pw2)) {
       if (pw.length < 6) return setErr('รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร')
       if (pw !== pw2) return setErr('รหัสผ่านยืนยันไม่ตรงกัน')
     }
     setBusy(true)
     try {
+      // Email changes require updating auth.users too — done by an admin-only
+      // SECURITY DEFINER RPC. Profile-only fields go through the normal update.
+      const emailChanged = e !== (user.email ?? '').toLowerCase()
+      if (emailChanged) {
+        const { error } = await supabase.rpc('admin_set_user_email', {
+          p_user_id: user.id,
+          p_email:   e,
+        })
+        if (error) throw new Error(error.message)
+      }
       await updateProfile.mutateAsync({
         id: user.id,
         patch: {
@@ -294,6 +307,11 @@ function EditProfileModal({ user, isSelf, onClose }: {
           <div className="field" style={{ marginBottom: 14 }}>
             <label>ชื่อผู้ใช้ (login)</label>
             <input value={username} onChange={e => setUsername(e.target.value.toLowerCase())} placeholder="เช่น somchai" autoComplete="username" />
+          </div>
+          <div className="field" style={{ marginBottom: 14 }}>
+            <label>อีเมล *</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@example.com" autoComplete="email" />
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>ใช้สำหรับเข้าระบบและรับลิงก์รีเซตรหัสผ่าน</div>
           </div>
           <div className="field" style={{ marginBottom: 4 }}>
             <label>เบอร์โทร</label>
