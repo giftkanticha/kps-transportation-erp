@@ -28,6 +28,8 @@ const BYPASS_PROFILE: UserProfile = {
   approved_at: null,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
+  email: 'dev@kps.local',
+  username: 'dev',
 }
 // ────────────────────────────────────────────────────────────────────────────
 

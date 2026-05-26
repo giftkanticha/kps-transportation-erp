@@ -8,10 +8,17 @@ interface Profile {
   id: string
   display_name: string
   username: string | null
+  email: string | null
   phone: string
   role: string
   status: string
   created_at: string
+}
+
+function thaiShortDate(iso: string): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return `${d.getDate()} ${['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][d.getMonth()]} ${(d.getFullYear() + 543).toString().slice(-2)}`
 }
 
 const ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'EMPLOYEE'] as const
@@ -110,6 +117,7 @@ export function SettingsUsers() {
             <tr>
               <th>ผู้ใช้</th>
               <th>ชื่อผู้ใช้ (login)</th>
+              <th>อีเมล</th>
               <th>โทร</th>
               <th>สิทธิ์</th>
               <th>สถานะ</th>
@@ -125,8 +133,12 @@ export function SettingsUsers() {
                   <td style={{ fontWeight: 500 }}>
                     {u.display_name}
                     {self && <span className="muted" style={{ fontSize: 11 }}> (คุณ)</span>}
+                    <div className="muted" style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>
+                      สมัคร {thaiShortDate(u.created_at)}
+                    </div>
                   </td>
                   <td className="mono muted">{u.username ?? '—'}</td>
+                  <td className="mono muted" style={{ fontSize: 12 }}>{u.email ?? '—'}</td>
                   <td className="mono muted">{u.phone || '—'}</td>
                   <td>
                     <select
@@ -181,7 +193,7 @@ export function SettingsUsers() {
               )
             })}
             {users.length === 0 && !isLoading && (
-              <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 24 }}>ไม่มีผู้ใช้</td></tr>
+              <tr><td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 24 }}>ไม่มีผู้ใช้</td></tr>
             )}
           </tbody>
         </table>
