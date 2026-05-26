@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useList, useUpdate, useDelete } from '../../hooks/useTable'
+import { useQueryClient } from '@tanstack/react-query'
+import { useList, useUpdate } from '../../hooks/useTable'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { Icon } from '../../components/ui'
@@ -64,7 +65,7 @@ export function SettingsUsers() {
   const { profile, isAdmin } = useAuth()
   const { data: users = [], isLoading } = useList<Profile>('user_profiles')
   const updateProfile = useUpdate<Profile>('user_profiles')
-  const deleteProfile = useDelete('user_profiles')
+  const qc = useQueryClient()
   const [busy, setBusy] = useState<string | null>(null)
   const [editing, setEditing] = useState<Profile | null>(null)
 
@@ -76,11 +77,18 @@ export function SettingsUsers() {
   }
 
   const del = async (id: string, name: string) => {
-    if (!confirm(`ลบผู้ใช้ "${name}" ออกจากระบบถาวร?\n(บัญชี auth ใน Supabase จะคงอยู่ — admin ลบเพิ่มได้ที่ Supabase Studio ถ้าต้องการ)`)) return
+    if (!confirm(`ลบผู้ใช้ "${name}" ออกจากระบบถาวร?\n(บัญชีและข้อมูลโปรไฟล์ทั้งหมดจะถูกลบ — กู้คืนไม่ได้)`)) return
     setBusy(id)
-    try { await deleteProfile.mutateAsync(id) }
-    catch (e) { alert(e instanceof Error ? e.message : 'ลบไม่สำเร็จ') }
-    finally { setBusy(null) }
+    try {
+      const { error } = await supabase.rpc('admin_delete_user', { p_user_id: id })
+      if (error) throw new Error(error.message)
+      // Refresh the user list now that the row is gone.
+      qc.invalidateQueries({ queryKey: ['user_profiles'] })
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'ลบไม่สำเร็จ')
+    } finally {
+      setBusy(null)
+    }
   }
 
   const sendReset = async (id: string, email: string | null, name: string) => {
