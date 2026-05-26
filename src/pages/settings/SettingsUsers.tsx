@@ -6,13 +6,13 @@ import { Icon } from '../../components/ui'
 
 interface Profile {
   id: string
-  display_name: string
+  displayName: string
   username: string | null
   email: string | null
   phone: string
   role: string
   status: string
-  created_at: string
+  createdAt: string
 }
 
 function thaiShortDate(iso: string): string {
@@ -148,10 +148,10 @@ export function SettingsUsers() {
               return (
                 <tr key={u.id}>
                   <td style={{ fontWeight: 500 }}>
-                    {u.display_name}
+                    {u.displayName}
                     {self && <span className="muted" style={{ fontSize: 11 }}> (คุณ)</span>}
                     <div className="muted" style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>
-                      สมัคร {thaiShortDate(u.created_at)}
+                      สมัคร {thaiShortDate(u.createdAt)}
                     </div>
                   </td>
                   <td className="mono muted">{u.username ?? '—'}</td>
@@ -186,7 +186,7 @@ export function SettingsUsers() {
                           className="btn ghost icon sm"
                           title="ส่งลิงก์รีเซตรหัสผ่าน"
                           disabled={busy === u.id || !u.email}
-                          onClick={() => sendReset(u.id, u.email, u.display_name)}
+                          onClick={() => sendReset(u.id, u.email, u.displayName)}
                         >
                           <Icon name="mail" size={14} />
                         </button>
@@ -207,7 +207,7 @@ export function SettingsUsers() {
                             เปิดใช้งาน
                           </button>
                           {!self && (
-                            <button className="btn sm danger" disabled={busy === u.id} onClick={() => del(u.id, u.display_name)}>
+                            <button className="btn sm danger" disabled={busy === u.id} onClick={() => del(u.id, u.displayName)}>
                               <Icon name="trash" size={13} /> ลบผู้ใช้
                             </button>
                           )}
@@ -243,10 +243,10 @@ function EditProfileModal({ user, isSelf, onClose }: {
   onClose: () => void
 }) {
   const updateProfile = useUpdate<Profile>('user_profiles')
-  const [displayName, setDisplayName] = useState(user.display_name)
+  const [displayName, setDisplayName] = useState(user.displayName ?? '')
   const [username, setUsername] = useState(user.username ?? '')
   const [email, setEmail] = useState(user.email ?? '')
-  const [phone, setPhone] = useState(user.phone)
+  const [phone, setPhone] = useState(user.phone ?? '')
   const [pw, setPw] = useState('')
   const [pw2, setPw2] = useState('')
   const [busy, setBusy] = useState(false)
@@ -291,7 +291,7 @@ function EditProfileModal({ user, isSelf, onClose }: {
       await updateProfile.mutateAsync({
         id: user.id,
         patch: {
-          display_name: dn,
+          displayName: dn,
           username: u || null,
           phone: ph,
         } as Partial<Profile>,
