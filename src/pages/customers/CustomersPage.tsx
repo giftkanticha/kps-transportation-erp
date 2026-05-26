@@ -214,11 +214,11 @@ export function CustomersPage() {
         title="เพิ่มลูกค้าใหม่"
         footer={
           <>
-            <button className="btn" onClick={() => setShow(false)}>
+            <button className="btn" onClick={() => setShow(false)} disabled={insertCustomer.isPending}>
               ยกเลิก
             </button>
-            <button className="btn primary" onClick={save}>
-              บันทึก
+            <button className="btn primary" onClick={save} disabled={insertCustomer.isPending}>
+              {insertCustomer.isPending ? 'กำลังบันทึก…' : 'บันทึก'}
             </button>
           </>
         }

@@ -70,6 +70,7 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
       onSaved()
     } catch (e) {
       setErr('บันทึกไม่สำเร็จ: ' + (e as Error).message)
+    } finally {
       setSaving(false)
     }
   }

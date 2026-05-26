@@ -193,8 +193,8 @@ function VehicleEditModal({
       updateVehicle.mutate(
         { id: vehicle.id, patch },
         {
-          onSuccess: () => onSuccess('✅ บันทึกข้อมูลเรียบร้อย'),
-          onError: (err) => { onError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'); setSaving(false) },
+          onSuccess: () => { onSuccess('✅ บันทึกข้อมูลเรียบร้อย'); setSaving(false) },
+          onError:   (err) => { onError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'); setSaving(false) },
         },
       )
       return

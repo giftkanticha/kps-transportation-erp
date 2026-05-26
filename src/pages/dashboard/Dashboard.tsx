@@ -85,7 +85,9 @@ function RegistrationModal({ reg, onClose }: { reg: RegItem; onClose: () => void
         },
       })
       onClose()
-    } catch {
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
       setSaving(false)
     }
   }
@@ -219,7 +221,9 @@ function ApprovalModal({ req, onClose }: { req: ReqItem; onClose: () => void }) 
         },
       })
       onClose()
-    } catch {
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
       setSaving(false)
     }
   }
