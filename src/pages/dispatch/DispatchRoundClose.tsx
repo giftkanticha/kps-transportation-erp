@@ -193,6 +193,7 @@ function CloseForm({
   const [roundNotes, setRoundNotes] = useState('')
   const [closingFuelLiters, setClosingFuelLiters] = useState('')
   const [closingFuelPrice, setClosingFuelPrice] = useState('')
+  const [closingFuelDate, setClosingFuelDate]   = useState('')
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
   const initedRef = useRef<string | null>(null)
@@ -247,6 +248,14 @@ function CloseForm({
       // dispatch row itself, so it survives reopen reliably).
       setClosingFuelLiters(round.closingFuelLiters != null ? String(round.closingFuelLiters) : '')
       setClosingFuelPrice(round.closingFuelPrice != null ? String(round.closingFuelPrice) : '')
+      // Default closing-fuel date: existing TRIP_CLOSING tx > round.date > today.
+      // This is what gets stamped on the fuel ledger so backdated trips don't
+      // pull from today's stock balance.
+      setClosingFuelDate(
+        ownClosingTx?.date
+        ?? round.date
+        ?? new Date().toISOString().slice(0, 10),
+      )
     }
 
     if (legsInitedRef.current !== legSig) {
@@ -399,10 +408,11 @@ function CloseForm({
         // fuel module already recorded one. Draft never touches the ledger — its
         // liters/price live on the dispatch row (below) and convert here on close.
         if (!hasExternalClosing) {
+          const txDate = closingFuelDate || round.date || new Date().toISOString().slice(0, 10)
           if (closingL > 0 && !ownClosingTx) {
             await insertFuelTx.mutateAsync({
               id: uid('ftx'),
-              date: new Date().toISOString().slice(0, 10),
+              date: txDate,
               vehicleId: round.vehicleId ?? '',
               liters: closingL,
               pricePerL: closingPrice,
@@ -420,7 +430,7 @@ function CloseForm({
           } else if (closingL > 0 && ownClosingTx) {
             await updateFuelTx.mutateAsync({
               id: ownClosingTx.id,
-              patch: { liters: closingL, pricePerL: closingPrice, total: closingL * closingPrice },
+              patch: { date: txDate, liters: closingL, pricePerL: closingPrice, total: closingL * closingPrice },
             })
           }
         }
@@ -852,7 +862,19 @@ function CloseForm({
             ))
           ) : (
             <>
-              <div className="grid-2" style={{ gap: 12 }}>
+              <div className="grid-3" style={{ gap: 12 }}>
+                <Field label="วันที่เติม">
+                  <input
+                    type="date"
+                    value={closingFuelDate}
+                    max={new Date().toISOString().slice(0, 10)}
+                    onChange={e => setClosingFuelDate(e.target.value)}
+                    disabled={isClosed}
+                  />
+                  <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                    วันที่ที่ใช้ตัดสต๊อกถังโรงงาน (รองรับย้อนหลัง)
+                  </div>
+                </Field>
                 <Field label="จำนวนน้ำมันเติมปลายรอบ (ลิตร)">
                   <input
                     type="number"

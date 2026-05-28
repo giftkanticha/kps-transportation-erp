@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
-import { useList, useInsert, useDelete } from '../../hooks/useTable'
+import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import type { FuelStock, FuelTransaction, Vehicle, User, Partner, ExpenseHeader, ExpenseLine } from '../../types'
 import { Icon, Field, PrintButton } from '../../components/ui'
@@ -270,6 +270,172 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
   )
 }
 
+// ─── Edit Stock In Modal ──────────────────────────────────────────────────────
+// Admin-only. Updates the fuel_stock row and, when the row is linked to an
+// expense_header (auto-created at add time), keeps the AP entry in sync so
+// inventory totals and the ledger don't drift.
+function EditStockModal({ stock, onClose, onSaved }: { stock: FuelStock; onClose: () => void; onSaved: () => void }) {
+  const todayISO = new Date().toISOString().slice(0, 10)
+  const [form, setForm] = useState({
+    date: stock.date,
+    liters: String(stock.liters),
+    pricePerL: String(stock.pricePerL ?? ''),
+    supplierId: '',
+    invoiceNo: stock.invoiceNo ?? '',
+  })
+  const [err, setErr] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const { data: partners = [] } = useList<Partner>('partners')
+  const { data: expenseLines = [] } = useList<ExpenseLine>('expense_lines')
+  const updateStock  = useUpdate<FuelStock>('fuel_stock')
+  const updateHeader = useUpdate<ExpenseHeader>('expense_headers')
+  const updateLine   = useUpdate<ExpenseLine>('expense_lines')
+
+  const fuelSuppliers = useMemo(
+    () => partners.filter(p => p.type === FUEL_PARTNER_TYPE && p.status === 'active'),
+    [partners],
+  )
+
+  // Resolve the supplierId from the stored supplier name once partners load.
+  useMemo(() => {
+    if (!form.supplierId && fuelSuppliers.length > 0) {
+      const match = fuelSuppliers.find(p => p.name === stock.supplier)
+      if (match) setForm(f => ({ ...f, supplierId: match.id }))
+    }
+  }, [fuelSuppliers, stock.supplier, form.supplierId])
+
+  const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }))
+  const total = (Number(form.liters) || 0) * (Number(form.pricePerL) || 0)
+  const isBackdated = form.date < todayISO
+
+  const save = async () => {
+    if (!form.liters || Number(form.liters) <= 0) return setErr('กรุณาระบุจำนวนลิตร (> 0)')
+    if (!form.supplierId)                          return setErr('กรุณาเลือกผู้จำหน่าย')
+    if (form.date > todayISO)                      return setErr('วันที่เกิดเหตุไม่สามารถเป็นอนาคตได้')
+
+    setSaving(true)
+    try {
+      const partnerName = fuelSuppliers.find(p => p.id === form.supplierId)?.name ?? stock.supplier
+
+      await updateStock.mutateAsync({
+        id: stock.id,
+        patch: {
+          date: form.date,
+          supplier: partnerName,
+          liters: Number(form.liters),
+          pricePerL: Number(form.pricePerL) || 0,
+          invoiceNo: form.invoiceNo,
+          total,
+        },
+      })
+
+      if (stock.expenseHeaderId) {
+        await updateHeader.mutateAsync({
+          id: stock.expenseHeaderId,
+          patch: {
+            date: form.date,
+            partnerId: form.supplierId,
+            total,
+            note: `น้ำมันเข้าคลัง ${form.liters} ลิตร${form.invoiceNo ? ` · ${form.invoiceNo}` : ''}`,
+          },
+        })
+        const line = expenseLines.find(l => l.headerId === stock.expenseHeaderId)
+        if (line) {
+          await updateLine.mutateAsync({
+            id: line.id,
+            patch: {
+              qty: Number(form.liters),
+              unitPrice: Number(form.pricePerL) || 0,
+              amount: total,
+            },
+          })
+        }
+      }
+
+      onSaved()
+    } catch (e) {
+      setErr('บันทึกไม่สำเร็จ: ' + (e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div style={{ background: 'var(--card)', borderRadius: 14, padding: 28, width: '100%', maxWidth: 480, boxShadow: '0 20px 60px rgba(0,0,0,.25)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>✏️ แก้ไขน้ำมันเข้าคลัง</h2>
+          <button className="btn ghost icon" onClick={onClose} style={{ padding: 4 }}>
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+
+        {err && (
+          <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: '#DC2626' }}>
+            {err}
+          </div>
+        )}
+
+        {stock.expenseHeaderId && (
+          <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 8, padding: '8px 14px', marginBottom: 14, fontSize: 12, color: '#1E40AF' }}>
+            🔗 รายการนี้ผูกกับใบค่าใช้จ่าย — การแก้ไขจะอัปเดตยอด AP ตามไปด้วย
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="grid-2" style={{ gap: 14 }}>
+            <Field label="วันที่เกิดเหตุ *">
+              <input type="date" value={form.date} max={todayISO} onChange={e => set('date', e.target.value)} />
+              {isBackdated && <div style={{ fontSize: 11, marginTop: 4, color: '#7C3AED', fontWeight: 500 }}>⬅️ ย้อนหลัง</div>}
+            </Field>
+            <Field label="จำนวนลิตร *">
+              <input type="number" step="0.01" value={form.liters} onChange={e => set('liters', e.target.value)} placeholder="0.00" />
+            </Field>
+          </div>
+
+          <Field label="แหล่งน้ำมัน / ผู้จำหน่าย *">
+            <select value={form.supplierId} onChange={e => set('supplierId', e.target.value)}>
+              <option value="">-- เลือกผู้จำหน่าย --</option>
+              {fuelSuppliers.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            {!fuelSuppliers.find(p => p.id === form.supplierId) && stock.supplier && (
+              <div style={{ fontSize: 11, marginTop: 4, color: 'var(--text-muted)' }}>
+                ผู้จำหน่ายเดิม: <strong>{stock.supplier}</strong> (เลือกใหม่หรือเพิ่มเข้าทะเบียนคู่ค้าก่อน)
+              </div>
+            )}
+          </Field>
+
+          <div className="grid-2" style={{ gap: 14 }}>
+            <Field label="ราคา/ลิตร (บาท)">
+              <input type="number" step="0.01" value={form.pricePerL} onChange={e => set('pricePerL', e.target.value)} placeholder="0.00" />
+            </Field>
+            <Field label="เลขใบส่งของ">
+              <input value={form.invoiceNo} onChange={e => set('invoiceNo', e.target.value)} placeholder="INV-XXXXXX" />
+            </Field>
+          </div>
+
+          {total > 0 && (
+            <div style={{ background: 'var(--primary-50)', borderRadius: 8, padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>มูลค่ารวม</span>
+              <span className="mono" style={{ fontSize: 17, fontWeight: 700, color: 'var(--primary)' }}>{db.thb(total)}</span>
+            </div>
+          )}
+        </div>
+
+        <div className="btn-row" style={{ marginTop: 22, justifyContent: 'flex-end' }}>
+          <button className="btn" onClick={onClose}>ยกเลิก</button>
+          <button className="btn primary" onClick={save} disabled={saving}>
+            <Icon name="check" size={15} /> {saving ? 'กำลังบันทึก…' : 'บันทึก'}
+          </button>
+        </div>
+      </div>
+    </ModalOverlay>
+  )
+}
+
 // ─── Full History Modal ───────────────────────────────────────────────────────
 interface HistoryModalProps {
   type: 'in' | 'out'
@@ -495,10 +661,12 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export function FuelStockDashboard() {
   const [showAddModal, setShowAddModal] = useState(false)
+  const [editingStock, setEditingStock] = useState<FuelStock | null>(null)
   const [historyType, setHistoryType] = useState<'in' | 'out' | null>(null)
 
   const user = db.currentUser() as User | null
   const canAdd = user?.role !== 'driver'
+  const canEdit = user?.role === 'admin'
   const canDelete = user?.role === 'admin'
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -620,7 +788,7 @@ export function FuelStockDashboard() {
                   <th>เลขใบส่งของ</th>
                   <th>บันทึกเมื่อ</th>
                   <th className="right">ยอดสะสม</th>
-                  {canDelete && <th style={{ width: 40 }}></th>}
+                  {(canEdit || canDelete) && <th style={{ width: 80 }}></th>}
                 </tr>
               </thead>
               <tbody>
@@ -643,11 +811,20 @@ export function FuelStockDashboard() {
                       <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
                         {balanceMap[s.id] != null ? db.fmt(balanceMap[s.id]) : '—'}
                       </td>
-                      {canDelete && (
+                      {(canEdit || canDelete) && (
                         <td>
-                          <button className="btn ghost icon sm" style={{ color: 'var(--red)' }} onClick={() => deleteStockIn(s.id)} title="ลบรายการ">
-                            <Icon name="trash" size={13} />
-                          </button>
+                          <div style={{ display: 'flex', gap: 2 }}>
+                            {canEdit && (
+                              <button className="btn ghost icon sm" onClick={() => setEditingStock(s)} title="แก้ไขรายการ">
+                                <Icon name="edit" size={13} />
+                              </button>
+                            )}
+                            {canDelete && (
+                              <button className="btn ghost icon sm" style={{ color: 'var(--red)' }} onClick={() => deleteStockIn(s.id)} title="ลบรายการ">
+                                <Icon name="trash" size={13} />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       )}
                     </tr>
@@ -715,6 +892,7 @@ export function FuelStockDashboard() {
       </div>
 
       {showAddModal && <AddStockModal onClose={() => setShowAddModal(false)} onSaved={() => setShowAddModal(false)} />}
+      {editingStock && <EditStockModal stock={editingStock} onClose={() => setEditingStock(null)} onSaved={() => setEditingStock(null)} />}
       {historyType && <StockHistoryModal type={historyType} balanceMap={balanceMap} onClose={() => setHistoryType(null)} />}
     </div>
   )
