@@ -652,6 +652,8 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                       {isEditing ? (
                         <input
                           list="fuel-plates-dl"
+                          autoComplete="off"
+                          name={`plate-edit-${i}`}
                           value={editDraft.plateTerm}
                           onChange={e => {
                             const found = vehicles.find(v => v.plate.toLowerCase() === e.target.value.trim().toLowerCase())
@@ -664,6 +666,8 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                         <input
                           id={`cell-${i}-1`}
                           list="fuel-plates-dl"
+                          autoComplete="off"
+                          name={`plate-${i}`}
                           value={row.plateTerm}
                           disabled={locked || row.reversed}
                           onChange={e => handlePlateChange(i, e.target.value)}

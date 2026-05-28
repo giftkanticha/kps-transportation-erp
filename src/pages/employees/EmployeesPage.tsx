@@ -235,6 +235,7 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
     lineId: employee.lineId,
     joined: employee.joined,
     address: employee.address ?? '',
+    salary: String(employee.salary ?? 0),
   })
   const [vehicleIds, setVehicleIds] = useState<string[]>(initialVehicleIds)
 
@@ -260,6 +261,7 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
           lineId: form.lineId,
           joined: form.joined,
           address: form.address,
+          salary: Number(form.salary) || 0,
           vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
         },
       })
@@ -335,6 +337,15 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
             </Field>
             <Field label="วันเริ่มงาน">
               <input type="date" value={form.joined} onChange={e => set('joined', e.target.value)} />
+            </Field>
+            <Field label="เงินเดือน (บาท/เดือน)">
+              <input
+                type="number"
+                value={form.salary}
+                onChange={e => set('salary', e.target.value)}
+                placeholder="0"
+                min={0}
+              />
             </Field>
           </div>
 
