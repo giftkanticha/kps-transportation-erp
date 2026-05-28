@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useList, useUpdate, useDelete } from '../../hooks/useTable'
+import { useAuth } from '../../context/AuthContext'
 import type { Employee, Vehicle } from '../../types'
 import { Icon, StatusBadge, Field, SearchInput } from '../../components/ui'
 
@@ -218,6 +219,7 @@ interface EmployeeEditModalProps {
 }
 
 function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProps) {
+  const { isManager } = useAuth()
   const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
   const { data: allEmployees = [] } = useList<Employee>('employees')
   const updateEmployee = useUpdate<Employee>('employees')
@@ -261,7 +263,10 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
           lineId: form.lineId,
           joined: form.joined,
           address: form.address,
-          salary: Number(form.salary) || 0,
+          // Salary is excluded from non-manager patches so a regular
+          // employee editing their own row (e.g. phone update) can't
+          // overwrite the salary on the server.
+          ...(isManager ? { salary: Number(form.salary) || 0 } : {}),
           vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
         },
       })
@@ -338,15 +343,17 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
             <Field label="วันเริ่มงาน">
               <input type="date" value={form.joined} onChange={e => set('joined', e.target.value)} />
             </Field>
-            <Field label="เงินเดือน (บาท/เดือน)">
-              <input
-                type="number"
-                value={form.salary}
-                onChange={e => set('salary', e.target.value)}
-                placeholder="0"
-                min={0}
-              />
-            </Field>
+            {isManager && (
+              <Field label="เงินเดือน (บาท/เดือน)">
+                <input
+                  type="number"
+                  value={form.salary}
+                  onChange={e => set('salary', e.target.value)}
+                  placeholder="0"
+                  min={0}
+                />
+              </Field>
+            )}
           </div>
 
           <Field label="ที่อยู่">

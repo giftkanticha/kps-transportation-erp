@@ -43,6 +43,7 @@ interface AuthContextValue {
   logout:     () => Promise<void>
   exitRecovery: () => void
   isAdmin:    boolean
+  isManager:  boolean
   isSuperAdmin: boolean
 }
 
@@ -163,6 +164,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider value={{
       session, profile, legacyUser, loading, recoveryMode, login, logout, exitRecovery,
       isAdmin:      BYPASS_AUTH || profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN',
+      isManager:    BYPASS_AUTH || profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN' || profile?.role === 'MANAGER',
       isSuperAdmin: BYPASS_AUTH || profile?.role === 'SUPER_ADMIN',
     }}>
       {children}

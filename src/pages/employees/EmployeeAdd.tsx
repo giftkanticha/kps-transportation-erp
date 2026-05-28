@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
+import { useAuth } from '../../context/AuthContext'
 import type { Employee, Vehicle } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -21,6 +22,7 @@ interface EmployeeForm {
 }
 
 export function EmployeeAdd({ setActive }: EmployeeAddProps) {
+  const { isManager } = useAuth()
   const { data: employees = [] } = useList<Employee>('employees')
   const insertEmployee = useInsert<Employee>('employees')
   const updateVehicle = useUpdate<Vehicle>('vehicles')
@@ -70,7 +72,8 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
         licenseStatus: form.licenseStatus as Employee['licenseStatus'],
         license: '',
         licenseExpire: '',
-        salary: Number(form.salary) || 0,
+        // Non-managers can't see/set salary — let the DB default (0) apply
+        ...(isManager ? { salary: Number(form.salary) || 0 } : {}),
         vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
         idCard: '',
         accountBank: '',
@@ -154,23 +157,25 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
               </Field>
             )}
           </div>
-          <div className="grid-2" style={{ gap: 14 }}>
+          <div className={isManager ? 'grid-2' : ''} style={{ gap: 14 }}>
             <Field label="สถานะ *">
-              <select value={form.status} onChange={e => set('status', e.target.value)}>
+              <select value={form.status} onChange={e => set('status', e.target.value)} style={isManager ? undefined : { maxWidth: 320 }}>
                 <option value="active">ทำงาน</option>
                 <option value="leave">ลาออก</option>
                 <option value="training">อบรม</option>
               </select>
             </Field>
-            <Field label="เงินเดือน (บาท/เดือน)">
-              <input
-                type="number"
-                value={form.salary}
-                onChange={e => set('salary', e.target.value)}
-                placeholder="0"
-                min={0}
-              />
-            </Field>
+            {isManager && (
+              <Field label="เงินเดือน (บาท/เดือน)">
+                <input
+                  type="number"
+                  value={form.salary}
+                  onChange={e => set('salary', e.target.value)}
+                  placeholder="0"
+                  min={0}
+                />
+              </Field>
+            )}
           </div>
         </div>
 
