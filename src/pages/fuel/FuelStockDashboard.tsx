@@ -441,9 +441,13 @@ interface HistoryModalProps {
   type: 'in' | 'out'
   balanceMap: Record<string, number>
   onClose: () => void
+  canEdit?: boolean
+  canDelete?: boolean
+  onEdit?: (stock: FuelStock) => void
+  onDelete?: (id: string) => void
 }
 
-function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
+function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, onEdit, onDelete }: HistoryModalProps) {
   const [page, setPage] = useState(1)
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
@@ -542,11 +546,12 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
                   </>
                 )}
                 <th className="num right">ยอดสะสม</th>
+                {type === 'in' && (canEdit || canDelete) && <th className="no-print" style={{ width: 80 }}></th>}
               </tr>
             </thead>
             <tbody className="hist-screen-only">
               {paginated.length === 0 ? (
-                <tr><td colSpan={type === 'in' ? 8 : 7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
+                <tr><td colSpan={type === 'in' ? (canEdit || canDelete ? 9 : 8) : 7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
               ) : paginated.map(r => {
                 const balance = balanceMap[(r as { id: string }).id]
                 if (type === 'in') {
@@ -567,6 +572,22 @@ function StockHistoryModal({ type, balanceMap, onClose }: HistoryModalProps) {
                         {s.recordedAt ? new Date(s.recordedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
                       </td>
                       <td className="num right mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{balance != null ? db.fmt(balance) : '—'}</td>
+                      {(canEdit || canDelete) && (
+                        <td className="no-print">
+                          <div style={{ display: 'flex', gap: 2 }}>
+                            {canEdit && onEdit && (
+                              <button className="btn ghost icon sm" onClick={() => onEdit(s)} title="แก้ไขรายการ">
+                                <Icon name="edit" size={13} />
+                              </button>
+                            )}
+                            {canDelete && onDelete && (
+                              <button className="btn ghost icon sm" style={{ color: 'var(--red)' }} onClick={() => onDelete(s.id)} title="ลบรายการ">
+                                <Icon name="trash" size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   )
                 } else {
@@ -893,7 +914,17 @@ export function FuelStockDashboard() {
 
       {showAddModal && <AddStockModal onClose={() => setShowAddModal(false)} onSaved={() => setShowAddModal(false)} />}
       {editingStock && <EditStockModal stock={editingStock} onClose={() => setEditingStock(null)} onSaved={() => setEditingStock(null)} />}
-      {historyType && <StockHistoryModal type={historyType} balanceMap={balanceMap} onClose={() => setHistoryType(null)} />}
+      {historyType && (
+        <StockHistoryModal
+          type={historyType}
+          balanceMap={balanceMap}
+          onClose={() => setHistoryType(null)}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          onEdit={(s) => { setHistoryType(null); setEditingStock(s) }}
+          onDelete={(id) => { void deleteStockIn(id) }}
+        />
+      )}
     </div>
   )
 }
