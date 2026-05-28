@@ -19,7 +19,7 @@ export function Topbar({ user, crumb, onLogout, onOpenAlerts }: TopbarProps) {
       ? 'ผู้ดูแลระบบ'
       : user.role === 'manager'
       ? 'ผู้จัดการขนส่ง'
-      : 'พนักงานขับรถ'
+      : 'พนักงาน'
 
   const avatarClass =
     user.role === 'admin' ? 'violet' : user.role === 'manager' ? '' : 'amber'
