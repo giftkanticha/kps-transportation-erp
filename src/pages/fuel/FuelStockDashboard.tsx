@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { FuelStock, FuelTransaction, Vehicle, User, Partner, ExpenseHeader, ExpenseLine } from '../../types'
+import { useAuth } from '../../context/AuthContext'
+import type { FuelStock, FuelTransaction, Vehicle, Partner, ExpenseHeader, ExpenseLine } from '../../types'
 import { Icon, Field, PrintButton } from '../../components/ui'
 
 const FUEL_PARTNER_TYPE = 'ซัพพลายเออร์น้ำมัน'
@@ -685,10 +686,13 @@ export function FuelStockDashboard() {
   const [editingStock, setEditingStock] = useState<FuelStock | null>(null)
   const [historyType, setHistoryType] = useState<'in' | 'out' | null>(null)
 
-  const user = db.currentUser() as User | null
-  const canAdd = user?.role !== 'driver'
-  const canEdit = user?.role === 'admin'
-  const canDelete = user?.role === 'admin'
+  // Auth source moved to Supabase — db.currentUser() reads the legacy
+  // localStorage session which is now empty, so the admin-only buttons
+  // were never rendering.
+  const { isAdmin, legacyUser } = useAuth()
+  const canAdd = legacyUser?.role !== 'driver'
+  const canEdit = isAdmin
+  const canDelete = isAdmin
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: dispatches = [] } = useDispatches()
