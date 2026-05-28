@@ -661,10 +661,12 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             <div className="muted" style={{ fontSize: 11 }}>น้ำหนักโหลดรวม</div>
             <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{totalWeight.toFixed(2)} ตัน</div>
           </div>
-          <div>
-            <div className="muted" style={{ fontSize: 11 }}>รายได้รวม</div>
-            <div className="mono" style={{ fontSize: 16, fontWeight: 600, color: 'var(--green)' }}>{db.thb(totalRevenue)}</div>
-          </div>
+          {isManager && (
+            <div>
+              <div className="muted" style={{ fontSize: 11 }}>รายได้รวม</div>
+              <div className="mono" style={{ fontSize: 16, fontWeight: 600, color: 'var(--green)' }}>{db.thb(totalRevenue)}</div>
+            </div>
+          )}
         </div>
         {round.notes && (
           <div style={{ marginTop: 14, padding: 10, background: 'var(--bg)', borderRadius: 6, fontSize: 13 }}>
@@ -710,7 +712,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                   <th>สินค้า</th>
                   <th>ประเภท</th>
                   <th className="num">น้ำหนัก (ตัน)</th>
-                  <th className="num right">ค่าขนส่ง</th>
+                  {isManager && <th className="num right">ค่าขนส่ง</th>}
                   {!isClosed && <th></th>}
                 </tr>
               </thead>
@@ -725,7 +727,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                     <td>{l.cargoType || <span className="muted">—</span>}</td>
                     <td><span className="badge" style={{ fontSize: 11 }}>{legTypeLabel(l.legType)}</span></td>
                     <td className="num">{(l.weight || 0).toFixed(2)}</td>
-                    <td className="num right">{db.thb(l.amount)}</td>
+                    {isManager && <td className="num right">{db.thb(l.amount)}</td>}
                     {!isClosed && (
                       <td>
                         <div className="row" style={{ gap: 4 }}>
@@ -769,7 +771,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                 <tr style={{ fontWeight: 600, background: 'var(--bg)' }}>
                   <td colSpan={4} className="right">รวม {legs.length} ขา</td>
                   <td className="num">{totalWeight.toFixed(2)}</td>
-                  <td className="num right" style={{ color: 'var(--green)' }}>{db.thb(totalRevenue)}</td>
+                  {isManager && <td className="num right" style={{ color: 'var(--green)' }}>{db.thb(totalRevenue)}</td>}
                   {!isClosed && <td></td>}
                 </tr>
               </tbody>
