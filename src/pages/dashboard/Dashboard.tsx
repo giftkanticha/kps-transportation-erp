@@ -4,6 +4,7 @@ import { useList, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
+import { canAccessRoute } from '../../lib/permissions'
 
 // ─── Mock data ─────────────────────────────────────────────────────────────────
 interface RegItem {
@@ -13,19 +14,22 @@ interface ReqItem {
   id: number; title: string; desc: string; time: string; priority: 'critical' | 'warning' | 'info'
 }
 
-const MOCK_REGISTRATIONS: RegItem[] = [
-  { id: 1, plate: '70-2451', label: 'RR2', type: 'ต่อภาษีรถ', dueDate: '28 พ.ค. 69', status: 'warning' },
-  { id: 2, plate: '70-4567', label: 'FL2', type: 'ต่อประกันภัยรถ', dueDate: '15 มิ.ย. 69', status: 'warning' },
-  { id: 3, plate: '70-7890', label: 'RR5', type: 'ต่อใบขับขี่', dueDate: 'วันนี้ ⚠️', status: 'critical' },
-]
-
-const MOCK_EMP_REQUESTS: ReqItem[] = [
-  { id: 1, title: 'ขอเปลี่ยนยาง - สนาม ด.', desc: 'ยาง 4 เส้น รถ 70-2451', time: '2 ชม.', priority: 'critical' },
-  { id: 2, title: 'ขอ OT ไปกลับ - วิทย์ น.', desc: 'เพิ่มเวลา 4 ชม.', time: '30 นาที', priority: 'warning' },
-  { id: 3, title: 'ขออาหารเสริม - บุญส่วน ร.', desc: 'ขอเบี้ยเลี้ยง 300 บาท', time: '1.5 ชม.', priority: 'info' },
-  { id: 4, title: 'ขอวันลา - สมศรี', desc: 'ลาป่วย 1 วัน', time: '45 นาที', priority: 'warning' },
-  { id: 5, title: 'ขอแก้เลขบัญชี - ณัฐ พ.', desc: 'เปลี่ยนบัญชีโอน', time: '3.5 ชม.', priority: 'info' },
-]
+// Renewals + employee requests used to be hard-coded demo data — kept the
+// types but the arrays are now computed from real DB rows below.
+const TODAY_ISO = new Date().toISOString().slice(0, 10)
+function daysTo(date: string | null | undefined): number | null {
+  if (!date) return null
+  const d = new Date(date)
+  if (Number.isNaN(d.getTime())) return null
+  const today = new Date(TODAY_ISO)
+  return Math.round((d.getTime() - today.getTime()) / 86_400_000)
+}
+function thaiShortDate(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const months = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.']
+  return `${d.getDate()} ${months[d.getMonth()]} ${(d.getFullYear() + 543).toString().slice(-2)}`
+}
 
 // ─── Priority helpers ──────────────────────────────────────────────────────────
 const P_COLOR = { critical: '#EF4444', warning: '#F59E0B', info: '#3B82F6', success: '#10B981' } as const
@@ -82,7 +86,9 @@ function RegistrationModal({ reg, onClose }: { reg: RegItem; onClose: () => void
         },
       })
       onClose()
-    } catch {
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
       setSaving(false)
     }
   }
@@ -216,7 +222,9 @@ function ApprovalModal({ req, onClose }: { req: ReqItem; onClose: () => void }) 
         },
       })
       onClose()
-    } catch {
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
       setSaving(false)
     }
   }
@@ -287,6 +295,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const [regModal, setRegModal]         = useState<RegItem | null>(null)
   const [approvalModal, setApprovalModal] = useState<ReqItem | null>(null)
   const [dismissedReqs, setDismissedReqs] = useState<Set<number>>(new Set())
+  const [showExport, setShowExport]       = useState(false)
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
@@ -321,14 +330,58 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const idleVehicles        = vehicles.filter(v => v.status === 'available').length
   const activeVehicles      = vehicles.filter(v => v.status === 'on-trip').length
   const maintenanceVehicles = vehicles.filter(v => v.status === 'maintenance').length
-  const tireAlerts          = tires.filter(t => (t.status as string) === 'critical').length
-  const lowStock            = stock.filter(s => s.qty <= s.reorderAt).length
+
+  // Real notification feed — only items that actually exist in the DB.
+  const criticalTireVehicles = useMemo(() => {
+    const ids = new Set<string>()
+    tires.forEach(t => { if ((t.status as string) === 'critical' && t.vehicleId) ids.add(t.vehicleId) })
+    return vehicles.filter(v => ids.has(v.id)).map(v => v.plate)
+  }, [tires, vehicles])
+  const maintenanceDueVehicles = useMemo(() => {
+    return vehicles.filter(v =>
+      v.nextServiceKm > 0 && v.odometer > 0 && v.odometer >= v.nextServiceKm - 500,
+    )
+  }, [vehicles])
+  const lowStockItems = useMemo(() => stock.filter(s => s.qty <= s.reorderAt), [stock])
+  const customersWithDebt = useMemo(() => customers.filter(c => (c.openInvoice ?? 0) > 0), [customers])
+  const totalOpenInvoice  = useMemo(() => customersWithDebt.reduce((s, c) => s + (c.openInvoice ?? 0), 0), [customersWithDebt])
+  const totalAlerts = criticalTireVehicles.length + maintenanceDueVehicles.length + lowStockItems.length + customersWithDebt.length
 
   const marginPct = revenueThisMonth > 0
     ? Math.round(((revenueThisMonth - costThisMonth) / revenueThisMonth) * 100) : 0
 
   const canApprove    = user.role === 'admin' || user.role === 'manager'
-  const pendingRequests = MOCK_EMP_REQUESTS.filter(r => !dismissedReqs.has(r.id))
+
+  // Vehicle document renewals due within 60 days, computed from real data.
+  const renewals = useMemo<RegItem[]>(() => {
+    const out: RegItem[] = []
+    let id = 0
+    const checks: { key: 'tax' | 'insurance' | 'dispatchPermit'; label: string }[] = [
+      { key: 'tax',            label: 'ต่อภาษีรถ' },
+      { key: 'insurance',      label: 'ต่อประกันภัยรถ' },
+      { key: 'dispatchPermit', label: 'ต่อใบอนุญาตขนส่ง' },
+    ]
+    vehicles.forEach(v => {
+      checks.forEach(c => {
+        const dateStr = String(v[c.key] ?? '')
+        const days = daysTo(dateStr)
+        if (days === null || days > 60) return
+        out.push({
+          id: ++id,
+          plate: v.plate,
+          label: v.brand || v.type || '',
+          type: c.label,
+          dueDate: days < 0 ? `หมดอายุแล้ว (${thaiShortDate(dateStr)})` : `${thaiShortDate(dateStr)} (${days} วัน)`,
+          status: days <= 7 ? 'critical' : 'warning',
+        })
+      })
+    })
+    return out.sort((a, b) => (a.status === 'critical' ? -1 : 1) - (b.status === 'critical' ? -1 : 1))
+  }, [vehicles])
+
+  // No employee-request feature in the system yet — render an empty queue.
+  const pendingRequests: ReqItem[] = []
+  void dismissedReqs // keep state hook intact for future use
 
   const iconMap:  Record<string, string> = { trip: 'package', alert: 'alert', create: 'plus', approve: 'check', invoice: 'money', fuel: 'fuel' }
   const colorMap: Record<string, string> = { alert: 'red', approve: 'green', fuel: 'amber' }
@@ -373,7 +426,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
           <button className="btn" onClick={() => setActive('dispatch.open')}>
             <Icon name="plus" size={15} /> เปิดงานใหม่
           </button>
-          <button className="btn primary">
+          <button className="btn primary" onClick={() => setShowExport(true)}>
             <Icon name="download" size={15} /> ส่งออกรายงาน
           </button>
         </div>
@@ -415,43 +468,68 @@ export function Dashboard({ user, setActive }: DashboardProps) {
           <div className="card">
             <div className="head">
               <h3>การแจ้งเตือน</h3>
-              <span className="badge red mono">{tireAlerts + lowStock + 1 + subUnpaid.length}</span>
+              {totalAlerts > 0 && <span className="badge red mono">{totalAlerts}</span>}
             </div>
             <div style={{ padding: '8px 18px' }}>
-              <div className="feed">
-                <div className="feed-item">
-                  <div className="ic red"><Icon name="alert" size={16} /></div>
-                  <div className="body">
-                    <div className="who">ยางวิกฤติ {tireAlerts} เส้น</div>
-                    <div className="txt">รถ 70-2451 (RR2) และ 70-4029 (FR) ต่ำกว่าเกณฑ์</div>
-                    <div className="when">8 ชม.ที่แล้ว</div>
-                  </div>
+              {totalAlerts === 0 ? (
+                <div className="empty" style={{ padding: 24 }}>ไม่มีการแจ้งเตือนใหม่ ✅</div>
+              ) : (
+                <div className="feed">
+                  {criticalTireVehicles.length > 0 && (
+                    <div className="feed-item">
+                      <div className="ic red"><Icon name="alert" size={16} /></div>
+                      <div className="body">
+                        <div className="who">ยางวิกฤติ {criticalTireVehicles.length} คัน</div>
+                        <div className="txt">
+                          {criticalTireVehicles.slice(0, 3).join(', ')}
+                          {criticalTireVehicles.length > 3 && ` และอีก ${criticalTireVehicles.length - 3} คัน`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {maintenanceDueVehicles.length > 0 && (
+                    <div className="feed-item">
+                      <div className="ic amber"><Icon name="wrench" size={16} /></div>
+                      <div className="body">
+                        <div className="who">ครบกำหนดบำรุงรักษา {maintenanceDueVehicles.length} คัน</div>
+                        <div className="txt">
+                          {maintenanceDueVehicles.slice(0, 3).map(v => `${v.plate} (${db.fmt(v.odometer)}/${db.fmt(v.nextServiceKm)} km)`).join(', ')}
+                          {maintenanceDueVehicles.length > 3 && ` และอีก ${maintenanceDueVehicles.length - 3}`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {lowStockItems.length > 0 && (
+                    <div className="feed-item">
+                      <div className="ic amber"><Icon name="package" size={16} /></div>
+                      <div className="body">
+                        <div className="who">สต็อคใกล้หมด {lowStockItems.length} รายการ</div>
+                        <div className="txt">
+                          {lowStockItems.slice(0, 3).map(s => s.name).join(', ')}
+                          {lowStockItems.length > 3 && ` และอีก ${lowStockItems.length - 3}`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {customersWithDebt.length > 0 && (
+                    <div className="feed-item">
+                      <div className="ic"><Icon name="money" size={16} /></div>
+                      <div className="body">
+                        <div className="who">ลูกหนี้คงค้าง {customersWithDebt.length} ราย · รวม {db.thb(totalOpenInvoice)}</div>
+                        <div className="txt">
+                          {customersWithDebt
+                            .slice()
+                            .sort((a, b) => (b.openInvoice ?? 0) - (a.openInvoice ?? 0))
+                            .slice(0, 3)
+                            .map(c => `${c.name} ${db.thb(c.openInvoice)}`)
+                            .join(' · ')}
+                          {customersWithDebt.length > 3 && ` และอีก ${customersWithDebt.length - 3}`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="feed-item">
-                  <div className="ic amber"><Icon name="wrench" size={16} /></div>
-                  <div className="body">
-                    <div className="who">ครบกำหนดบำรุงรักษา</div>
-                    <div className="txt">รถ 70-7890 ครบ 10,000 km</div>
-                    <div className="when">วันนี้</div>
-                  </div>
-                </div>
-                <div className="feed-item">
-                  <div className="ic amber"><Icon name="package" size={16} /></div>
-                  <div className="body">
-                    <div className="who">สต็อคใกล้หมด {lowStock} รายการ</div>
-                    <div className="txt">หลอดไฟหน้า H4, ผ้าเบรกหน้า</div>
-                    <div className="when">เมื่อวาน</div>
-                  </div>
-                </div>
-                <div className="feed-item">
-                  <div className="ic"><Icon name="money" size={16} /></div>
-                  <div className="body">
-                    <div className="who">ลูกหนี้เกินกำหนด</div>
-                    <div className="txt">PTT Global Chemical ฿1.24M (30+ วัน)</div>
-                    <div className="when">3 วันที่แล้ว</div>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
           </div>
 
@@ -541,10 +619,13 @@ export function Dashboard({ user, setActive }: DashboardProps) {
           <div className="card">
             <div className="head">
               <h3>ต่อทะเบียน / ภาษีรถ</h3>
-              <span className="badge amber mono">{MOCK_REGISTRATIONS.length}</span>
+              {renewals.length > 0 && <span className="badge amber mono">{renewals.length}</span>}
             </div>
             <div style={{ padding: '10px 0 6px' }}>
-              {MOCK_REGISTRATIONS.map(reg => {
+              {renewals.length === 0 && (
+                <div className="empty" style={{ padding: '28px 18px' }}>ไม่มีเอกสารใกล้หมดอายุใน 60 วัน ✅</div>
+              )}
+              {renewals.map(reg => {
                 const isCritical = reg.status === 'critical'
                 return (
                   <div
@@ -568,11 +649,8 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                       </div>
                     </div>
                     <button
-                      style={{
-                        background: isCritical ? '#EF4444' : '#3B82F6', color: '#fff',
-                        border: 'none', borderRadius: 7, padding: '5px 14px',
-                        fontSize: 12.5, fontWeight: 600, cursor: 'pointer', flexShrink: 0,
-                      }}
+                      className={`btn sm ${isCritical ? 'danger solid' : 'primary'}`}
+                      style={{ flexShrink: 0 }}
                       onClick={() => setRegModal(reg)}
                     >
                       {isCritical ? '⚠️ ต่อด่วน' : 'ต่อเลย'}
@@ -726,6 +804,118 @@ export function Dashboard({ user, setActive }: DashboardProps) {
       {/* Modals */}
       {regModal      && <RegistrationModal reg={regModal}    onClose={() => setRegModal(null)} />}
       {approvalModal && <ApprovalModal     req={approvalModal} onClose={() => setApprovalModal(null)} />}
+      {showExport    && (
+        <ExportReportsModal
+          role={user.role}
+          onPick={id => { setShowExport(false); setActive(id) }}
+          onClose={() => setShowExport(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Export Reports shortcut ───────────────────────────────────────────────────
+const REPORT_GROUPS: { title: string; reports: { id: string; label: string; desc: string; icon: string }[] }[] = [
+  {
+    title: 'งานขนส่ง',
+    reports: [
+      { id: 'dispatch.report',  label: 'รายงานสรุปงานขนส่ง',     desc: 'KPI ต่อรอบ + แบบฟอร์มรายเที่ยว · พิมพ์ PDF', icon: 'chart' },
+      { id: 'dispatch.monthly', label: 'รายงานรายเดือน',          desc: 'สรุปงานขนส่งแยกตามเดือน',                  icon: 'calendar' },
+      { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน',       desc: 'ดูประวัติงานทั้งหมด',                       icon: 'history' },
+    ],
+  },
+  {
+    title: 'น้ำมัน',
+    reports: [
+      { id: 'fuel.report',  label: 'รายงานน้ำมันรายเดือน', desc: 'การใช้น้ำมันแยกตามเดือน/รถ', icon: 'chart' },
+      { id: 'fuel.summary', label: 'สรุปคลังน้ำมันรวม',     desc: 'สต๊อกคลังน้ำมัน + รับเข้า/จ่ายออก', icon: 'package' },
+    ],
+  },
+  {
+    title: 'ค่าใช้จ่าย',
+    reports: [
+      { id: 'expenses.report',  label: 'รายงานสรุปค่าใช้จ่าย', desc: 'ค่าใช้จ่ายแยกตามหมวด/รถ/ช่วงเวลา',     icon: 'chart' },
+      { id: 'expenses.finance', label: 'สถานะการเงิน',         desc: 'ยอดค้างจ่าย/ครบกำหนดของค่าใช้จ่าย',    icon: 'money' },
+    ],
+  },
+  {
+    title: 'การเงิน',
+    reports: [
+      { id: 'finance', label: 'P&L รายคัน', desc: 'กำไร/ขาดทุนต่อรถ', icon: 'chart' },
+    ],
+  },
+  {
+    title: 'ยาง',
+    reports: [
+      { id: 'tires.history',   label: 'ประวัติยางรายเส้น', desc: 'ค้นและดูประวัติยางรายเส้น', icon: 'history' },
+      { id: 'tires.scrapped',  label: 'ยางหมดสภาพ',        desc: 'รายการยางที่หมดสภาพ + ขายซาก', icon: 'trash' },
+    ],
+  },
+]
+
+function ExportReportsModal({
+  role, onPick, onClose,
+}: {
+  role: 'admin' | 'manager' | 'driver'
+  onPick: (id: string) => void
+  onClose: () => void
+}) {
+  const visibleGroups = REPORT_GROUPS
+    .map(g => ({ ...g, reports: g.reports.filter(r => canAccessRoute(r.id, role)) }))
+    .filter(g => g.reports.length > 0)
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal wide" onClick={e => e.stopPropagation()}>
+        <div className="head">
+          <h3>เลือกรายงานที่ต้องการดู/พิมพ์</h3>
+        </div>
+        <div className="body">
+          {visibleGroups.length === 0 ? (
+            <div className="empty" style={{ padding: 24 }}>ไม่มีรายงานที่บัญชีของคุณเข้าถึงได้</div>
+          ) : visibleGroups.map(group => (
+            <div key={group.title} style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.05em', textTransform: 'uppercase', marginBottom: 8 }}>
+                {group.title}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+                {group.reports.map(r => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => onPick(r.id)}
+                    style={{
+                      textAlign: 'left', padding: '12px 14px', borderRadius: 10,
+                      border: '1px solid var(--line)', background: '#fff', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 12, fontFamily: 'inherit',
+                      transition: 'border-color .15s, background .15s',
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.background = 'var(--primary-50)' }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--line)'; e.currentTarget.style.background = '#fff' }}
+                  >
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                      background: 'var(--primary-50)', color: 'var(--primary)',
+                      display: 'grid', placeItems: 'center',
+                    }}>
+                      <Icon name={r.icon} size={18} />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text)' }}>{r.label}</div>
+                      <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{r.desc}</div>
+                    </div>
+                    <Icon name="chevron-right" size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose}>ปิด</button>
+        </div>
+      </div>
     </div>
   )
 }

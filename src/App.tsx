@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
-import { db } from './lib/db'
 import { useAuth } from './context/AuthContext'
+import { canAccessRoute } from './lib/permissions'
 import { LoginScreen } from './pages/auth/LoginScreen'
+import { ResetPasswordScreen } from './pages/auth/ResetPasswordScreen'
 import { Sidebar } from './components/layout/Sidebar'
 import { Topbar } from './components/layout/Topbar'
 import { UserManagementPage } from './pages/admin/UserManagementPage'
 import { ResetDataPage } from './pages/admin/ResetDataPage'
+import { ResetHistoryPage } from './pages/admin/ResetHistoryPage'
 import { Dashboard } from './pages/dashboard/Dashboard'
 import { AlertsTasksPage } from './pages/dashboard/AlertsTasksPage'
 import { VehiclesPage } from './pages/vehicles/VehiclesPage'
@@ -79,10 +81,11 @@ const crumbMap: Record<string, string> = {
   'settings.company': 'ตั้งค่า • บริษัท',
   'admin.users': 'จัดการผู้ใช้งาน',
   'admin.reset': 'รีเซตข้อมูล',
+  'admin.reset.history': 'ประวัติการรีเซต',
 }
 
 export default function App() {
-  const { legacyUser, logout, isAdmin, loading } = useAuth()
+  const { legacyUser, logout, isAdmin, loading, recoveryMode } = useAuth()
   const [active, setActive] = useState('dashboard')
   const [subject, setSubject] = useState<unknown>(null)
   const [collapsed, setCollapsed] = useState(false)
@@ -99,18 +102,22 @@ export default function App() {
     )
   }
 
+  if (recoveryMode) return <ResetPasswordScreen />
   if (!legacyUser) return <LoginScreen />
 
   const handleLogout = () => logout()
 
-  const handleReset = () => {
-    if (confirm('รีเซ็ตข้อมูลทั้งหมดและกลับไปค่าเริ่มต้น?')) {
-      db.reset()
-      window.location.reload()
-    }
-  }
-
   const renderPage = () => {
+    if (!canAccessRoute(active, legacyUser.role)) {
+      return (
+        <div className="page-head">
+          <div>
+            <h1 className="page-title">ไม่มีสิทธิ์เข้าถึง</h1>
+            <div className="page-sub">บัญชีของคุณไม่มีสิทธิ์ดูหน้านี้ — กรุณาติดต่อผู้ดูแลระบบ</div>
+          </div>
+        </div>
+      )
+    }
     switch (active) {
       case 'dashboard':
         return <Dashboard user={legacyUser} setActive={setActive} />
@@ -211,12 +218,14 @@ export default function App() {
       case 'settings.users':
         return <SettingsUsers />
       case 'settings.company':
-        return <SettingsCompany />
+        return <SettingsCompany setActive={setActive} />
 
       case 'admin.users':
         return isAdmin ? <UserManagementPage /> : <Dashboard user={legacyUser} setActive={setActive} />
       case 'admin.reset':
-        return isAdmin ? <ResetDataPage /> : <Dashboard user={legacyUser} setActive={setActive} />
+        return isAdmin ? <ResetDataPage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
+      case 'admin.reset.history':
+        return isAdmin ? <ResetHistoryPage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
 
       default:
         return <Dashboard user={legacyUser} setActive={setActive} />
@@ -238,7 +247,6 @@ export default function App() {
           user={legacyUser}
           crumb={crumbMap[active] ?? 'Dashboard'}
           onLogout={handleLogout}
-          onReset={handleReset}
           onOpenAlerts={() => setActive('alerts')}
         />
         <div className="content">{renderPage()}</div>

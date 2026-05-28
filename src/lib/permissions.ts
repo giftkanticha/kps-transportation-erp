@@ -29,3 +29,26 @@ export const roleBadgeColor = (role: KPSRole): string => {
 
 export const isPrivileged = (user: User | null | undefined): boolean =>
   !!user && (user.role === 'admin' || user.role === 'manager')
+
+// ── Menu / route access ──────────────────────────────────────────────
+// Routes hidden from drivers/employees: dashboard, finance, staff data,
+// and all summary/report pages. Managers see everything except settings/admin.
+const MANAGER_PLUS_ROUTES = new Set<string>([
+  'dashboard',
+  'finance',
+  'employees', 'employees.add',
+  'fuel.report', 'fuel.summary', 'fuel.reconcile',
+  'dispatch.report',  // drivers see 'dispatch.history' instead — money columns are hidden there
+
+  'expenses.finance', 'expenses.report',
+])
+const ADMIN_ONLY_TOP = new Set<string>(['settings', 'admin'])
+
+export function canAccessRoute(routeId: string, role: KPSRole): boolean {
+  if (role === 'admin') return true
+  const top = routeId.split('.')[0]
+  if (ADMIN_ONLY_TOP.has(top)) return false
+  if (role === 'manager') return true
+  // driver / employee
+  return !MANAGER_PLUS_ROUTES.has(routeId)
+}

@@ -177,7 +177,11 @@ export const db = {
   lastClosedMileage(vehicleId: string, dispatches?: Dispatch[]): number | null {
     if (!vehicleId) return null
     const rounds = (dispatches ?? db.getAll<Dispatch>('dispatch'))
-      .filter(d => d.vehicleId === vehicleId && d.roundStatus === 'closed' && d.endOdometer != null)
+      .filter(d =>
+        d.vehicleId === vehicleId
+        && (d.roundStatus === 'closed' || d.status === 'completed')
+        && d.endOdometer != null,
+      )
     if (!rounds.length) return null
     return Math.max(...rounds.map(d => d.endOdometer ?? 0))
   },

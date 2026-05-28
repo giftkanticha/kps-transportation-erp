@@ -262,6 +262,7 @@ export interface FuelStock {
   pricePerL: number
   invoiceNo: string
   total: number
+  expenseHeaderId?: string | null  // FK → expense_headers when this purchase is also booked as AP
 }
 
 export interface Expense {

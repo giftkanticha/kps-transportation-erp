@@ -80,6 +80,7 @@ export function FuelReconciliation() {
 
     setSyncing(true)
     const log: string[] = []
+    let failed = 0
 
     for (const lr of legacyOnly) {
       const vehicle = vehicles.find(v => v.id === lr.vehicleId)
@@ -99,27 +100,32 @@ export function FuelReconciliation() {
         if (match) status = 'TRIP_LINKED'
       }
 
-      await insertFuelTx.mutateAsync({
-        id: uid('ftx'),
-        date: lr.date,
-        vehicleId: lr.vehicleId,
-        liters: lr.liters,
-        pricePerL: lr.pricePerL || 35,
-        total: lr.total || lr.liters * 35,
-        source,
-        tripId: null,
-        status,
-        tripFuelRole: 'NORMAL',
-        entryMethod: 'MANUAL_ADMIN',
-        createdAt: new Date().toISOString(),
-        reversedAt: null,
-        reversalOf: null,
-        note: `Migrated from legacy FuelRecord ${lr.id}`,
-      })
-
-      log.push(`✅ ${vehicle?.plate ?? lr.vehicleId} · ${lr.date} · ${lr.liters} ล. → ${status}`)
+      try {
+        await insertFuelTx.mutateAsync({
+          id: uid('ftx'),
+          date: lr.date,
+          vehicleId: lr.vehicleId,
+          liters: lr.liters,
+          pricePerL: lr.pricePerL || 35,
+          total: lr.total || lr.liters * 35,
+          source,
+          tripId: null,
+          status,
+          tripFuelRole: 'NORMAL',
+          entryMethod: 'MANUAL_ADMIN',
+          createdAt: new Date().toISOString(),
+          reversedAt: null,
+          reversalOf: null,
+          note: `Migrated from legacy FuelRecord ${lr.id}`,
+        })
+        log.push(`✅ ${vehicle?.plate ?? lr.vehicleId} · ${lr.date} · ${lr.liters} ล. → ${status}`)
+      } catch (e) {
+        failed += 1
+        log.push(`❌ ${vehicle?.plate ?? lr.vehicleId} · ${lr.date}: ${e instanceof Error ? e.message : String(e)}`)
+      }
     }
 
+    if (failed > 0) alert(`ซิงค์เสร็จ — สำเร็จ ${log.length - failed} · ล้มเหลว ${failed} (ดูรายละเอียดในรายการด้านล่าง)`)
     setSyncLog(log)
     setSyncing(false)
   }

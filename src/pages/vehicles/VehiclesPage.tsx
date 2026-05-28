@@ -4,7 +4,7 @@ import { useList, useUpdate, useDelete, useInsert } from '../../hooks/useTable'
 import { useRealtimeTable } from '../../hooks/useRealtime'
 import { can } from '../../lib/permissions'
 import type { Vehicle, Employee, User, EditApprovalRequest, VehicleChangeField } from '../../types'
-import { Icon, StatusBadge, Field } from '../../components/ui'
+import { Icon, StatusBadge, Field, SearchInput } from '../../components/ui'
 
 const FIELD_LABELS: Record<string, string> = {
   plate: 'ทะเบียน', brand: 'ยี่ห้อ', year: 'ปี', type: 'ประเภท', groupKind: 'กลุ่ม',
@@ -193,8 +193,8 @@ function VehicleEditModal({
       updateVehicle.mutate(
         { id: vehicle.id, patch },
         {
-          onSuccess: () => onSuccess('✅ บันทึกข้อมูลเรียบร้อย'),
-          onError: (err) => { onError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'); setSaving(false) },
+          onSuccess: () => { onSuccess('✅ บันทึกข้อมูลเรียบร้อย'); setSaving(false) },
+          onError:   (err) => { onError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'); setSaving(false) },
         },
       )
       return
@@ -611,15 +611,7 @@ export function VehiclesPage({ setActive, setSubject, user }: VehiclesPageProps)
             display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap',
           }}
         >
-          <div style={{ position: 'relative', flex: 1, minWidth: 240 }}>
-            <Icon name="search" size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-faint)' }} />
-            <input
-              value={q}
-              onChange={e => setQ(e.target.value)}
-              placeholder="ค้นหาทะเบียน / ยี่ห้อ / ประเภท"
-              style={{ width: '100%', height: 38, padding: '0 12px 0 36px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13 }}
-            />
-          </div>
+          <SearchInput value={q} onChange={setQ} placeholder="ค้นหาทะเบียน / ยี่ห้อ / ประเภท" />
           <FilterCheckGroup
             label="สถานะ"
             options={[

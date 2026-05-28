@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import { Icon } from '../../components/ui'
+import { Icon, SearchInput } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
 import type { Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance, Expense, ExpenseHeader, Employee } from '../../types'
 
@@ -282,21 +282,7 @@ function VehiclePicker({ vehicles, picked, onChange }: {
             {picked.size}/{vehicles.length} คัน
           </span>
         </div>
-        <div style={{ position: 'relative' }}>
-          <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
-            <Icon name="search" size={13} />
-          </span>
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="ค้นหาทะเบียน..."
-            style={{
-              width: '100%', padding: '5px 8px 5px 28px',
-              border: '1px solid #CBD5E1', borderRadius: 6,
-              fontSize: 12.5, background: 'var(--bg)',
-            }}
-          />
-        </div>
+        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาทะเบียน..." width="100%" />
       </div>
 
       <label
