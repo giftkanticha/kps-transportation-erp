@@ -38,8 +38,12 @@ const tabBtn = (active: boolean): CSSProperties => ({
   transition: 'all .15s',
 })
 
-const isFactoryFuel = (f: FuelRecord) =>
-  !['PTT', 'Shell', 'Bangchak', 'Esso'].some(s => f.station?.includes(s))
+// Factory-tank fuel uses the literal 'ถังโรงงาน' Thai string in
+// fuel_records.station (set by ExpressFuelLog source=FACTORY_TANK and by
+// DispatchRoundClose TRIP_CLOSING). The old exclusion-list approach
+// ('PTT' / 'Shell' / …) leaked external pump rows into the factory daily
+// table now that supplier names are Thai ('บริษัท ปตท.' etc.).
+const isFactoryFuel = (f: FuelRecord) => f.station === 'ถังโรงงาน'
 
 type FuelVal = { liters: number; amount: number }
 
@@ -88,8 +92,7 @@ function FuelRecord() {
     }
   }
 
-  const isExternal = (station: string) =>
-    ['PTT', 'Shell', 'Bangchak', 'Esso'].some((s) => station.includes(s))
+  const isExternal = (station: string) => station === 'ปั๊มภายนอก'
 
   return (
     <div>

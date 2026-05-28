@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
-import { useList } from '../../hooks/useTable'
+import { useList, useUpdate, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
+import { useAuth } from '../../context/AuthContext'
 import { usePrint } from '../../hooks/usePrint'
-import type { Vehicle, Employee, Dispatch, FuelRound } from '../../types'
+import type { Vehicle, Employee, Dispatch, FuelRound, EditApprovalRequest, KPSRole } from '../../types'
 import { Icon, Field, SegmentedFilter } from '../../components/ui'
 
 interface Props {
@@ -35,12 +36,18 @@ function isoMonth(s: string): string {
 
 export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   const today = new Date()
+  const { profile, isAdmin } = useAuth()
   const [from, setFrom] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`)
   const [to, setTo] = useState(today.toISOString().slice(0, 10))
   const [vehicleId, setVehicleId] = useState('')
   const [driverId, setDriverId] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
   const [printScope, setPrintScope] = useState<'both' | 'summary' | 'form'>('both')
+  const [reopenTarget, setReopenTarget] = useState<Dispatch | null>(null)
+  const [requestTarget, setRequestTarget] = useState<Dispatch | null>(null)
+  const [toastMsg, setToastMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const updateDispatch = useUpdate<Dispatch>('dispatch')
+  const insertApproval = useInsert<EditApprovalRequest>('edit_approvals')
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
@@ -292,6 +299,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
                 <th className="num">กำไร</th>
                 <th className="num">KM/L</th>
                 <th>สถานะ</th>
+                <th className="no-print" style={{ width: 110 }}>การกระทำ</th>
               </tr>
             </thead>
             <tbody>
@@ -343,12 +351,37 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
                           ? <span className="badge amber" style={{ fontSize: 11 }}>DRAFT</span>
                           : <span className="badge" style={{ fontSize: 11 }}>LEGACY</span>}
                     </td>
+                    <td
+                      className="no-print"
+                      onClick={e => e.stopPropagation()}
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      {r.status === 'closed' && (
+                        isAdmin ? (
+                          <button
+                            className="btn sm"
+                            title="เปิดรอบนี้กลับมาแก้ไข"
+                            onClick={() => setReopenTarget(r.round)}
+                          >
+                            <Icon name="edit" size={12} /> แก้ไข
+                          </button>
+                        ) : (
+                          <button
+                            className="btn sm"
+                            title="ส่งคำขอแก้ไขให้แอดมิน"
+                            onClick={() => setRequestTarget(r.round)}
+                          >
+                            <Icon name="bell" size={12} /> ขอแก้ไข
+                          </button>
+                        )
+                      )}
+                    </td>
                   </tr>
                 )
               })}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={11} style={{ textAlign: 'center', padding: 36, color: 'var(--text-2)' }}>
+                  <td colSpan={12} style={{ textAlign: 'center', padding: 36, color: 'var(--text-2)' }}>
                     ไม่พบรายการในช่วงเวลาที่เลือก
                   </td>
                 </tr>
@@ -441,6 +474,142 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
           </div>
         </>
       )}
+
+      {reopenTarget && (
+        <ReopenConfirm
+          round={reopenTarget}
+          onClose={() => setReopenTarget(null)}
+          onConfirm={async () => {
+            try {
+              await updateDispatch.mutateAsync({
+                id: reopenTarget.id,
+                patch: { roundStatus: 'draft', status: 'in-progress' },
+              })
+              setReopenTarget(null)
+              setSubject({ type: 'round', id: reopenTarget.id })
+              setActive('dispatch.close')
+            } catch (e) {
+              setToastMsg({ kind: 'err', text: e instanceof Error ? e.message : 'เปิดรอบไม่สำเร็จ' })
+            }
+          }}
+        />
+      )}
+
+      {requestTarget && profile && (
+        <RequestEditModal
+          round={requestTarget}
+          onClose={() => setRequestTarget(null)}
+          onSubmit={async (reason) => {
+            try {
+              await insertApproval.mutateAsync({
+                requesterId:   profile.id,
+                requesterName: profile.display_name ?? profile.username ?? profile.email ?? 'ผู้ใช้',
+                requesterRole: (String(profile.role).toLowerCase() === 'manager' ? 'manager' : 'driver') as KPSRole,
+                vehicleId:     requestTarget.vehicleId ?? '',
+                vehiclePlate:  vehicles.find(v => v.id === requestTarget.vehicleId)?.plate ?? requestTarget.code,
+                reason,
+                changes: {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  _kind: 'dispatch_reopen',
+                  roundId: requestTarget.id,
+                  roundCode: requestTarget.code,
+                } as Partial<Vehicle>,
+                changeFields: [],
+                requestedAt:  new Date().toISOString(),
+                status:       'pending',
+                reviewerId:   null,
+                reviewerName: null,
+                reviewedAt:   null,
+                reviewNote:   '',
+              })
+              setRequestTarget(null)
+              setToastMsg({ kind: 'ok', text: 'ส่งคำขอแก้ไขให้แอดมินแล้ว' })
+            } catch (e) {
+              setToastMsg({ kind: 'err', text: e instanceof Error ? e.message : 'ส่งคำขอไม่สำเร็จ' })
+            }
+          }}
+        />
+      )}
+
+      {toastMsg && (
+        <div
+          onClick={() => setToastMsg(null)}
+          style={{
+            position: 'fixed', bottom: 24, right: 24, zIndex: 2000,
+            padding: '12px 18px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+            background: toastMsg.kind === 'ok' ? '#dcfce7' : '#fee2e2',
+            color:      toastMsg.kind === 'ok' ? '#166534' : '#991b1b',
+            border: `1px solid ${toastMsg.kind === 'ok' ? '#86efac' : '#fca5a5'}`,
+            cursor: 'pointer', maxWidth: 360, boxShadow: '0 6px 24px rgba(0,0,0,.15)',
+          }}
+        >
+          {toastMsg.text}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Reopen confirmation (admin) ──────────────────────────────────────────────
+function ReopenConfirm({ round, onClose, onConfirm }: { round: Dispatch; onClose: () => void; onConfirm: () => void }) {
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+        <div className="head"><h3>เปิดรอบเพื่อแก้ไข</h3></div>
+        <div className="body">
+          <p style={{ marginBottom: 12 }}>
+            รอบ <strong className="mono" style={{ color: 'var(--primary)' }}>{round.code}</strong> ปิดอยู่
+          </p>
+          <p className="muted" style={{ fontSize: 13 }}>
+            กดยืนยันจะตั้งสถานะรอบเป็น <strong>DRAFT</strong> และพาไปหน้าปิดรอบเพื่อแก้ไขข้อมูล — ปิดรอบใหม่อีกครั้งเมื่อเสร็จ
+          </p>
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose}>ยกเลิก</button>
+          <button className="btn primary" onClick={onConfirm}>
+            <Icon name="edit" size={14} /> เปิดเพื่อแก้ไข
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Request edit (non-admin) ─────────────────────────────────────────────────
+function RequestEditModal({ round, onClose, onSubmit }: { round: Dispatch; onClose: () => void; onSubmit: (reason: string) => Promise<void> }) {
+  const [reason, setReason] = useState('')
+  const [busy, setBusy]     = useState(false)
+  const submit = async () => {
+    if (!reason.trim()) return
+    setBusy(true)
+    try { await onSubmit(reason.trim()) } finally { setBusy(false) }
+  }
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div className="head"><h3>ขอแก้ไขรอบที่ปิดแล้ว</h3></div>
+        <div className="body">
+          <p style={{ marginBottom: 14, fontSize: 13 }}>
+            รอบ <strong className="mono" style={{ color: 'var(--primary)' }}>{round.code}</strong> — แอดมินจะตรวจสอบคำขอและเปิดรอบให้แก้ไข
+          </p>
+          <Field label="เหตุผลที่ขอแก้ไข *">
+            <textarea
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              rows={3}
+              placeholder="เช่น เลขไมล์ปิดงานคลาดเคลื่อน / ลืมใส่ค่าน้ำมัน"
+              style={{ width: '100%', resize: 'vertical' }}
+              autoFocus
+            />
+          </Field>
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" onClick={submit} disabled={busy || !reason.trim()}>
+            {busy ? 'กำลังส่ง…' : 'ส่งคำขอ'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

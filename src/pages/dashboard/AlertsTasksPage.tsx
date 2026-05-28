@@ -5,7 +5,7 @@ import { useList, useUpdate } from '../../hooks/useTable'
 import { callRpc } from '../../lib/crud'
 import { Icon } from '../../components/ui'
 import { can } from '../../lib/permissions'
-import type { Vehicle, Maintenance, EditApprovalRequest, User } from '../../types'
+import type { Vehicle, Maintenance, EditApprovalRequest, Dispatch, User } from '../../types'
 
 const TODAY = new Date('2026-05-17')
 const SOON_DAYS = 30
@@ -532,7 +532,11 @@ function PendingApprovalsSection({ user, requests, onReview }: PendingApprovalsS
 
       {requests.length > 0 && (
         <div className="grid-2" style={{ gap: 14 }}>
-          {requests.map(req => (
+          {requests.map(req => {
+            const changesRec = req.changes as Record<string, unknown>
+            const isDispatchReopen = changesRec?._kind === 'dispatch_reopen'
+            const roundCode = isDispatchReopen ? String(changesRec.roundCode ?? '') : ''
+            return (
             <div
               key={req.id}
               className="card"
@@ -548,10 +552,20 @@ function PendingApprovalsSection({ user, requests, onReview }: PendingApprovalsS
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13.5, lineHeight: 1.5 }}>
                     <strong>{req.requesterName}</strong>
-                    <span className="muted"> ขอแก้ไข </span>
-                    <span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>
-                      {req.vehiclePlate}
-                    </span>
+                    {isDispatchReopen ? (
+                      <>
+                        <span className="muted"> ขอเปิดรอบ </span>
+                        <span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{roundCode}</span>
+                        <span className="muted"> เพื่อแก้ไข</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="muted"> ขอแก้ไข </span>
+                        <span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                          {req.vehiclePlate}
+                        </span>
+                      </>
+                    )}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-2)', marginTop: 4 }}>
                     เหตุผล: {req.reason}
@@ -562,23 +576,25 @@ function PendingApprovalsSection({ user, requests, onReview }: PendingApprovalsS
                 </span>
               </div>
 
-              <div
-                style={{
-                  background: 'var(--bg-sunk)',
-                  borderRadius: 6,
-                  padding: '8px 10px',
-                  fontSize: 12,
-                }}
-              >
-                {req.changeFields.map((f, i) => (
-                  <div key={i} className="row" style={{ gap: 6, alignItems: 'center', marginTop: i > 0 ? 4 : 0 }}>
-                    <span style={{ color: 'var(--text-2)', minWidth: 110 }}>{f.label}:</span>
-                    <span className="mono muted">{f.before}</span>
-                    <Icon name="arrow-right" size={11} style={{ color: 'var(--text-faint)' }} />
-                    <span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{f.after}</span>
-                  </div>
-                ))}
-              </div>
+              {!isDispatchReopen && req.changeFields.length > 0 && (
+                <div
+                  style={{
+                    background: 'var(--bg-sunk)',
+                    borderRadius: 6,
+                    padding: '8px 10px',
+                    fontSize: 12,
+                  }}
+                >
+                  {req.changeFields.map((f, i) => (
+                    <div key={i} className="row" style={{ gap: 6, alignItems: 'center', marginTop: i > 0 ? 4 : 0 }}>
+                      <span style={{ color: 'var(--text-2)', minWidth: 110 }}>{f.label}:</span>
+                      <span className="mono muted">{f.before}</span>
+                      <Icon name="arrow-right" size={11} style={{ color: 'var(--text-faint)' }} />
+                      <span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{f.after}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
                 <button
@@ -619,7 +635,7 @@ function PendingApprovalsSection({ user, requests, onReview }: PendingApprovalsS
                 </button>
               </div>
             </div>
-          ))}
+          )})}
         </div>
       )}
     </div>
@@ -639,6 +655,7 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
   const { data: maintenance = [] } = useList<Maintenance>('maintenance')
   const updateApproval = useUpdate<EditApprovalRequest>('edit_approvals')
   const updateVehicle = useUpdate<Vehicle>('vehicles')
+  const updateDispatch = useUpdate<Dispatch>('dispatch')
 
   const pendingApprovals = useMemo(() => {
     if (!can.reviewApprovals(user.role)) return []
@@ -654,7 +671,18 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
       if (fresh.status !== 'pending') throw new Error('คำขอนี้ถูกพิจารณาแล้ว')
 
       if (decision === 'approved') {
-        await updateVehicle.mutateAsync({ id: req.vehicleId, patch: req.changes })
+        // dispatch_reopen requests use the same edit_approvals table but
+        // target a Dispatch row instead of a Vehicle. We tag the intent in
+        // req.changes._kind when inserting from DispatchSummaryReport.
+        const changesAsRecord = req.changes as Record<string, unknown>
+        if (changesAsRecord?._kind === 'dispatch_reopen' && typeof changesAsRecord.roundId === 'string') {
+          await updateDispatch.mutateAsync({
+            id: changesAsRecord.roundId,
+            patch: { roundStatus: 'draft', status: 'in-progress' },
+          })
+        } else {
+          await updateVehicle.mutateAsync({ id: req.vehicleId, patch: req.changes })
+        }
       }
 
       await updateApproval.mutateAsync({
