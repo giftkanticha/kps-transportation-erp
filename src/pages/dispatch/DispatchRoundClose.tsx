@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction, FuelStock } from '../../types'
+import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction, FuelStock, FuelRecord } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -181,6 +181,12 @@ function CloseForm({
   const updateDispatch = useUpdate<Dispatch>('dispatch')
   const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
   const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
+  // Mirror the TRIP_CLOSING into fuel_records too — that's the legacy table
+  // FinancePL + FuelInventorySummary read from, so without this the closing
+  // fuel never shows up under 'น้ำมันในโรงงาน' on the P&L.
+  const { data: allFuelRecs = [] } = useList<FuelRecord>('fuel_records')
+  const insertFuelRec = useInsert<FuelRecord>('fuel_records')
+  const updateFuelRec = useUpdate<FuelRecord>('fuel_records')
   const round = useMemo(() => dispatches.find(d => d.id === roundId), [dispatches, roundId])
   const vehicle = vehicles.find(v => v.id === round?.vehicleId)
   const driver = employees.find(e => e.id === round?.driverId)
@@ -409,6 +415,11 @@ function CloseForm({
         // liters/price live on the dispatch row (below) and convert here on close.
         if (!hasExternalClosing) {
           const txDate = closingFuelDate || round.date || new Date().toISOString().slice(0, 10)
+          // Each round gets a single deterministic fuel_records.code so we can
+          // upsert without tracking a separate FK on the dispatch row.
+          const recCode = `TRIP-${round.code}-CLOSE`
+          const existingRec = allFuelRecs.find(r => r.code === recCode)
+
           if (closingL > 0 && !ownClosingTx) {
             await insertFuelTx.mutateAsync({
               id: uid('ftx'),
@@ -432,6 +443,32 @@ function CloseForm({
               id: ownClosingTx.id,
               patch: { date: txDate, liters: closingL, pricePerL: closingPrice, total: closingL * closingPrice },
             })
+          }
+
+          // Mirror to fuel_records (legacy ledger that drives P&L + daily
+          // factory-fuel summary). station='ถังโรงงาน' is what isFactoryStation
+          // matches against.
+          if (closingL > 0) {
+            const recPayload = {
+              vehicleId: round.vehicleId ?? '',
+              driverId: null,
+              station: 'ถังโรงงาน',
+              liters: closingL,
+              pricePerL: closingPrice,
+              total: closingL * closingPrice,
+              odometer: em ?? 0,
+              date: txDate,
+              type: 'diesel',
+            }
+            if (existingRec) {
+              await updateFuelRec.mutateAsync({ id: existingRec.id, patch: recPayload })
+            } else {
+              await insertFuelRec.mutateAsync({
+                id: uid('frec'),
+                code: recCode,
+                ...recPayload,
+              })
+            }
           }
         }
         // Final fuel = INTERMEDIATE + NORMAL + TRIP_CLOSING (NOT TRIP_OPENING)
