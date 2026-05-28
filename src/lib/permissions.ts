@@ -38,7 +38,8 @@ const MANAGER_PLUS_ROUTES = new Set<string>([
   'finance',
   'employees', 'employees.add',
   'fuel.report', 'fuel.summary', 'fuel.reconcile',
-  'dispatch.report', 'dispatch.history',
+  'dispatch.report',  // drivers see 'dispatch.history' instead — money columns are hidden there
+
   'expenses.finance', 'expenses.report',
 ])
 const ADMIN_ONLY_TOP = new Set<string>(['settings', 'admin'])

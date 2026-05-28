@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
+import { useAuth } from '../../context/AuthContext'
 import type { Vehicle, Employee, Dispatch } from '../../types'
 import { Icon, SearchInput, SegmentedFilter } from '../../components/ui'
 
@@ -22,6 +23,7 @@ function legSummary(round: Dispatch): { origin: string; destination: string } {
 }
 
 export function DispatchHistory({ setActive, setSubject }: Props) {
+  const { isManager } = useAuth()
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -158,9 +160,11 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div className="mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
-                      {db.fmt(totalRevenue)} <span style={{ fontSize: 11 }}>บาท</span>
-                    </div>
+                    {isManager && (
+                      <div className="mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
+                        {db.fmt(totalRevenue)} <span style={{ fontSize: 11 }}>บาท</span>
+                      </div>
+                    )}
                     {distance && (
                       <div className="muted" style={{ fontSize: 11 }}>{db.fmt(distance)} km</div>
                     )}
@@ -179,8 +183,8 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
                             <th>เส้นทาง</th>
                             <th>สินค้า</th>
                             <th className="num">น้ำหนัก</th>
-                            <th className="num">ราคา</th>
-                            <th className="num right">ค่าขนส่ง</th>
+                            {isManager && <th className="num">ราคา</th>}
+                            {isManager && <th className="num right">ค่าขนส่ง</th>}
                           </tr>
                         </thead>
                         <tbody>
@@ -190,18 +194,20 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
                               <td>{l.origin} → {l.destination}</td>
                               <td>{l.cargo}</td>
                               <td className="num">{(l.weight || 0).toFixed(2)} ตัน</td>
-                              <td className="num">
-                                {l.priceMode === 'lump'
-                                  ? `${db.fmt(l.price)}`
-                                  : `${db.fmt(l.price)} / ${l.priceMode === 'per_kg' ? 'กก.' : 'ตัน'}`}
-                              </td>
-                              <td className="num right">{db.thb(l.amount)}</td>
+                              {isManager && (
+                                <td className="num">
+                                  {l.priceMode === 'lump'
+                                    ? `${db.fmt(l.price)}`
+                                    : `${db.fmt(l.price)} / ${l.priceMode === 'per_kg' ? 'กก.' : 'ตัน'}`}
+                                </td>
+                              )}
+                              {isManager && <td className="num right">{db.thb(l.amount)}</td>}
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     )}
-                    <div className="grid-4" style={{ gap: 12, fontSize: 12.5 }}>
+                    <div className={isManager ? 'grid-4' : 'grid-2'} style={{ gap: 12, fontSize: 12.5 }}>
                       <div>
                         <span className="muted">ไมล์ต้น/ปลาย:</span>{' '}
                         <span className="mono">{db.fmt(round.startOdometer)} → {db.fmt(round.endOdometer)}</span>
@@ -210,14 +216,18 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
                         <span className="muted">น้ำมัน:</span>{' '}
                         <span className="mono">{round.liters ? `${db.fmt(round.liters)} L` : '—'}</span>
                       </div>
-                      <div>
-                        <span className="muted">ค่าน้ำมัน:</span>{' '}
-                        <span className="mono">{round.cost ? db.thb(round.cost) : '—'}</span>
-                      </div>
-                      <div>
-                        <span className="muted">เบี้ยเลี้ยง:</span>{' '}
-                        <span className="mono">{round.perDiem ? db.thb(round.perDiem) : '—'}</span>
-                      </div>
+                      {isManager && (
+                        <div>
+                          <span className="muted">ค่าน้ำมัน:</span>{' '}
+                          <span className="mono">{round.cost ? db.thb(round.cost) : '—'}</span>
+                        </div>
+                      )}
+                      {isManager && (
+                        <div>
+                          <span className="muted">เบี้ยเลี้ยง:</span>{' '}
+                          <span className="mono">{round.perDiem ? db.thb(round.perDiem) : '—'}</span>
+                        </div>
+                      )}
                     </div>
                     <div className="row btn-row" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
                       {isDraft && (
