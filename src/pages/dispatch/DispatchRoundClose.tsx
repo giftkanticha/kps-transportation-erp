@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
+import { useAuth } from '../../context/AuthContext'
 import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction, FuelStock, FuelRecord } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -92,6 +93,7 @@ function tonToDwInput(weightTon: number | null | undefined, mode: DispatchLeg['p
 function DraftRoundsList({
   setSubject,
 }: { setSubject: (s: unknown) => void }) {
+  const { isManager } = useAuth()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: dispatches = [] } = useDispatches()
@@ -119,7 +121,7 @@ function DraftRoundsList({
                   <th>คนขับ</th>
                   <th>ออกเดินทาง</th>
                   <th className="num">จำนวนขา</th>
-                  <th className="num right">รายได้</th>
+                  {isManager && <th className="num right">รายได้</th>}
                   <th></th>
                 </tr>
               </thead>
@@ -138,7 +140,7 @@ function DraftRoundsList({
                       <td>{dr?.name ?? '—'}</td>
                       <td className="num muted">{db.thaiDate(d.depart || d.date)}</td>
                       <td className="num">{d.legs?.length ?? 0}</td>
-                      <td className="num right">{db.thb(db.roundRevenue(d))}</td>
+                      {isManager && <td className="num right">{db.thb(db.roundRevenue(d))}</td>}
                       <td onClick={e => e.stopPropagation()}>
                         <button className="btn primary sm" onClick={() => setSubject({ type: 'round', id: d.id })}>
                           ปิดงาน →
@@ -171,6 +173,7 @@ function CloseForm({
   setActive,
   setSubject,
 }: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
+  const { isManager } = useAuth()
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
@@ -565,10 +568,12 @@ function CloseForm({
             <div className="muted" style={{ fontSize: 11 }}>จำนวนขา</div>
             <div style={{ fontSize: 14, fontWeight: 600 }}>{legs.length} ขา</div>
           </div>
-          <div>
-            <div className="muted" style={{ fontSize: 11 }}>รายได้ค่าขนส่ง</div>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--green)' }}>{db.thb(revenue)}</div>
-          </div>
+          {isManager && (
+            <div>
+              <div className="muted" style={{ fontSize: 11 }}>รายได้ค่าขนส่ง</div>
+              <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--green)' }}>{db.thb(revenue)}</div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -607,9 +612,13 @@ function CloseForm({
                     {l.customerId ? (customers.find(c => c.id === l.customerId)?.name ?? '—') : '—'}
                     {' • '}{l.cargoType || '—'}
                     {' • '}<span className="badge" style={{ fontSize: 10.5 }}>{legTypeLabel(l.legType)}</span>
-                    {' • '}<span className="badge" style={{ fontSize: 10.5 }}>
-                      {isLump ? 'เหมา' : l.priceMode === 'per_kg' ? `${db.fmt(l.price)} ฿/กก.` : `${db.fmt(l.price)} ฿/ตัน`}
-                    </span>
+                    {isManager && (
+                      <>
+                        {' • '}<span className="badge" style={{ fontSize: 10.5 }}>
+                          {isLump ? 'เหมา' : l.priceMode === 'per_kg' ? `${db.fmt(l.price)} ฿/กก.` : `${db.fmt(l.price)} ฿/ตัน`}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -710,7 +719,7 @@ function CloseForm({
                               </span>
                       }
                     </span>
-                    {!isLump && (
+                    {!isLump && isManager && (
                       <span className="muted">
                         ค่าขนส่งใหม่:{' '}
                         <span className="mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>
@@ -1024,28 +1033,32 @@ function CloseForm({
         }}
       >
         <div className="row" style={{ gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div>
-            <div className="muted" style={{ fontSize: 10.5 }}>รายได้</div>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--green)' }}>{db.thb(revenue)}</div>
-          </div>
-          <div>
-            <div className="muted" style={{ fontSize: 10.5 }}>ค่าน้ำมัน</div>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(fuelCost)}</div>
-          </div>
-          <div>
-            <div className="muted" style={{ fontSize: 10.5 }}>เบี้ยเลี้ยง</div>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(perDiemTotal)}</div>
-          </div>
-          <div>
-            <div className="muted" style={{ fontSize: 10.5 }}>อื่นๆ</div>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(otherTotal)}</div>
-          </div>
-          <div style={{ borderLeft: '1px solid var(--line)', paddingLeft: 24 }}>
-            <div className="muted" style={{ fontSize: 10.5 }}>กำไรสุทธิ</div>
-            <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
-              {db.thb(profit)}
-            </div>
-          </div>
+          {isManager && (
+            <>
+              <div>
+                <div className="muted" style={{ fontSize: 10.5 }}>รายได้</div>
+                <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--green)' }}>{db.thb(revenue)}</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 10.5 }}>ค่าน้ำมัน</div>
+                <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(fuelCost)}</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 10.5 }}>เบี้ยเลี้ยง</div>
+                <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(perDiemTotal)}</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 10.5 }}>อื่นๆ</div>
+                <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(otherTotal)}</div>
+              </div>
+              <div style={{ borderLeft: '1px solid var(--line)', paddingLeft: 24 }}>
+                <div className="muted" style={{ fontSize: 10.5 }}>กำไรสุทธิ</div>
+                <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {db.thb(profit)}
+                </div>
+              </div>
+            </>
+          )}
           <div>
             <div className="muted" style={{ fontSize: 10.5 }}>ระยะทาง</div>
             <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.fmt(distance)} km</div>

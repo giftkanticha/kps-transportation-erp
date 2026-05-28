@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
+import { useAuth } from '../../context/AuthContext'
 import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -274,7 +275,7 @@ function LegModal({
   )
 }
 
-function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelRound | null }) {
+function ClosedSummary({ round, fuelRound, isManager }: { round: Dispatch; fuelRound: FuelRound | null; isManager: boolean }) {
   const legs = round.legs ?? []
   const revenue = db.roundRevenue(round)
   const perDiemTotal = db.roundPerDiem(round)
@@ -305,7 +306,8 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
                 <div style={{ fontWeight: 600 }}>📍 START FULL — {startR.location}</div>
                 <div className="muted" style={{ marginTop: 2 }}>
                   ⏰ {startR.at.slice(11, 16)} ({db.fmt(startR.mileage)} km) ·
-                  🛢️ {startR.liters} L · 💰 ฿{db.fmt(startR.cost)} <em>(คิดในรอบก่อน)</em>
+                  🛢️ {startR.liters} L
+                  {isManager && <> · 💰 ฿{db.fmt(startR.cost)} <em>(คิดในรอบก่อน)</em></>}
                 </div>
               </div>
             )}
@@ -314,7 +316,8 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
                 <div style={{ fontWeight: 600 }}>➕ INTERMEDIATE #{i + 1} — {r.location}</div>
                 <div className="muted" style={{ marginTop: 2 }}>
                   ⏰ {r.at.slice(11, 16)} ({db.fmt(r.mileage)} km) ·
-                  🛢️ {r.liters} L · 💰 ฿{db.fmt(r.cost)}
+                  🛢️ {r.liters} L
+                  {isManager && <> · 💰 ฿{db.fmt(r.cost)}</>}
                 </div>
               </div>
             ))}
@@ -323,7 +326,8 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
                 <div style={{ fontWeight: 600 }}>🏁 END FULL — {endR.location}</div>
                 <div className="muted" style={{ marginTop: 2 }}>
                   ⏰ {endR.at.slice(11, 16)} ({db.fmt(endR.mileage)} km) ·
-                  🛢️ {endR.liters} L (จนเต็ม) · 💰 ฿{db.fmt(endR.cost)}
+                  🛢️ {endR.liters} L (จนเต็ม)
+                  {isManager && <> · 💰 ฿{db.fmt(endR.cost)}</>}
                 </div>
               </div>
             )}
@@ -349,10 +353,12 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
                       {kmPerL?.toFixed(2) ?? '—'} km/L {isLow && '⚠️'}
                     </td>
                   </tr>
-                  <tr>
-                    <td style={{ fontWeight: 600 }}>💰 Fuel cost:</td>
-                    <td className="num right" style={{ fontWeight: 700 }}>฿{db.fmt(fuelCost)}</td>
-                  </tr>
+                  {isManager && (
+                    <tr>
+                      <td style={{ fontWeight: 600 }}>💰 Fuel cost:</td>
+                      <td className="num right" style={{ fontWeight: 700 }}>฿{db.fmt(fuelCost)}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -360,7 +366,8 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
         </div>
       )}
 
-      {/* P&L summary */}
+      {/* P&L summary — manager+ only; drivers see distance/KM-L below only */}
+      {isManager && (
       <div className="card">
         <div className="head"><h3>📊 สรุป P&amp;L</h3></div>
         <div style={{ padding: 18 }}>
@@ -485,11 +492,13 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }
 
 export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
+  const { isManager } = useAuth()
   const subj = subject as { type?: string; id?: string } | null
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -769,7 +778,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
         )}
       </div>
 
-      {isClosed && <ClosedSummary round={round} fuelRound={fuelRound} />}
+      {isClosed && <ClosedSummary round={round} fuelRound={fuelRound} isManager={isManager} />}
 
       {editingLeg && (
         <LegModal
