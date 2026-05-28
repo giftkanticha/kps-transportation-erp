@@ -7,6 +7,7 @@ import { Sidebar } from './components/layout/Sidebar'
 import { Topbar } from './components/layout/Topbar'
 import { UserManagementPage } from './pages/admin/UserManagementPage'
 import { ResetDataPage } from './pages/admin/ResetDataPage'
+import { ResetHistoryPage } from './pages/admin/ResetHistoryPage'
 import { Dashboard } from './pages/dashboard/Dashboard'
 import { AlertsTasksPage } from './pages/dashboard/AlertsTasksPage'
 import { VehiclesPage } from './pages/vehicles/VehiclesPage'
@@ -80,6 +81,7 @@ const crumbMap: Record<string, string> = {
   'settings.company': 'ตั้งค่า • บริษัท',
   'admin.users': 'จัดการผู้ใช้งาน',
   'admin.reset': 'รีเซตข้อมูล',
+  'admin.reset.history': 'ประวัติการรีเซต',
 }
 
 export default function App() {
@@ -216,12 +218,14 @@ export default function App() {
       case 'settings.users':
         return <SettingsUsers />
       case 'settings.company':
-        return <SettingsCompany />
+        return <SettingsCompany setActive={setActive} />
 
       case 'admin.users':
         return isAdmin ? <UserManagementPage /> : <Dashboard user={legacyUser} setActive={setActive} />
       case 'admin.reset':
-        return isAdmin ? <ResetDataPage /> : <Dashboard user={legacyUser} setActive={setActive} />
+        return isAdmin ? <ResetDataPage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
+      case 'admin.reset.history':
+        return isAdmin ? <ResetHistoryPage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
 
       default:
         return <Dashboard user={legacyUser} setActive={setActive} />

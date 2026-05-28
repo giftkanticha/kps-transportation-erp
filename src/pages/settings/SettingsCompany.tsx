@@ -14,7 +14,7 @@ interface CompanySettings {
 
 const EMPTY: CompanySettings = { id: 1, name: '', taxId: '', phone: '', email: '', address: '' }
 
-export function SettingsCompany() {
+export function SettingsCompany({ setActive }: { setActive?: (id: string) => void }) {
   const { isAdmin } = useAuth()
   const { data: rows = [], isLoading } = useList<CompanySettings>('company_settings')
   const updateSettings = useUpdate<CompanySettings>('company_settings')
@@ -101,6 +101,35 @@ export function SettingsCompany() {
           </>
         )}
       </div>
+
+      {isAdmin && setActive && (
+        <div
+          className="card pad"
+          style={{
+            maxWidth: 720,
+            marginTop: 32,
+            border: '1px solid #fecaca',
+            background: '#fff5f5',
+          }}
+        >
+          <h3 className="section-title" style={{ color: '#991b1b' }}>ส่วนอันตราย (Danger Zone)</h3>
+          <div className="muted" style={{ fontSize: 13, marginBottom: 14 }}>
+            การลบข้อมูลถาวร — ใช้เฉพาะเมื่อต้องการเริ่มจากศูนย์ ระบบจะให้ดาวน์โหลดสำรองข้อมูลก่อนทุกครั้ง
+          </div>
+          <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <button
+              className="btn"
+              style={{ borderColor: '#fca5a5', color: '#991b1b' }}
+              onClick={() => setActive('admin.reset')}
+            >
+              <Icon name="refresh" size={14} /> เปิดหน้ารีเซตข้อมูล
+            </button>
+            <button className="btn" onClick={() => setActive('admin.reset.history')}>
+              <Icon name="history" size={14} /> ดูประวัติการรีเซต
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
