@@ -2,18 +2,35 @@ import { useState, useMemo } from 'react'
 import { db, uid } from '../../lib/db'
 import { useList, useInsert, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { FuelStock, FuelTransaction, Vehicle, User } from '../../types'
+import type { FuelStock, FuelTransaction, Vehicle, User, Partner, ExpenseHeader, ExpenseLine } from '../../types'
 import { Icon, Field, PrintButton } from '../../components/ui'
 
-const FUEL_SUPPLIERS = [
-  'บริษัท ปตท. น้ำมัน จำกัด',
-  'บริษัท บางจาก คอร์ปอเรชั่น จำกัด',
-  'บริษัท เชลล์ แห่งประเทศไทย จำกัด',
-  'บริษัท เอสโซ่ (ประเทศไทย) จำกัด',
-  'อื่นๆ (ระบุในช่องหมายเหตุ)',
-]
-
+const FUEL_PARTNER_TYPE = 'ซัพพลายเออร์น้ำมัน'
 const PAGE_SIZE = 20
+
+// EXP-YYYYMMDD-NNN code generator, mirrored from ExpensesModule so fuel
+// auto-expenses share the same numbering scheme as manually entered ones.
+function genExpCode(headers: ExpenseHeader[]): string {
+  const now = new Date()
+  const yyyymmdd =
+    String(now.getFullYear()) +
+    String(now.getMonth() + 1).padStart(2, '0') +
+    String(now.getDate()).padStart(2, '0')
+  const prefix = `EXP-${yyyymmdd}-`
+  const existing = headers.filter(h => h.code?.startsWith(prefix))
+  return prefix + String(existing.length + 1).padStart(3, '0')
+}
+
+// Next FUEL-NNN partner code based on whatever's already in the partners table.
+function nextFuelPartnerCode(partners: Partner[]): string {
+  const maxN = partners
+    .filter(p => p.code?.startsWith('FUEL-'))
+    .reduce((max, p) => {
+      const n = parseInt(p.code.slice(5), 10)
+      return Number.isNaN(n) ? max : Math.max(max, n)
+    }, 0)
+  return 'FUEL-' + String(maxN + 1).padStart(3, '0')
+}
 
 // ─── Modal overlay ────────────────────────────────────────────────────────────
 function ModalOverlay({ children, onClose, className }: { children: React.ReactNode; onClose: () => void; className?: string }) {
@@ -41,31 +58,93 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
     date: todayISO,
     liters: '',
     pricePerL: '',
-    supplier: '',
+    supplierId: '',       // partner.id, or '__new__' to create
+    newSupplierName: '',  // used when supplierId === '__new__'
     invoiceNo: '',
+    recordExpense: true,  // checkbox — auto-create expense_header alongside the stock entry
   })
   const [err, setErr] = useState('')
   const [saving, setSaving] = useState(false)
-  const insertStock = useInsert<FuelStock>('fuel_stock')
-  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  const { data: partners = [] } = useList<Partner>('partners')
+  const { data: expenseHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const insertStock        = useInsert<FuelStock>('fuel_stock')
+  const insertPartner      = useInsert<Partner>('partners')
+  const insertExpenseHdr   = useInsert<ExpenseHeader>('expense_headers')
+  const insertExpenseLine  = useInsert<ExpenseLine>('expense_lines')
+
+  const fuelSuppliers = useMemo(
+    () => partners.filter(p => p.type === FUEL_PARTNER_TYPE && p.status === 'active'),
+    [partners],
+  )
+
+  const set = (k: keyof typeof form, v: string | boolean) => setForm(f => ({ ...f, [k]: v }))
   const total = (Number(form.liters) || 0) * (Number(form.pricePerL) || 0)
   const isBackdated = form.date < todayISO
+  const isNewSupplier = form.supplierId === '__new__'
+  const canRecordExpense = total > 0  // need a price to book AP
 
   const save = async () => {
     if (!form.liters || Number(form.liters) <= 0) return setErr('กรุณาระบุจำนวนลิตร (> 0)')
-    if (!form.supplier) return setErr('กรุณาเลือกแหล่งที่มา')
-    if (form.date > todayISO) return setErr('วันที่เกิดเหตุไม่สามารถเป็นอนาคตได้')
+    if (!form.supplierId)                          return setErr('กรุณาเลือกผู้จำหน่าย')
+    if (isNewSupplier && !form.newSupplierName.trim())
+                                                    return setErr('กรุณากรอกชื่อผู้จำหน่ายใหม่')
+    if (form.date > todayISO)                       return setErr('วันที่เกิดเหตุไม่สามารถเป็นอนาคตได้')
+
     setSaving(true)
     try {
+      // 1) Resolve partner — create a new one inline if requested.
+      let partnerId = form.supplierId
+      let partnerName = ''
+      if (isNewSupplier) {
+        const created = await insertPartner.mutateAsync({
+          code: nextFuelPartnerCode(partners),
+          name: form.newSupplierName.trim(),
+          type: FUEL_PARTNER_TYPE,
+          status: 'active',
+        })
+        partnerId = created.id
+        partnerName = created.name
+      } else {
+        partnerName = partners.find(p => p.id === partnerId)?.name ?? ''
+      }
+
+      // 2) Optionally book the purchase as an AP expense, linked back to fuel_stock.
+      let expenseHeaderId: string | null = null
+      if (form.recordExpense && canRecordExpense) {
+        const header = await insertExpenseHdr.mutateAsync({
+          code: genExpCode(expenseHeaders),
+          date: form.date,
+          vehicleId: null as unknown as string,  // fuel-in is company-wide, not per vehicle
+          partnerId,
+          odometer: 0,
+          paid: false,
+          dueDate: '',
+          total,
+          lineCount: 1,
+          note: `น้ำมันเข้าคลัง ${form.liters} ลิตร${form.invoiceNo ? ` · ${form.invoiceNo}` : ''}`,
+        })
+        await insertExpenseLine.mutateAsync({
+          headerId: header.id,
+          item: 'น้ำมันดีเซล',
+          qty: Number(form.liters),
+          unitPrice: Number(form.pricePerL),
+          amount: total,
+        })
+        expenseHeaderId = header.id
+      }
+
+      // 3) Write the fuel_stock entry, linked to the expense if one was created.
       await insertStock.mutateAsync({
         id: uid('fs'),
         date: form.date,
         recordedAt: new Date().toISOString(),
-        supplier: form.supplier,
+        supplier: partnerName,        // keep readable string for legacy reports
         liters: Number(form.liters),
         pricePerL: Number(form.pricePerL) || 0,
         invoiceNo: form.invoiceNo,
         total,
+        expenseHeaderId,
       })
       onSaved()
     } catch (e) {
@@ -115,11 +194,28 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
           </div>
 
           <Field label="แหล่งน้ำมัน / ผู้จำหน่าย *">
-            <select value={form.supplier} onChange={e => set('supplier', e.target.value)}>
+            <select value={form.supplierId} onChange={e => set('supplierId', e.target.value)}>
               <option value="">-- เลือกผู้จำหน่าย --</option>
-              {FUEL_SUPPLIERS.map(s => <option key={s} value={s}>{s}</option>)}
+              {fuelSuppliers.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+              <option value="__new__">+ เพิ่มผู้จำหน่ายใหม่</option>
             </select>
           </Field>
+
+          {isNewSupplier && (
+            <Field label="ชื่อผู้จำหน่ายใหม่ *">
+              <input
+                value={form.newSupplierName}
+                onChange={e => set('newSupplierName', e.target.value)}
+                placeholder="เช่น บริษัท สตาร์ปิโตรเลียม"
+                autoFocus
+              />
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                จะถูกเพิ่มเข้าทะเบียนคู่ค้า (type: ซัพพลายเออร์น้ำมัน) อัตโนมัติ
+              </div>
+            </Field>
+          )}
 
           <div className="grid-2" style={{ gap: 14 }}>
             <Field label="ราคา/ลิตร (บาท)">
@@ -136,6 +232,31 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
               <span className="mono" style={{ fontSize: 17, fontWeight: 700, color: 'var(--primary)' }}>{db.thb(total)}</span>
             </div>
           )}
+
+          <label
+            style={{
+              display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px',
+              border: '1px solid var(--line)', borderRadius: 8, cursor: canRecordExpense ? 'pointer' : 'not-allowed',
+              background: form.recordExpense && canRecordExpense ? 'var(--primary-50)' : 'var(--bg-sunk)',
+              opacity: canRecordExpense ? 1 : 0.55,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={form.recordExpense && canRecordExpense}
+              disabled={!canRecordExpense}
+              onChange={e => set('recordExpense', e.target.checked)}
+              style={{ marginTop: 3, accentColor: 'var(--primary)' }}
+            />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>บันทึกเป็นค่าใช้จ่ายด้วย</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                {canRecordExpense
+                  ? 'สร้างใบค่าใช้จ่ายผูกกับผู้จำหน่ายอัตโนมัติ (status: ยังไม่ชำระ) — partner.balance จะอัปเดต'
+                  : 'ใส่ราคา/ลิตรก่อนเพื่อสร้างค่าใช้จ่าย — ปลดเช็คได้ถ้าเป็น "ยอดยกมา"'}
+              </div>
+            </div>
+          </label>
         </div>
 
         <div className="btn-row" style={{ marginTop: 22, justifyContent: 'flex-end' }}>

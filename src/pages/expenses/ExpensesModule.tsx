@@ -1933,7 +1933,7 @@ function typeColor(t: string): string {
   return 'gray'
 }
 
-const PARTNER_TYPES = ['ช่างภายนอก', 'ร้านอะไหล่', 'ร้านค้าทั่วไป', 'คลัง KPS', 'อื่นๆ']
+const PARTNER_TYPES = ['ช่างภายนอก', 'ร้านอะไหล่', 'ร้านค้าทั่วไป', 'คลัง KPS', 'ซัพพลายเออร์น้ำมัน', 'อื่นๆ']
 
 function VendorEditModal({
   partner,
