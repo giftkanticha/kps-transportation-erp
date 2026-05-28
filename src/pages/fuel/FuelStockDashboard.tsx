@@ -444,11 +444,12 @@ interface HistoryModalProps {
   onClose: () => void
   canEdit?: boolean
   canDelete?: boolean
+  canSeeMoney?: boolean
   onEdit?: (stock: FuelStock) => void
   onDelete?: (id: string) => void
 }
 
-function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, onEdit, onDelete }: HistoryModalProps) {
+function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canSeeMoney = true, onEdit, onDelete }: HistoryModalProps) {
   const [page, setPage] = useState(1)
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
@@ -533,8 +534,8 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, onEd
                 {type === 'in' ? (
                   <>
                     <th>ผู้จำหน่าย</th>
-                    <th className="num right">ราคา/ลิตร</th>
-                    <th className="num right">มูลค่า</th>
+                    {canSeeMoney && <th className="num right">ราคา/ลิตร</th>}
+                    {canSeeMoney && <th className="num right">มูลค่า</th>}
                     <th>เลขใบส่งของ</th>
                     <th>บันทึกเมื่อ</th>
                   </>
@@ -552,7 +553,9 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, onEd
             </thead>
             <tbody className="hist-screen-only">
               {paginated.length === 0 ? (
-                <tr><td colSpan={type === 'in' ? (canEdit || canDelete ? 9 : 8) : 7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
+                <tr><td colSpan={type === 'in'
+                  ? 5 + (canSeeMoney ? 2 : 0) + (canEdit || canDelete ? 1 : 0)
+                  : 7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
               ) : paginated.map(r => {
                 const balance = balanceMap[(r as { id: string }).id]
                 if (type === 'in') {
@@ -566,8 +569,8 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, onEd
                       </td>
                       <td className="num right mono" style={{ color: 'var(--green)', fontWeight: 600 }}>+{db.fmt(s.liters)}</td>
                       <td style={{ maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.supplier}</td>
-                      <td className="num right mono muted">{s.pricePerL ? s.pricePerL.toFixed(2) : '—'}</td>
-                      <td className="num right mono">{s.total ? db.thb(s.total) : '—'}</td>
+                      {canSeeMoney && <td className="num right mono muted">{s.pricePerL ? s.pricePerL.toFixed(2) : '—'}</td>}
+                      {canSeeMoney && <td className="num right mono">{s.total ? db.thb(s.total) : '—'}</td>}
                       <td className="muted" style={{ fontSize: 12 }}>{s.invoiceNo || '—'}</td>
                       <td className="muted" style={{ fontSize: 11 }}>
                         {s.recordedAt ? new Date(s.recordedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
@@ -632,8 +635,8 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, onEd
                       <td className="mono">{db.thaiDate(s.date)}</td>
                       <td className="num right mono" style={{ color: 'var(--green)', fontWeight: 600 }}>+{db.fmt(s.liters)}</td>
                       <td>{s.supplier}</td>
-                      <td className="num right mono">{s.pricePerL ? s.pricePerL.toFixed(2) : '—'}</td>
-                      <td className="num right mono">{s.total ? db.thb(s.total) : '—'}</td>
+                      {canSeeMoney && <td className="num right mono">{s.pricePerL ? s.pricePerL.toFixed(2) : '—'}</td>}
+                      {canSeeMoney && <td className="num right mono">{s.total ? db.thb(s.total) : '—'}</td>}
                       <td>{s.invoiceNo || '—'}</td>
                       <td>{s.recordedAt ? new Date(s.recordedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
                       <td className="num right mono" style={{ fontWeight: 600 }}>{balance != null ? db.fmt(balance) : '—'}</td>
@@ -689,7 +692,7 @@ export function FuelStockDashboard() {
   // Auth source moved to Supabase — db.currentUser() reads the legacy
   // localStorage session which is now empty, so the admin-only buttons
   // were never rendering.
-  const { isAdmin, legacyUser } = useAuth()
+  const { isAdmin, isManager, legacyUser } = useAuth()
   const canAdd = legacyUser?.role !== 'driver'
   const canEdit = isAdmin
   const canDelete = isAdmin
@@ -766,7 +769,9 @@ export function FuelStockDashboard() {
           <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8, color: currentBalance < 100 ? 'var(--red)' : 'var(--green)' }}>
             {db.fmt(Math.max(0, currentBalance))} <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>ลิตร</span>
           </div>
-          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>ราคาเฉลี่ย {avgPrice.toFixed(2)} บาท/ลิตร</div>
+          {isManager && (
+            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>ราคาเฉลี่ย {avgPrice.toFixed(2)} บาท/ลิตร</div>
+          )}
         </div>
         <div className="card kpi">
           <div className="label">📥 เข้าวันนี้</div>
@@ -785,7 +790,9 @@ export function FuelStockDashboard() {
           <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8 }}>
             {db.fmt(totalLitersEver)} <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>ลิตร</span>
           </div>
-          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>{allFuelStock.length} รายการ · {db.thb(totalStockValue)}</div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
+            {allFuelStock.length} รายการ{isManager && ` · ${db.thb(totalStockValue)}`}
+          </div>
         </div>
       </div>
 
@@ -808,8 +815,8 @@ export function FuelStockDashboard() {
                   <th>วันที่เกิดเหตุ</th>
                   <th>ผู้จำหน่าย</th>
                   <th className="right">ลิตร</th>
-                  <th className="right">ราคา/ลิตร</th>
-                  <th className="right">มูลค่า</th>
+                  {isManager && <th className="right">ราคา/ลิตร</th>}
+                  {isManager && <th className="right">มูลค่า</th>}
                   <th>เลขใบส่งของ</th>
                   <th>บันทึกเมื่อ</th>
                   <th className="right">ยอดสะสม</th>
@@ -827,8 +834,8 @@ export function FuelStockDashboard() {
                       </td>
                       <td style={{ maxWidth: 180, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.supplier}</td>
                       <td className="num right mono" style={{ color: '#166534', fontWeight: 600 }}>+{db.fmt(s.liters)}</td>
-                      <td className="num right muted" style={{ fontSize: 12 }}>{s.pricePerL ? s.pricePerL.toFixed(2) : '—'}</td>
-                      <td className="num right mono">{s.total ? db.thb(s.total) : '—'}</td>
+                      {isManager && <td className="num right muted" style={{ fontSize: 12 }}>{s.pricePerL ? s.pricePerL.toFixed(2) : '—'}</td>}
+                      {isManager && <td className="num right mono">{s.total ? db.thb(s.total) : '—'}</td>}
                       <td className="muted" style={{ fontSize: 12 }}>{s.invoiceNo || '—'}</td>
                       <td className="muted" style={{ fontSize: 11 }}>
                         {s.recordedAt ? new Date(s.recordedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
@@ -925,6 +932,7 @@ export function FuelStockDashboard() {
           onClose={() => setHistoryType(null)}
           canEdit={canEdit}
           canDelete={canDelete}
+          canSeeMoney={isManager}
           onEdit={(s) => { setHistoryType(null); setEditingStock(s) }}
           onDelete={(id) => { void deleteStockIn(id) }}
         />

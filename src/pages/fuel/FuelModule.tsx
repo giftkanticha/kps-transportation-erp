@@ -5,6 +5,7 @@ import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import { VehiclePickerSidebar } from '../../components/ui/VehiclePickerSidebar'
 import { usePrint } from '../../hooks/usePrint'
+import { useAuth } from '../../context/AuthContext'
 import type { CSSProperties } from 'react'
 import type { FuelRecord, Vehicle, Employee } from '../../types'
 import { FuelStockDashboard } from './FuelStockDashboard'
@@ -49,6 +50,7 @@ type FuelVal = { liters: number; amount: number }
 
 // ─── Tab 2: บันทึก ─── (Fuel record form)
 function FuelRecord() {
+  const { isManager } = useAuth()
   const [form, setForm] = useState({
     vehicleId: '',
     driverId: '',
@@ -241,7 +243,7 @@ function FuelRecord() {
                 <th>วันที่</th>
                 <th>ทะเบียนรถ</th>
                 <th className="right">ปริมาณ (ลิตร)</th>
-                <th className="right">จำนวนเงิน</th>
+                {isManager && <th className="right">จำนวนเงิน</th>}
                 <th>คนขับ</th>
                 <th>แหล่งน้ำมัน</th>
               </tr>
@@ -256,9 +258,11 @@ function FuelRecord() {
                     </a>
                   </td>
                   <td className="num right">{f.liters}</td>
-                  <td className="num right" style={{ fontWeight: 600 }}>
-                    {db.fmt(f.total)} บาท
-                  </td>
+                  {isManager && (
+                    <td className="num right" style={{ fontWeight: 600 }}>
+                      {db.fmt(f.total)} บาท
+                    </td>
+                  )}
                   <td>{employees.find(e => e.id === f.driverId)?.name ?? '—'}</td>
                   <td>
                     {isExternal(f.station) ? (

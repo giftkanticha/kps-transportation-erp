@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { uid } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
+import { useAuth } from '../../context/AuthContext'
 import { Icon } from '../../components/ui/Icon'
 import { QuickOpenTripModal } from './QuickOpenTripModal'
 import type { CSSProperties } from 'react'
@@ -241,6 +242,7 @@ interface FloatingToast {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => void }) {
+  const { isManager } = useAuth()
   const [rows, setRows] = useState<GridRow[]>([makeRow()])
   const [toast, setToast] = useState<FloatingToast | null>(null)
   const [quickOpenCtx, setQuickOpenCtx] = useState<{ vehicleId: string; date: string; floatingTxId: string } | null>(null)
@@ -590,12 +592,17 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#F8FAFC', borderBottom: '2px solid #E2E8F0' }}>
-                {['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ'].map((h, hi) => (
+                {(isManager
+                  ? ['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ']
+                  : ['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ']
+                ).map((h, hi) => (
                   <th key={hi} style={{
                     padding: '9px 12px',
-                    textAlign: hi === 0 ? 'center' : hi >= 3 && hi <= 4 ? 'right' : hi === 7 ? 'center' : 'left',
+                    textAlign: hi === 0 ? 'center' : hi === 3 || (isManager && hi === 4) ? 'right' : hi === (isManager ? 7 : 6) ? 'center' : 'left',
                     color: '#64748B', fontSize: 11, fontWeight: 700,
-                    width: [40, 130, 155, 95, 110, 165, undefined, 120][hi],
+                    width: (isManager
+                      ? [40, 130, 155, 95, 110, 165, undefined, 120]
+                      : [40, 130, 155, 95, 165, undefined, 120])[hi],
                     whiteSpace: 'nowrap',
                   }}>{h}</th>
                 ))}
@@ -710,31 +717,33 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                       )}
                     </td>
 
-                    {/* ราคา/ลิตร */}
-                    <td style={{ padding: '5px 7px' }}>
-                      {isEditing ? (
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.5"
-                          value={editDraft.pricePerL}
-                          onChange={e => setEditDraft(d => ({ ...d, pricePerL: e.target.value }))}
-                          style={{ ...cellInput, textAlign: 'right' }}
-                        />
-                      ) : (
-                        <input
-                          id={`cell-${i}-3`}
-                          type="number"
-                          min="0"
-                          step="0.5"
-                          value={row.pricePerL}
-                          disabled={locked || row.reversed}
-                          onChange={e => patchRow(i, { pricePerL: e.target.value })}
-                          onKeyDown={onKeyDown(i, false)}
-                          style={{ ...cellInput, textAlign: 'right', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
-                        />
-                      )}
-                    </td>
+                    {/* ราคา/ลิตร — manager+ only */}
+                    {isManager && (
+                      <td style={{ padding: '5px 7px' }}>
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={editDraft.pricePerL}
+                            onChange={e => setEditDraft(d => ({ ...d, pricePerL: e.target.value }))}
+                            style={{ ...cellInput, textAlign: 'right' }}
+                          />
+                        ) : (
+                          <input
+                            id={`cell-${i}-3`}
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={row.pricePerL}
+                            disabled={locked || row.reversed}
+                            onChange={e => patchRow(i, { pricePerL: e.target.value })}
+                            onKeyDown={onKeyDown(i, false)}
+                            style={{ ...cellInput, textAlign: 'right', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
+                          />
+                        )}
+                      </td>
+                    )}
 
                     {/* แหล่ง */}
                     <td style={{ padding: '5px 7px' }}>

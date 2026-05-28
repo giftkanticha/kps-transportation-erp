@@ -45,7 +45,7 @@ const MENU: MenuItem[] = [
     ],
   },
   {
-    id: 'fuel', label: 'ระบบน้ำมัน', icon: 'fuel', roles: ['admin', 'manager'],
+    id: 'fuel', label: 'ระบบน้ำมัน', icon: 'fuel', roles: ['admin', 'manager', 'driver'],
     sub: [
       { id: 'fuel', label: 'ภาพรวมคลังน้ำมัน', icon: 'gauge' },
       { id: 'fuel.express', label: 'คีย์ด่วนน้ำมัน', icon: 'bolt' },
