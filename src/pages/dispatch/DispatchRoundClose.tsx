@@ -648,6 +648,37 @@ function CloseForm({
                       placeholder={isPerKg ? '0' : '0.00'}
                       disabled={isClosed}
                     />
+                    {/* For per_ton: when the entered value would be more than
+                        100 ตัน or 3x the loaded weight, assume the user typed
+                        the kg figure from the weighbridge by mistake and offer
+                        a one-click conversion. */}
+                    {!isPerKg && !isLump && dwTon > 0 && (
+                      (dwTon > 100 || (l.weight && dwTon > l.weight * 3)) ? (
+                        <div style={{ fontSize: 11, marginTop: 4, color: 'var(--red)', fontWeight: 600, lineHeight: 1.6 }}>
+                          ⚠️ {dwTon.toLocaleString()} ตัน สูงผิดปกติ — น่าจะกรอกจากใบชั่ง (กก.) ผิดหน่วย
+                          {!isClosed && (
+                            <>
+                              {' '}
+                              <button
+                                type="button"
+                                onClick={() => updateLegState(i, { deliveredWeight: String(dwTon / 1000) })}
+                                style={{
+                                  marginLeft: 4, padding: '2px 8px', fontSize: 11, fontWeight: 600,
+                                  background: 'var(--red)', color: '#fff', border: 'none',
+                                  borderRadius: 4, cursor: 'pointer',
+                                }}
+                              >
+                                แปลงเป็น {(dwTon / 1000).toLocaleString()} ตัน
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                          = {(dwTon * 1000).toLocaleString()} กก.
+                        </div>
+                      )
+                    )}
                   </Field>
                 )}
                 <Field label="เบี้ยเลี้ยง (฿)">
