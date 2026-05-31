@@ -24,21 +24,28 @@ export function FuelDailyPricesPage() {
   const updatePrice = useUpdate<FuelDailyPrice>('fuel_daily_prices')
   const deletePrice = useDelete('fuel_daily_prices')
 
-  const [filterSource, setFilterSource] = useState<'ALL' | 'EXTERNAL_PUMP' | 'FACTORY_TANK'>('ALL')
   const [filterMonth, setFilterMonth] = useState<string>(new Date().toISOString().slice(0, 7))
   const [showAdd, setShowAdd] = useState(false)
   const [editing, setEditing] = useState<FuelDailyPrice | null>(null)
 
-  const filtered = useMemo(() => {
-    return prices
-      .filter(p => filterSource === 'ALL' || p.source === filterSource)
-      .filter(p => !filterMonth || p.date.startsWith(filterMonth))
-      .sort((a, b) => b.date.localeCompare(a.date) || a.source.localeCompare(b.source))
-  }, [prices, filterSource, filterMonth])
+  // Factory tank only. External pump prices vary per station/province so
+  // drivers always type from the receipt instead of pulling from a table.
+  const factoryPrices = useMemo(
+    () => prices.filter(p => p.source === 'FACTORY_TANK'),
+    [prices],
+  )
 
-  // Latest known price for each source (used as the "current" headline above)
-  const latestExternal = useMemo(() => priceForDate(prices, 'EXTERNAL_PUMP', new Date().toISOString().slice(0, 10)), [prices])
-  const latestFactory  = useMemo(() => priceForDate(prices, 'FACTORY_TANK',  new Date().toISOString().slice(0, 10)), [prices])
+  const filtered = useMemo(() => {
+    return factoryPrices
+      .filter(p => !filterMonth || p.date.startsWith(filterMonth))
+      .sort((a, b) => b.date.localeCompare(a.date))
+  }, [factoryPrices, filterMonth])
+
+  // Latest known factory-tank price (the headline above)
+  const latestFactory = useMemo(
+    () => priceForDate(factoryPrices, 'FACTORY_TANK', new Date().toISOString().slice(0, 10)),
+    [factoryPrices],
+  )
 
   if (!isManager) {
     return (
@@ -52,9 +59,13 @@ export function FuelDailyPricesPage() {
     <div>
       <div className="page-head">
         <div>
-          <h1 className="page-title">ราคาน้ำมันรายวัน</h1>
+          <h1 className="page-title">ราคาน้ำมันโรงงานรายวัน</h1>
           <div className="page-sub">
-            ตั้งราคาน้ำมัน (บาท/ลิตร) ต่อวัน · ใช้ใน "คีย์ด่วนน้ำมัน" อัตโนมัติ · พนักงานไม่ต้องกรอกเอง
+            ตั้งราคาน้ำมัน <strong>ถังโรงงาน</strong> (บาท/ลิตร) ต่อวัน · ใช้ใน "คีย์ด่วนน้ำมัน" อัตโนมัติ
+            <br />
+            <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+              💡 ปั๊มภายนอก — ราคาขึ้นกับปั๊ม/จังหวัด พนักงานกรอกตามใบเสร็จเองทุกครั้ง
+            </span>
           </div>
         </div>
         <div className="actions">
@@ -64,35 +75,19 @@ export function FuelDailyPricesPage() {
         </div>
       </div>
 
-      {/* Current price headlines */}
-      <div className="grid-2" style={{ gap: 14, marginBottom: 18 }}>
-        <div className="card kpi">
-          <div className="label">🟠 ปั๊มภายนอก — ราคาล่าสุด</div>
-          <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8, color: latestExternal != null ? 'var(--text)' : 'var(--text-muted)' }}>
-            {latestExternal != null ? latestExternal.toFixed(2) : '—'}
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500, marginLeft: 6 }}>บาท/ลิตร</span>
-          </div>
-        </div>
-        <div className="card kpi">
-          <div className="label">🟢 ถังโรงงาน — ราคาล่าสุด</div>
-          <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8, color: latestFactory != null ? 'var(--text)' : 'var(--text-muted)' }}>
-            {latestFactory != null ? latestFactory.toFixed(2) : '—'}
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500, marginLeft: 6 }}>บาท/ลิตร</span>
-          </div>
+      {/* Current price headline */}
+      <div className="card kpi" style={{ marginBottom: 18, maxWidth: 380 }}>
+        <div className="label">🟢 ถังโรงงาน — ราคาล่าสุด</div>
+        <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8, color: latestFactory != null ? 'var(--text)' : 'var(--text-muted)' }}>
+          {latestFactory != null ? latestFactory.toFixed(2) : '—'}
+          <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500, marginLeft: 6 }}>บาท/ลิตร</span>
         </div>
       </div>
 
-      {/* Filters */}
+      {/* Filter */}
       <div className="card pad" style={{ marginBottom: 14, display: 'flex', gap: 14, alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <Field label="เดือน">
           <input type="month" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={{ width: 160 }} />
-        </Field>
-        <Field label="แหล่งน้ำมัน">
-          <select value={filterSource} onChange={e => setFilterSource(e.target.value as typeof filterSource)} style={{ width: 200 }}>
-            <option value="ALL">ทั้งหมด</option>
-            <option value="EXTERNAL_PUMP">🟠 ปั๊มภายนอก</option>
-            <option value="FACTORY_TANK">🟢 ถังโรงงาน</option>
-          </select>
         </Field>
         <div style={{ marginLeft: 'auto', fontSize: 12.5, color: 'var(--text-muted)' }}>
           {filtered.length} รายการ
@@ -105,7 +100,6 @@ export function FuelDailyPricesPage() {
           <thead>
             <tr>
               <th style={{ width: 130 }}>วันที่</th>
-              <th style={{ width: 170 }}>แหล่งน้ำมัน</th>
               <th className="num right" style={{ width: 140 }}>ราคา/ลิตร</th>
               <th>หมายเหตุ</th>
               <th style={{ width: 100 }}>กำหนดเมื่อ</th>
@@ -113,22 +107,15 @@ export function FuelDailyPricesPage() {
             </tr>
           </thead>
           <tbody>
-            {isLoading && <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center' }}>กำลังโหลด…</td></tr>}
+            {isLoading && <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center' }}>กำลังโหลด…</td></tr>}
             {!isLoading && filtered.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: 36, textAlign: 'center', color: 'var(--text-2)' }}>
+              <tr><td colSpan={5} style={{ padding: 36, textAlign: 'center', color: 'var(--text-2)' }}>
                 ยังไม่มีรายการในเดือนนี้ — กด "ตั้งราคาวันใหม่" เพื่อเพิ่ม
               </td></tr>
             )}
             {filtered.map(p => (
               <tr key={p.id}>
                 <td className="mono">{db.thaiDate(p.date)}</td>
-                <td>
-                  {p.source === 'EXTERNAL_PUMP' ? (
-                    <span className="badge" style={{ background: '#FFF7ED', color: '#C2410C', fontSize: 11.5 }}>🟠 ปั๊มภายนอก</span>
-                  ) : (
-                    <span className="badge" style={{ background: '#F0FDF4', color: '#166534', fontSize: 11.5 }}>🟢 ถังโรงงาน</span>
-                  )}
-                </td>
                 <td className="num right mono" style={{ fontWeight: 600 }}>{p.pricePerL.toFixed(2)}</td>
                 <td className="muted" style={{ fontSize: 12.5 }}>{p.notes || '—'}</td>
                 <td className="muted" style={{ fontSize: 11 }}>
@@ -203,7 +190,6 @@ function PriceModal({
   const today = new Date().toISOString().slice(0, 10)
   const [form, setForm] = useState({
     date: existing?.date ?? today,
-    source: (existing?.source ?? 'EXTERNAL_PUMP') as 'EXTERNAL_PUMP' | 'FACTORY_TANK',
     pricePerL: existing?.pricePerL != null ? String(existing.pricePerL) : '',
     notes: existing?.notes ?? '',
   })
@@ -221,7 +207,7 @@ function PriceModal({
     try {
       await onSave({
         date: form.date,
-        source: form.source,
+        source: 'FACTORY_TANK',
         pricePerL: price,
         notes: form.notes.trim(),
       })
@@ -234,26 +220,18 @@ function PriceModal({
     <div className="modal-bg" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
         <div className="head">
-          <h3>{existing ? '✏️ แก้ไขราคาน้ำมัน' : '💰 ตั้งราคาน้ำมันใหม่'}</h3>
+          <h3>{existing ? '✏️ แก้ไขราคาน้ำมันโรงงาน' : '💰 ตั้งราคาน้ำมันโรงงานใหม่'}</h3>
         </div>
         <div className="body">
           {err && (
             <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: '#DC2626' }}>{err}</div>
           )}
-          <div className="grid-2" style={{ gap: 14 }}>
-            <Field label="วันที่ *">
-              <input type="date" value={form.date} max={today} onChange={e => set('date', e.target.value)} />
-              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                ราคาจะใช้กับการเติมตั้งแต่วันนี้เป็นต้นไป จนกว่าจะมีราคาวันใหม่
-              </div>
-            </Field>
-            <Field label="แหล่งน้ำมัน *">
-              <select value={form.source} onChange={e => set('source', e.target.value as 'EXTERNAL_PUMP' | 'FACTORY_TANK')}>
-                <option value="EXTERNAL_PUMP">🟠 ปั๊มภายนอก</option>
-                <option value="FACTORY_TANK">🟢 ถังโรงงาน</option>
-              </select>
-            </Field>
-          </div>
+          <Field label="วันที่ *">
+            <input type="date" value={form.date} max={today} onChange={e => set('date', e.target.value)} />
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+              ราคานี้จะใช้กับการเติมตั้งแต่วันนี้เป็นต้นไป จนกว่าจะมีราคาวันใหม่
+            </div>
+          </Field>
           <div style={{ marginTop: 14 }}>
             <Field label="ราคา/ลิตร (บาท) *">
               <input

@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import { useList, useUpdate } from '../../hooks/useTable'
+import { useList, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { FuelTransaction, Vehicle } from '../../types'
+import { useAuth } from '../../context/AuthContext'
+import { Icon, Field } from '../../components/ui'
+import type { FuelTransaction, Vehicle, FuelRecord } from '../../types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -23,26 +25,31 @@ const STATUS_LABEL: Record<string, string> = {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function FloatingFuel() {
-  const [linkTx, setLinkTx] = useState<FuelTransaction | null>(null)
+  const { isManager, isAdmin } = useAuth()
+  const [linkTx, setLinkTx]   = useState<FuelTransaction | null>(null)
+  const [editTx, setEditTx]   = useState<FuelTransaction | null>(null)
   const [selectedDispatch, setSelectedDispatch] = useState('')
 
-  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: allFuelTxs = [] }  = useList<FuelTransaction>('fuel_transactions')
+  const { data: allFuelRecs = [] } = useList<FuelRecord>('fuel_records')
   const { data: allDispatches = [] } = useDispatches()
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
-  const linkFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
+  const { data: vehicles = [] }     = useList<Vehicle>('vehicles')
+  const updateFuelTx  = useUpdate<FuelTransaction>('fuel_transactions')
+  const updateFuelRec = useUpdate<FuelRecord>('fuel_records')
+  const deleteFuelTx  = useDelete('fuel_transactions')
+  const deleteFuelRec = useDelete('fuel_records')
 
   const floatingTxs = [...allFuelTxs]
     .filter(t => t.status === 'FLOATING')
     .sort((a, b) => b.date.localeCompare(a.date))
 
-  const openModal = (tx: FuelTransaction) => {
+  const openLinkModal = (tx: FuelTransaction) => {
     const candidates = allDispatches
       .filter(d => d.vehicleId === tx.vehicleId && d.status !== 'cancelled')
-      .sort((a, b) => {
-        const da = Math.abs(new Date(a.date).getTime() - new Date(tx.date).getTime())
-        const db2 = Math.abs(new Date(b.date).getTime() - new Date(tx.date).getTime())
-        return da - db2
-      })
+      .sort((a, b) =>
+        Math.abs(new Date(a.date).getTime() - new Date(tx.date).getTime()) -
+        Math.abs(new Date(b.date).getTime() - new Date(tx.date).getTime()),
+      )
     setLinkTx(tx)
     setSelectedDispatch(candidates[0]?.id ?? '')
   }
@@ -50,7 +57,7 @@ export function FloatingFuel() {
   const doLink = async () => {
     if (!linkTx || !selectedDispatch) return
     try {
-      await linkFuelTx.mutateAsync({
+      await updateFuelTx.mutateAsync({
         id: linkTx.id,
         patch: { tripId: selectedDispatch, status: 'TRIP_LINKED' },
       })
@@ -58,6 +65,50 @@ export function FloatingFuel() {
       setSelectedDispatch('')
     } catch (e) {
       alert('ผูกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
+  // Find the legacy fuel_records mirror for a tx (matched by date + vehicle +
+  // liters since Express Fuel Log inserts to both tables but doesn't store an FK).
+  const findMirror = (tx: FuelTransaction): FuelRecord | undefined =>
+    allFuelRecs.find(r =>
+      r.vehicleId === tx.vehicleId
+      && r.date === tx.date
+      && Math.abs(r.liters - tx.liters) < 0.01,
+    )
+
+  const saveEdit = async (patch: Partial<FuelTransaction>) => {
+    if (!editTx) return
+    try {
+      await updateFuelTx.mutateAsync({ id: editTx.id, patch })
+      const mirror = findMirror(editTx)
+      if (mirror) {
+        await updateFuelRec.mutateAsync({
+          id: mirror.id,
+          patch: {
+            date: patch.date ?? mirror.date,
+            vehicleId: patch.vehicleId ?? mirror.vehicleId,
+            liters: patch.liters ?? mirror.liters,
+            pricePerL: patch.pricePerL ?? mirror.pricePerL,
+            total: patch.total ?? mirror.total,
+            station: (patch.source ?? editTx.source) === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
+          },
+        })
+      }
+      setEditTx(null)
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
+  const removeTx = async (tx: FuelTransaction) => {
+    if (!confirm(`ลบรายการน้ำมันลอยนี้?\n${thaiDate(tx.date)} · ${fmt(tx.liters)} ลิตร`)) return
+    try {
+      await deleteFuelTx.mutateAsync(tx.id)
+      const mirror = findMirror(tx)
+      if (mirror) await deleteFuelRec.mutateAsync(mirror.id)
+    } catch (e) {
+      alert('ลบไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
   }
 
@@ -79,7 +130,7 @@ export function FloatingFuel() {
       <div className="page-head no-print">
         <div>
           <h1 className="page-title">🟡 น้ำมันลอย (Floating Fuel)</h1>
-          <div className="page-sub">รายการที่ยังไม่ได้ผูกรอบงาน — กด "ผูกรอบ" เพื่อเชื่อมกับใบงาน</div>
+          <div className="page-sub">รายการที่ยังไม่ได้ผูกรอบงาน — กด "ผูกรอบ" เพื่อเชื่อมกับใบงาน{isAdmin && ' · แอดมินแก้ไข/ลบรายการได้'}</div>
         </div>
       </div>
 
@@ -102,9 +153,13 @@ export function FloatingFuel() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#FFFBEB', borderBottom: '1px solid #FDE68A' }}>
-                {['วันที่', 'ทะเบียน', 'ลิตร', 'จำนวนเงิน', 'แหล่ง', 'รอบงานแนะนำ', ''].map((h, i) => (
+                {(isManager
+                  ? ['วันที่', 'ทะเบียน', 'ลิตร', 'จำนวนเงิน', 'แหล่ง', 'รอบงานแนะนำ', '']
+                  : ['วันที่', 'ทะเบียน', 'ลิตร', 'แหล่ง', 'รอบงานแนะนำ', '']
+                ).map((h, i) => (
                   <th key={i} style={{
-                    padding: '9px 14px', textAlign: i >= 2 && i <= 3 ? 'right' : i === 6 ? 'center' : 'left',
+                    padding: '9px 14px',
+                    textAlign: i === 2 || (isManager && i === 3) ? 'right' : i === (isManager ? 6 : 5) ? 'center' : 'left',
                     color: '#78350F', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
                   }}>{h}</th>
                 ))}
@@ -134,9 +189,11 @@ export function FloatingFuel() {
                     <td style={{ padding: '9px 14px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
                       {fmt(tx.liters)} ล.
                     </td>
-                    <td style={{ padding: '9px 14px', textAlign: 'right', fontFamily: 'monospace' }}>
-                      {fmt(tx.total)} ฿
-                    </td>
+                    {isManager && (
+                      <td style={{ padding: '9px 14px', textAlign: 'right', fontFamily: 'monospace' }}>
+                        {fmt(tx.total)} ฿
+                      </td>
+                    )}
                     <td style={{ padding: '9px 14px' }}>
                       <span style={{
                         fontSize: 11, fontWeight: 600, padding: '2px 9px', borderRadius: 20,
@@ -161,19 +218,40 @@ export function FloatingFuel() {
                       )}
                     </td>
                     <td style={{ padding: '9px 10px', textAlign: 'center' }}>
-                      <button
-                        onClick={() => openModal(tx)}
-                        style={{
-                          background: '#0066CC', color: '#fff', border: 'none',
-                          borderRadius: 7, padding: '6px 16px', cursor: 'pointer',
-                          fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
-                          whiteSpace: 'nowrap',
-                        }}
-                        onMouseEnter={e => (e.currentTarget.style.background = '#0052A3')}
-                        onMouseLeave={e => (e.currentTarget.style.background = '#0066CC')}
-                      >
-                        ผูกรอบ
-                      </button>
+                      <div style={{ display: 'inline-flex', gap: 6 }}>
+                        <button
+                          onClick={() => openLinkModal(tx)}
+                          style={{
+                            background: '#0066CC', color: '#fff', border: 'none',
+                            borderRadius: 7, padding: '6px 16px', cursor: 'pointer',
+                            fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                            whiteSpace: 'nowrap',
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.background = '#0052A3')}
+                          onMouseLeave={e => (e.currentTarget.style.background = '#0066CC')}
+                        >
+                          ผูกรอบ
+                        </button>
+                        {isAdmin && (
+                          <>
+                            <button
+                              className="btn ghost icon sm"
+                              onClick={() => setEditTx(tx)}
+                              title="แก้ไขรายการ"
+                            >
+                              <Icon name="edit" size={13} />
+                            </button>
+                            <button
+                              className="btn ghost icon sm"
+                              style={{ color: 'var(--red)' }}
+                              onClick={() => void removeTx(tx)}
+                              title="ลบรายการ"
+                            >
+                              <Icon name="trash" size={13} />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )
@@ -216,7 +294,7 @@ export function FloatingFuel() {
                 <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8, padding: '10px 14px', marginBottom: 18 }}>
                   <div style={{ fontWeight: 700, color: '#78350F', fontSize: 13 }}>น้ำมันที่จะผูก</div>
                   <div style={{ marginTop: 5, fontSize: 13, color: '#92400E' }}>
-                    {thaiDate(linkTx.date)} · <strong>{vehicle?.plate ?? '—'}</strong> · {fmt(linkTx.liters)} ลิตร · {fmt(linkTx.total)} บาท
+                    {thaiDate(linkTx.date)} · <strong>{vehicle?.plate ?? '—'}</strong> · {fmt(linkTx.liters)} ลิตร{isManager && ` · ${fmt(linkTx.total)} บาท`}
                   </div>
                 </div>
 
@@ -286,6 +364,121 @@ export function FloatingFuel() {
           </div>
         )
       })()}
+
+      {editTx && (
+        <EditTxModal
+          tx={editTx}
+          vehicles={vehicles}
+          onClose={() => setEditTx(null)}
+          onSave={saveEdit}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Admin edit modal ─────────────────────────────────────────────────────────
+
+function EditTxModal({
+  tx, vehicles, onClose, onSave,
+}: {
+  tx: FuelTransaction
+  vehicles: Vehicle[]
+  onClose: () => void
+  onSave: (patch: Partial<FuelTransaction>) => Promise<void>
+}) {
+  const [form, setForm] = useState({
+    date: tx.date,
+    vehicleId: tx.vehicleId ?? '',
+    liters: String(tx.liters),
+    pricePerL: String(tx.pricePerL ?? ''),
+    source: tx.source,
+    note: tx.note ?? '',
+  })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const set = <K extends keyof typeof form>(k: K, v: typeof form[K]) => setForm(f => ({ ...f, [k]: v }))
+  const liters = Number(form.liters) || 0
+  const price  = Number(form.pricePerL) || 0
+  const total  = liters * price
+
+  const save = async () => {
+    setErr('')
+    if (liters <= 0) return setErr('ลิตรต้อง > 0')
+    if (!form.vehicleId) return setErr('กรุณาเลือกรถ')
+    setBusy(true)
+    try {
+      await onSave({
+        date: form.date,
+        vehicleId: form.vehicleId,
+        liters,
+        pricePerL: price,
+        total,
+        source: form.source,
+        note: form.note,
+      })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+        <div className="head"><h3>✏️ แก้ไขรายการน้ำมันลอย</h3></div>
+        <div className="body">
+          {err && (
+            <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: '#DC2626' }}>{err}</div>
+          )}
+          <div className="grid-2" style={{ gap: 14 }}>
+            <Field label="วันที่ *">
+              <input type="date" value={form.date} max={new Date().toISOString().slice(0, 10)} onChange={e => set('date', e.target.value)} />
+            </Field>
+            <Field label="ทะเบียนรถ *">
+              <select value={form.vehicleId} onChange={e => set('vehicleId', e.target.value)}>
+                <option value="">— เลือกรถ —</option>
+                {vehicles.map(v => (
+                  <option key={v.id} value={v.id}>{v.plate} · {v.brand}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div className="grid-2" style={{ gap: 14, marginTop: 14 }}>
+            <Field label="ลิตร *">
+              <input type="number" step="0.01" value={form.liters} onChange={e => set('liters', e.target.value)} />
+            </Field>
+            <Field label="ราคา/ลิตร">
+              <input type="number" step="0.01" value={form.pricePerL} onChange={e => set('pricePerL', e.target.value)} />
+            </Field>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <Field label="แหล่งน้ำมัน">
+              <select value={form.source} onChange={e => set('source', e.target.value as FuelTransaction['source'])}>
+                <option value="FACTORY_TANK">🏭 ถังโรงงาน</option>
+                <option value="EXTERNAL_PUMP">⛽ ปั๊มภายนอก</option>
+              </select>
+            </Field>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <Field label="หมายเหตุ">
+              <input value={form.note} onChange={e => set('note', e.target.value)} placeholder="—" />
+            </Field>
+          </div>
+          {total > 0 && (
+            <div style={{ marginTop: 14, padding: '10px 14px', background: 'var(--primary-50)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>ยอดรวม</span>
+              <span className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--primary)' }}>{fmt(total)} บาท</span>
+            </div>
+          )}
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" onClick={save} disabled={busy}>
+            <Icon name="check" size={14} /> {busy ? 'กำลังบันทึก…' : 'บันทึก'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

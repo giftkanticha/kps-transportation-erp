@@ -2,7 +2,6 @@ import React, { useState, useMemo, useEffect } from 'react'
 import { uid } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import { useAuth } from '../../context/AuthContext'
 import { Icon } from '../../components/ui/Icon'
 import { QuickOpenTripModal } from './QuickOpenTripModal'
 import type { CSSProperties } from 'react'
@@ -243,7 +242,6 @@ interface FloatingToast {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => void }) {
-  const { isManager } = useAuth()
   const [rows, setRows] = useState<GridRow[]>([makeRow()])
   const [toast, setToast] = useState<FloatingToast | null>(null)
   const [quickOpenCtx, setQuickOpenCtx] = useState<{ vehicleId: string; date: string; floatingTxId: string } | null>(null)
@@ -264,13 +262,14 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
   const { data: fuelRecords = [] } = useList<FuelRecord>('fuel_records')
   const { data: dailyPrices = [] } = useList<FuelDailyPrice>('fuel_daily_prices', 'date', false)
 
-  // Sync uncommitted rows' pricePerL with the latest daily-price table.
-  // Runs on mount when prices load + whenever an admin adds/edits a price.
+  // Auto-fill only for FACTORY_TANK — external pump prices vary per station
+  // / province so the driver always types from the receipt.
   useEffect(() => {
     if (dailyPrices.length === 0) return
     setRows(prev => prev.map(r => {
       if (r.committed || r.reversed) return r
-      const p = priceForDate(dailyPrices, r.source, r.date)
+      if (r.source !== 'FACTORY_TANK') return r
+      const p = priceForDate(dailyPrices, 'FACTORY_TANK', r.date)
       if (p == null) return r
       return r.pricePerL === String(p) ? r : { ...r, pricePerL: String(p) }
     }))
@@ -607,17 +606,13 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#F8FAFC', borderBottom: '2px solid #E2E8F0' }}>
-                {(isManager
-                  ? ['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ']
-                  : ['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ']
+                {(['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ']
                 ).map((h, hi) => (
                   <th key={hi} style={{
                     padding: '9px 12px',
-                    textAlign: hi === 0 ? 'center' : hi === 3 || (isManager && hi === 4) ? 'right' : hi === (isManager ? 7 : 6) ? 'center' : 'left',
+                    textAlign: hi === 0 ? 'center' : hi === 3 || hi === 4 ? 'right' : hi === 7 ? 'center' : 'left',
                     color: '#64748B', fontSize: 11, fontWeight: 700,
-                    width: (isManager
-                      ? [40, 130, 155, 95, 110, 165, undefined, 120]
-                      : [40, 130, 155, 95, 165, undefined, 120])[hi],
+                    width: [40, 130, 155, 95, 110, 165, undefined, 120][hi],
                     whiteSpace: 'nowrap',
                   }}>{h}</th>
                 ))}
@@ -664,8 +659,13 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                           disabled={locked || row.reversed}
                           onChange={e => {
                             const d = e.target.value
-                            const auto = priceForDate(dailyPrices, row.source, d)
-                            patchRow(i, auto != null ? { date: d, pricePerL: String(auto) } : { date: d })
+                            // Auto-fill price only for factory tank — drivers type external-pump prices.
+                            if (row.source === 'FACTORY_TANK') {
+                              const auto = priceForDate(dailyPrices, 'FACTORY_TANK', d)
+                              patchRow(i, auto != null ? { date: d, pricePerL: String(auto) } : { date: d })
+                            } else {
+                              patchRow(i, { date: d })
+                            }
                           }}
                           onKeyDown={onKeyDown(i, false)}
                           style={{ ...cellInput, border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
@@ -736,33 +736,32 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                       )}
                     </td>
 
-                    {/* ราคา/ลิตร — manager+ only */}
-                    {isManager && (
-                      <td style={{ padding: '5px 7px' }}>
-                        {isEditing ? (
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.5"
-                            value={editDraft.pricePerL}
-                            onChange={e => setEditDraft(d => ({ ...d, pricePerL: e.target.value }))}
-                            style={{ ...cellInput, textAlign: 'right' }}
-                          />
-                        ) : (
-                          <input
-                            id={`cell-${i}-3`}
-                            type="number"
-                            min="0"
-                            step="0.5"
-                            value={row.pricePerL}
-                            disabled={locked || row.reversed}
-                            onChange={e => patchRow(i, { pricePerL: e.target.value })}
-                            onKeyDown={onKeyDown(i, false)}
-                            style={{ ...cellInput, textAlign: 'right', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
-                          />
-                        )}
-                      </td>
-                    )}
+                    {/* ราคา/ลิตร — visible for everyone; auto-filled for FACTORY_TANK,
+                        typed by the driver for EXTERNAL_PUMP (varies per station) */}
+                    <td style={{ padding: '5px 7px' }}>
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={editDraft.pricePerL}
+                          onChange={e => setEditDraft(d => ({ ...d, pricePerL: e.target.value }))}
+                          style={{ ...cellInput, textAlign: 'right' }}
+                        />
+                      ) : (
+                        <input
+                          id={`cell-${i}-3`}
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={row.pricePerL}
+                          disabled={locked || row.reversed}
+                          onChange={e => patchRow(i, { pricePerL: e.target.value })}
+                          onKeyDown={onKeyDown(i, false)}
+                          style={{ ...cellInput, textAlign: 'right', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
+                        />
+                      )}
+                    </td>
 
                     {/* แหล่ง */}
                     <td style={{ padding: '5px 7px' }}>
@@ -782,8 +781,14 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                           disabled={locked || row.reversed}
                           onChange={e => {
                             const s = e.target.value as FuelSource
-                            const auto = priceForDate(dailyPrices, s, row.date)
-                            patchRow(i, auto != null ? { source: s, pricePerL: String(auto) } : { source: s })
+                            // Swapping to factory tank → pull the daily price.
+                            // Swapping back to external pump → clear, driver re-enters.
+                            if (s === 'FACTORY_TANK') {
+                              const auto = priceForDate(dailyPrices, 'FACTORY_TANK', row.date)
+                              patchRow(i, auto != null ? { source: s, pricePerL: String(auto) } : { source: s })
+                            } else {
+                              patchRow(i, { source: s, pricePerL: '' })
+                            }
                           }}
                           onKeyDown={onKeyDown(i, true)}
                           style={{ ...cellInput, cursor: (locked || row.reversed) ? 'default' : 'pointer', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
