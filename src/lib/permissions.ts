@@ -37,7 +37,7 @@ const MANAGER_PLUS_ROUTES = new Set<string>([
   'dashboard',
   'finance',
   'employees', 'employees.add',
-  'fuel.report', 'fuel.summary', 'fuel.reconcile',
+  'fuel.report', 'fuel.summary', 'fuel.reconcile', 'fuel.prices',
   'dispatch.report',  // drivers see 'dispatch.history' instead — money columns are hidden there
 
   'expenses.finance', 'expenses.report',

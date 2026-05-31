@@ -13,6 +13,7 @@ import { FuelInventorySummary } from './FuelInventorySummary'
 import { ExpressFuelLog } from './ExpressFuelLog'
 import { FloatingFuel } from './FloatingFuel'
 import { FuelReconciliation } from './FuelReconciliation'
+import { FuelDailyPricesPage } from './FuelDailyPricesPage'
 
 const THAI_MONTHS_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -646,6 +647,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
     tab === 'express' ? 'express' :
     tab === 'floating' ? 'floating' :
     tab === 'reconcile' ? 'reconcile' :
+    tab === 'prices' ? 'prices' :
     'overview'
 
   return (
@@ -662,6 +664,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
             ['overview', 'fuel', 'ภาพรวม', 'gauge'],
             ['express', 'express', 'คีย์ด่วน', 'bolt'],
             ['floating', 'floating', 'น้ำมันลอย', 'alert'],
+            ['prices', 'prices', 'ราคารายวัน', 'money'],
             ['report', 'report', 'รายงาน', 'chart'],
             ['summary', 'summary', 'สรุปคลัง', 'package'],
             ['reconcile', 'reconcile', 'ตรวจสอบข้อมูล', 'search'],
@@ -684,6 +687,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       {current === 'report' && <FuelReportV2 />}
       {current === 'summary' && <FuelInventorySummary />}
       {current === 'reconcile' && <FuelReconciliation />}
+      {current === 'prices' && <FuelDailyPricesPage />}
     </div>
   )
 }

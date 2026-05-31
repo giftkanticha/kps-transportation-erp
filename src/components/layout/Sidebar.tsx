@@ -50,6 +50,7 @@ const MENU: MenuItem[] = [
       { id: 'fuel', label: 'ภาพรวมคลังน้ำมัน', icon: 'gauge' },
       { id: 'fuel.express', label: 'คีย์ด่วนน้ำมัน', icon: 'bolt' },
       { id: 'fuel.floating', label: 'น้ำมันลอยรอผูก', icon: 'alert' },
+      { id: 'fuel.prices', label: 'ตั้งราคารายวัน', icon: 'money' },
       { id: 'fuel.report', label: 'รายงานน้ำมันรายเดือน', icon: 'chart' },
       { id: 'fuel.summary', label: 'สรุปคลังน้ำมันรวม', icon: 'package' },
     ],

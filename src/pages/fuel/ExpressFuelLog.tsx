@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { uid } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
@@ -6,7 +6,8 @@ import { useAuth } from '../../context/AuthContext'
 import { Icon } from '../../components/ui/Icon'
 import { QuickOpenTripModal } from './QuickOpenTripModal'
 import type { CSSProperties } from 'react'
-import type { Vehicle, Dispatch as DispatchJob, FuelRecord, FuelStock, FuelTransaction } from '../../types'
+import type { Vehicle, Dispatch as DispatchJob, FuelRecord, FuelStock, FuelTransaction, FuelDailyPrice } from '../../types'
+import { priceForDate } from './FuelDailyPricesPage'
 
 type InsertFuelTx = ReturnType<typeof useInsert<FuelTransaction>>
 type InsertFuelRec = ReturnType<typeof useInsert<FuelRecord>>
@@ -261,6 +262,20 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
   const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const { data: fuelStock = [] } = useList<FuelStock>('fuel_stock')
   const { data: fuelRecords = [] } = useList<FuelRecord>('fuel_records')
+  const { data: dailyPrices = [] } = useList<FuelDailyPrice>('fuel_daily_prices', 'date', false)
+
+  // Sync uncommitted rows' pricePerL with the latest daily-price table.
+  // Runs on mount when prices load + whenever an admin adds/edits a price.
+  useEffect(() => {
+    if (dailyPrices.length === 0) return
+    setRows(prev => prev.map(r => {
+      if (r.committed || r.reversed) return r
+      const p = priceForDate(dailyPrices, r.source, r.date)
+      if (p == null) return r
+      return r.pricePerL === String(p) ? r : { ...r, pricePerL: String(p) }
+    }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dailyPrices])
   const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
   const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
   const insertFuelRec = useInsert<FuelRecord>('fuel_records')
@@ -647,7 +662,11 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                           type="date"
                           value={row.date}
                           disabled={locked || row.reversed}
-                          onChange={e => patchRow(i, { date: e.target.value })}
+                          onChange={e => {
+                            const d = e.target.value
+                            const auto = priceForDate(dailyPrices, row.source, d)
+                            patchRow(i, auto != null ? { date: d, pricePerL: String(auto) } : { date: d })
+                          }}
                           onKeyDown={onKeyDown(i, false)}
                           style={{ ...cellInput, border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
                         />
@@ -761,7 +780,11 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                           id={`cell-${i}-4`}
                           value={row.source}
                           disabled={locked || row.reversed}
-                          onChange={e => patchRow(i, { source: e.target.value as FuelSource })}
+                          onChange={e => {
+                            const s = e.target.value as FuelSource
+                            const auto = priceForDate(dailyPrices, s, row.date)
+                            patchRow(i, auto != null ? { source: s, pricePerL: String(auto) } : { source: s })
+                          }}
                           onKeyDown={onKeyDown(i, true)}
                           style={{ ...cellInput, cursor: (locked || row.reversed) ? 'default' : 'pointer', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
                         >
