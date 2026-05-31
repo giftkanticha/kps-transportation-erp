@@ -222,6 +222,27 @@ function CloseForm({
   const ownClosingTx = fuelClosing.find(t => t.entryMethod === 'TRIP_CLOSE') ?? null
   const externalClosing = fuelClosing.filter(t => t.entryMethod !== 'TRIP_CLOSE')
   const hasExternalClosing = externalClosing.length > 0
+
+  // Floating fuel for THIS vehicle — admin can attach to this round inline
+  // instead of bouncing to the Floating Fuel page.
+  const floatingForVehicle = useMemo(
+    () => allFuelTxs
+      .filter(t => t.status === 'FLOATING' && t.vehicleId === round?.vehicleId)
+      .sort((a, b) => b.date.localeCompare(a.date)),
+    [allFuelTxs, round?.vehicleId],
+  )
+
+  const attachFloating = async (txId: string) => {
+    try {
+      await updateFuelTx.mutateAsync({
+        id: txId,
+        patch: { tripId: roundId, status: 'TRIP_LINKED' },
+      })
+      setToast({ kind: 'success', msg: '✅ ผูกน้ำมันลอยกับรอบนี้แล้ว' })
+    } catch (e) {
+      setToast({ kind: 'error', msg: e instanceof Error ? e.message : 'ผูกไม่สำเร็จ' })
+    }
+  }
   const fuelNormal = linkedFuelTxs.filter(t => t.tripFuelRole === 'NORMAL')
   const sumIntermediate = fuelIntermediate.reduce((s, t) => s + t.liters, 0)
   const sumNormal = fuelNormal.reduce((s, t) => s + t.liters, 0)
@@ -386,6 +407,16 @@ function CloseForm({
     try {
       const newLegs = buildLegsPatch(mode === 'close')
       if (mode === 'close') {
+        // Per-leg เบี้ยเลี้ยง is required at close time. Empty string is
+        // ambiguous (forgot? meant zero?) — make the user type 0 explicitly
+        // if no per-diem was paid.
+        for (let i = 0; i < legs.length; i++) {
+          if (legs[i].legType === 'return') continue
+          const raw = legStates[i]?.perDiem ?? ''
+          if (raw === '' || isNaN(Number(raw))) {
+            throw new Error(`ขา ${i + 1}: กรุณากรอกเบี้ยเลี้ยง (ถ้าไม่มีให้ใส่ 0)`)
+          }
+        }
         const err = validateClose(newLegs)
         if (err) throw new Error(err)
         // Over-threshold loss and overweight (delivered > loaded) are both allowed
@@ -690,7 +721,7 @@ function CloseForm({
                     )}
                   </Field>
                 )}
-                <Field label="เบี้ยเลี้ยง (฿)">
+                <Field label="เบี้ยเลี้ยง (฿) *">
                   <input
                     type="number"
                     value={ls.perDiem}
@@ -698,6 +729,9 @@ function CloseForm({
                     placeholder="0"
                     disabled={isClosed}
                   />
+                  <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                    ใส่ 0 ถ้าไม่มี
+                  </div>
                 </Field>
               </div>
 
@@ -853,6 +887,58 @@ function CloseForm({
           />
         </Field>
       </div>
+
+      {/* Floating fuel quick-attach — only show when this vehicle has FLOATING txs.
+          Saves bouncing to the Floating Fuel page just to link one transaction. */}
+      {floatingForVehicle.length > 0 && !isClosed && (
+        <>
+          <h3 className="section-title" style={{ marginBottom: 10 }}>🟡 น้ำมันลอยของรถคันนี้</h3>
+          <div className="card pad" style={{ marginBottom: 16, background: '#FFFBEB', border: '1px solid #FDE68A' }}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+              รายการน้ำมันที่ยังไม่ผูกรอบ — กดปุ่ม "ผูกกับรอบนี้" เพื่อเชื่อมกับรอบ {round.code}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {floatingForVehicle.map(t => {
+                const dDiff = Math.abs(new Date(t.date).getTime() - new Date(round.date).getTime()) / (1000 * 60 * 60 * 24)
+                const isNear = dDiff <= 2
+                return (
+                  <div
+                    key={t.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '8px 14px', borderRadius: 8,
+                      border: `1px solid ${isNear ? '#FBBF24' : '#FEF3C7'}`,
+                      background: isNear ? '#FEF3C7' : '#fff',
+                    }}
+                  >
+                    <div style={{ flex: 1, fontSize: 13 }}>
+                      <span className="mono" style={{ fontWeight: 600 }}>{db.thaiDate(t.date)}</span>
+                      <span className="muted" style={{ marginLeft: 10 }}>·</span>
+                      <span style={{ marginLeft: 10 }}>{t.liters.toFixed(2)} ลิตร</span>
+                      <span className="muted" style={{ marginLeft: 10 }}>·</span>
+                      <span style={{ marginLeft: 10, fontSize: 11 }}>
+                        {t.source === 'FACTORY_TANK' ? '🏭 ถังโรงงาน' : '⛽ ปั๊มภายนอก'}
+                      </span>
+                      {isNear && (
+                        <span style={{ marginLeft: 10, fontSize: 10.5, fontWeight: 700, color: '#92400E' }}>
+                          ⭐ ใกล้วันเปิดรอบ
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      className="btn sm primary"
+                      onClick={() => void attachFloating(t.id)}
+                      disabled={updateFuelTx.isPending}
+                    >
+                      <Icon name="check" size={12} /> ผูกกับรอบนี้
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Fuel lifecycle card */}
       <h3 className="section-title" style={{ marginBottom: 10 }}>น้ำมันในรอบ</h3>
