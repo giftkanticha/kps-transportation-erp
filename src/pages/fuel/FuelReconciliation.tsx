@@ -8,8 +8,10 @@ import type { Vehicle, FuelRecord, FuelTransaction, FuelStock } from '../../type
 
 const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-const isFactory = (f: FuelRecord) =>
-  !['PTT', 'Shell', 'Bangchak', 'Esso'].some(b => f.station?.includes(b))
+// Same Thai-string check the rest of the fuel module now uses. The old
+// exclusion list ('PTT' / 'Shell' / …) mis-classified the literal 'ปั๊มภายนอก'
+// stored by ExpressFuelLog as factory.
+const isFactory = (f: FuelRecord) => f.station === 'ถังโรงงาน'
 
 // ─── Component ────────────────────────────────────────────────────────────────
 

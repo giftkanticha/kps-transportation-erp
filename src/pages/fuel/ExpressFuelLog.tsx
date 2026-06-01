@@ -59,9 +59,13 @@ function makeRow(): GridRow {
 }
 
 function getFactoryBalance(stocks: FuelStock[], fuelRecords: FuelRecord[]): number {
+  // Only fuel_records tagged as factory tank consume from the on-site stock.
+  // External-pump fills are an AP cost, not an inventory draw. The previous
+  // 'NOT in PTT/Shell/…' filter mis-classified the Thai 'ปั๊มภายนอก' string
+  // as factory and was bleeding external pumps out of the tank balance.
   const stockIn = stocks.reduce((s, r) => s + (r.liters || 0), 0)
   const stockOut = fuelRecords
-    .filter(f => !['PTT', 'Shell', 'Bangchak', 'Esso'].some(b => f.station?.includes(b)))
+    .filter(f => f.station === 'ถังโรงงาน')
     .reduce((s, r) => s + (r.liters || 0), 0)
   return Math.max(0, stockIn - stockOut)
 }
