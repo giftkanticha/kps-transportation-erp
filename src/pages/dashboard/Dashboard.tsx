@@ -518,8 +518,8 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                     <div
                       className="feed-item"
                       style={{ cursor: 'pointer' }}
-                      onClick={() => setActive('maintenance')}
-                      title="ไปหน้าบำรุงรักษา"
+                      onClick={() => setActive('alerts')}
+                      title="กดเพื่อบันทึก 'เปลี่ยนถ่ายแล้ว' + ตั้งไมล์ครั้งถัดไป"
                     >
                       <div className="ic amber"><Icon name="wrench" size={16} /></div>
                       <div className="body">
@@ -531,10 +531,10 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                       </div>
                       <button
                         className="btn sm primary"
-                        onClick={(e) => { e.stopPropagation(); setActive('maintenance') }}
+                        onClick={(e) => { e.stopPropagation(); setActive('alerts') }}
                         style={{ alignSelf: 'center' }}
                       >
-                        จัดการ <Icon name="arrow-right" size={12} />
+                        เปลี่ยนถ่ายแล้ว <Icon name="arrow-right" size={12} />
                       </button>
                     </div>
                   )}
@@ -579,12 +579,28 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                         <div className="who">
                           ค่าใช้จ่ายค้างชำระ {creditorsWithDebt.length} เจ้าหนี้ · รวม {db.thb(totalCreditorDebt)}
                         </div>
-                        <div className="txt">
-                          {creditorsWithDebt
-                            .slice(0, 3)
-                            .map(c => `${c.partner?.name ?? '—'} ${db.thb(c.total)}${c.isOverdue ? ' ⚠️' : ''}`)
-                            .join(' · ')}
-                          {creditorsWithDebt.length > 3 && ` และอีก ${creditorsWithDebt.length - 3}`}
+                        <div className="txt" style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
+                          {creditorsWithDebt.slice(0, 5).map((c, i) => (
+                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                              <span>
+                                {c.partner?.name ?? '— ไม่ระบุ —'}
+                                <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>
+                                  ({c.bills} บิล)
+                                </span>
+                                {c.isOverdue && (
+                                  <span className="badge red" style={{ marginLeft: 6, fontSize: 10 }}>เกินกำหนด</span>
+                                )}
+                              </span>
+                              <span className="mono" style={{ fontWeight: 600, color: c.isOverdue ? 'var(--red)' : 'var(--text-1)' }}>
+                                {db.thb(c.total)}
+                              </span>
+                            </div>
+                          ))}
+                          {creditorsWithDebt.length > 5 && (
+                            <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                              และอีก {creditorsWithDebt.length - 5} เจ้าหนี้
+                            </div>
+                          )}
                         </div>
                       </div>
                       <button
