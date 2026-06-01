@@ -76,7 +76,10 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
       },
       {
         onSuccess: () => setActive('vehicles'),
-        onError: (err) => alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'),
+        onError: (err) => {
+          const msg = err instanceof Error && err.message ? err.message : String(err)
+          alert('บันทึกไม่สำเร็จ: ' + (msg || 'ไม่ทราบสาเหตุ'))
+        },
       },
     )
   }
