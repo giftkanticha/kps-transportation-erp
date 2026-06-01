@@ -1,4 +1,4 @@
-import React, { Fragment, useState, useMemo, useEffect, useRef } from 'react'
+import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info, SearchInput } from '../../components/ui'
@@ -888,46 +888,21 @@ function ExpFinance() {
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: stocks = [] } = useList<StockItem>('stock_items')
   const [editing, setEditing] = useState<ExpenseHeader | null>(null)
-  const [payTarget, setPayTarget] = useState<ExpenseHeader | null>(null)
-  const [expandedPartner, setExpandedPartner] = useState<string | null>(null)
 
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-
-  const unpaidHeaders = useMemo(() => headers.filter((h) => !h.paid), [headers])
-  const overdueHeaders = useMemo(
-    () => unpaidHeaders.filter((h) => h.dueDate && new Date(h.dueDate) < today),
-    [unpaidHeaders, today],
-  )
+  const today = (() => { const d = new Date(); d.setHours(0,0,0,0); return d })()
+  const unpaidHeaders = headers.filter((h) => !h.paid)
+  const overdue = unpaidHeaders.filter((h) => h.dueDate && new Date(h.dueDate) < today)
   const totalUnpaid = unpaidHeaders.reduce((s, h) => s + h.total, 0)
   const totalPaid = headers.filter((h) => h.paid).reduce((s, h) => s + h.total, 0)
+  const [filter, setFilter] = useState('all')
+  const [payTarget, setPayTarget] = useState<ExpenseHeader | null>(null)
 
-  // Group by creditor (partner) instead of per invoice — that's the view AP
-  // wants to act on ("ยอดของเจ้าหนี้แต่ละราย").
-  const byPartner = useMemo(() => {
-    const map = new Map<string, { partner: Partner | undefined; headers: ExpenseHeader[]; total: number; overdueCount: number; earliestDue: string | null }>()
-    for (const h of unpaidHeaders) {
-      const key = h.partnerId || '__none__'
-      const cur = map.get(key) ?? {
-        partner: partners.find((p) => p.id === h.partnerId),
-        headers: [],
-        total: 0,
-        overdueCount: 0,
-        earliestDue: null,
-      }
-      cur.headers.push(h)
-      cur.total += h.total
-      if (h.dueDate && new Date(h.dueDate) < today) cur.overdueCount += 1
-      if (h.dueDate && (cur.earliestDue == null || h.dueDate < cur.earliestDue)) cur.earliestDue = h.dueDate
-      map.set(key, cur)
-    }
-    return [...map.values()].sort((a, b) => b.total - a.total)
-  }, [unpaidHeaders, partners, today])
-
-  const [filter, setFilter] = useState<'all' | 'overdue'>('all')
-  const visible = filter === 'overdue'
-    ? byPartner.filter((g) => g.overdueCount > 0)
-    : byPartner
+  const list =
+    filter === 'overdue'
+      ? overdue
+      : filter === 'due'
+        ? unpaidHeaders.filter((h) => !overdue.includes(h))
+        : unpaidHeaders
 
   return (
     <div>
@@ -945,31 +920,39 @@ function ExpFinance() {
           </div>
         </div>
         <div className="card kpi">
-          <div className="label">เจ้าหนี้ค้างชำระ</div>
-          <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8 }}>
-            {byPartner.length} <span style={{ fontSize: 14, fontWeight: 500 }}>ราย</span>
+          <div className="label">เกินกำหนดชำระ</div>
+          <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8, color: 'var(--red)' }}>
+            {overdue.length} <span style={{ fontSize: 14, fontWeight: 500 }}>รายการ</span>
           </div>
         </div>
         <div className="card kpi">
-          <div className="label">เกินกำหนดชำระ</div>
-          <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8, color: 'var(--red)' }}>
-            {overdueHeaders.length} <span style={{ fontSize: 14, fontWeight: 500 }}>รายการ</span>
+          <div className="label">รายการทั้งหมด</div>
+          <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8 }}>
+            {unpaidHeaders.length} <span style={{ fontSize: 14, fontWeight: 500 }}>รายการ</span>
           </div>
         </div>
       </div>
 
       <div className="card">
         <div className="head">
-          <h3>เจ้าหนี้ค้างชำระ</h3>
+          <h3>รายการเจ้าหนี้ (Accounts Payable)</h3>
           <div className="right">
             <Icon name="filter" size={14} style={{ color: 'var(--text-faint)' }} />
             <select
               value={filter}
-              onChange={(e) => setFilter(e.target.value as 'all' | 'overdue')}
-              style={{ height: 32, padding: '0 10px', border: '1px solid var(--line)', borderRadius: 6, background: '#fff', fontSize: 12.5 }}
+              onChange={(e) => setFilter(e.target.value)}
+              style={{
+                height: 32,
+                padding: '0 10px',
+                border: '1px solid var(--line)',
+                borderRadius: 6,
+                background: '#fff',
+                fontSize: 12.5,
+              }}
             >
               <option value="all">ทั้งหมด</option>
-              <option value="overdue">มีบิลเกินกำหนด</option>
+              <option value="overdue">เกินกำหนด</option>
+              <option value="due">ใกล้ครบกำหนด</option>
             </select>
           </div>
         </div>
@@ -977,122 +960,77 @@ function ExpFinance() {
           <table className="tbl">
             <thead>
               <tr>
-                <th>เจ้าหนี้</th>
-                <th>เลขที่บัญชี / ธนาคาร</th>
-                <th className="num right">จำนวนบิล</th>
-                <th>วันที่ครบกำหนดเร็วสุด</th>
-                <th className="num right">ยอดค้างรวม</th>
-                <th></th>
+                <th>รหัส AP</th>
+                <th>ช่าง / ร้านค้า</th>
+                <th>เลขที่บัญชี</th>
+                <th>วันที่สร้าง</th>
+                <th>ครบกำหนด</th>
+                <th className="right">จำนวนเงิน</th>
+                <th>สถานะ</th>
+                <th>จัดการ</th>
               </tr>
             </thead>
             <tbody>
-              {visible.length === 0 && (
-                <tr>
-                  <td colSpan={6}><div className="empty">ไม่มีเจ้าหนี้ค้างชำระ</div></td>
-                </tr>
-              )}
-              {visible.map((g) => {
-                const key = g.partner?.id ?? '__none__'
-                const isOpen = expandedPartner === key
-                const earliestOverdue = g.earliestDue && new Date(g.earliestDue) < today
+              {list.map((h, i) => {
+                const isOverdue = h.dueDate && new Date(h.dueDate) < today
+                const p = partners.find((x) => x.id === h.partnerId)
                 return (
-                  <Fragment key={key}>
-                    <tr
-                      style={{ cursor: 'pointer', background: isOpen ? 'var(--primary-50)' : undefined }}
-                      onClick={() => setExpandedPartner(isOpen ? null : key)}
-                    >
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{g.partner?.name ?? '— ไม่ระบุเจ้าหนี้ —'}</div>
-                        {g.partner?.type && (
-                          <div className="muted" style={{ fontSize: 11 }}>{g.partner.type}</div>
-                        )}
-                      </td>
-                      <td className="mono" style={{ fontSize: 12.5 }}>
-                        {g.partner?.account && g.partner.account !== '—' ? (
-                          <>
-                            <div>{g.partner.account}</div>
-                            <div className="muted" style={{ fontSize: 11 }}>{g.partner.bank}</div>
-                          </>
-                        ) : (
-                          <span className="muted">—</span>
-                        )}
-                      </td>
-                      <td className="num right">
-                        {g.headers.length}
-                        {g.overdueCount > 0 && (
-                          <span className="badge red" style={{ marginLeft: 6, fontSize: 10.5 }}>
-                            เกิน {g.overdueCount}
-                          </span>
-                        )}
-                      </td>
-                      <td className="num muted">
-                        {g.earliestDue ? db.thaiDate(g.earliestDue) : '—'}
-                        {earliestOverdue && (
-                          <span style={{ color: 'var(--red)', fontWeight: 600, marginLeft: 6, fontSize: 11 }}>เกินกำหนด</span>
-                        )}
-                      </td>
-                      <td className="num right" style={{ fontWeight: 700, color: 'var(--red)' }}>
-                        {db.fmt(g.total)} ฿
-                      </td>
-                      <td>
-                        <Icon name={isOpen ? 'chevron-down' : 'chevron-right'} size={14} />
-                      </td>
-                    </tr>
-                    {isOpen && (
-                      <tr>
-                        <td colSpan={6} style={{ background: 'var(--bg)', padding: '10px 18px' }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8 }}>บิลค้างของ {g.partner?.name ?? '—'} ({g.headers.length} รายการ)</div>
-                          <table className="tbl" style={{ background: '#fff' }}>
-                            <thead>
-                              <tr>
-                                <th>รหัส</th>
-                                <th>วันที่สร้าง</th>
-                                <th>ครบกำหนด</th>
-                                <th>หมายเหตุ</th>
-                                <th className="num right">ยอด</th>
-                                <th></th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {g.headers
-                                .sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''))
-                                .map((h) => {
-                                  const isOver = h.dueDate && new Date(h.dueDate) < today
-                                  return (
-                                    <tr key={h.id}>
-                                      <td className="mono" style={{ fontSize: 12 }}>{h.code}</td>
-                                      <td className="num muted" style={{ fontSize: 12 }}>{db.thaiDate(h.date)}</td>
-                                      <td className="num muted" style={{ fontSize: 12 }}>
-                                        {h.dueDate ? db.thaiDate(h.dueDate) : '—'}
-                                        {isOver && <span className="badge red" style={{ marginLeft: 4, fontSize: 10 }}>เกิน</span>}
-                                      </td>
-                                      <td className="muted" style={{ fontSize: 12 }}>{h.note || '—'}</td>
-                                      <td className="num right mono" style={{ fontWeight: 600 }}>{db.fmt(h.total)}</td>
-                                      <td>
-                                        <div className="row" style={{ gap: 4 }}>
-                                          <button className="btn sm" onClick={(e) => { e.stopPropagation(); setEditing(h) }} title="แก้ไข">
-                                            <Icon name="edit" size={11} />
-                                          </button>
-                                          <button
-                                            className="btn sm"
-                                            style={{ background: 'var(--green)', color: '#fff', borderColor: 'var(--green)' }}
-                                            onClick={(e) => { e.stopPropagation(); setPayTarget(h) }}
-                                          >
-                                            <Icon name="money" size={11} /> ชำระ
-                                          </button>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  )
-                                })}
-                            </tbody>
-                          </table>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
+                  <tr key={h.id}>
+                    <td className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                      AP-{String(i + 1).padStart(3, '0')}
+                    </td>
+                    <td>{p?.name ?? '—'}</td>
+                    <td className="mono" style={{ fontSize: 12.5 }}>
+                      {p?.account && p.account !== '—' ? (
+                        <>
+                          <div>{p.account}</div>
+                          <div className="muted" style={{ fontSize: 11 }}>{p.bank}</div>
+                        </>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
+                    <td className="num muted">{db.thaiDate(h.date)}</td>
+                    <td className="num muted">
+                      {db.thaiDate(h.dueDate)}
+                      {isOverdue && (
+                        <span className="badge red" style={{ marginLeft: 6 }}>
+                          เกินกำหนด
+                        </span>
+                      )}
+                    </td>
+                    <td className="num right" style={{ fontWeight: 700 }}>
+                      {db.fmt(h.total)} ฿
+                    </td>
+                    <td>
+                      <span className="badge amber">
+                        <Icon name="alert" size={11} /> ค้างชำระ
+                      </span>
+                    </td>
+                    <td>
+                      <div className="row" style={{ gap: 6 }}>
+                        <button className="btn sm" onClick={() => setEditing(h)} title="แก้ไขรายการ/ราคา">
+                          <Icon name="edit" size={12} /> แก้ไข
+                        </button>
+                        <button
+                          className="btn sm"
+                          style={{ background: 'var(--green)', color: '#fff', borderColor: 'var(--green)' }}
+                          onClick={() => setPayTarget(h)}
+                        >
+                          <Icon name="money" size={12} /> บันทึกชำระ
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
                 )
               })}
+              {list.length === 0 && (
+                <tr>
+                  <td colSpan={8}>
+                    <div className="empty">ไม่มีรายการ</div>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -1121,6 +1059,7 @@ function ExpFinance() {
   )
 }
 
+// ─── Tab 3: สต๊อคคลัง KPS ────────────────────────────────────────────────────
 // ─── Tab 3: สต๊อคคลัง KPS ────────────────────────────────────────────────────
 
 function SellPriceCell({ item, onSaved }: { item: StockItem; onSaved: () => void }) {

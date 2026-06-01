@@ -345,7 +345,34 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const lowStockItems = useMemo(() => stock.filter(s => s.qty <= s.reorderAt), [stock])
   const customersWithDebt = useMemo(() => customers.filter(c => (c.openInvoice ?? 0) > 0), [customers])
   const totalOpenInvoice  = useMemo(() => customersWithDebt.reduce((s, c) => s + (c.openInvoice ?? 0), 0), [customersWithDebt])
-  const totalAlerts = criticalTireVehicles.length + maintenanceDueVehicles.length + lowStockItems.length + customersWithDebt.length
+
+  // AP — group unpaid expense_headers by creditor (partner) so the dashboard
+  // surfaces 'who owes what' instead of a per-invoice list. Vehicle is
+  // intentionally ignored — AP is per-creditor, not per-truck.
+  const creditorsWithDebt = useMemo(() => {
+    const map = new Map<string, { partner: Partner | undefined; total: number; bills: number; earliestDue: string | null }>()
+    const todayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() })()
+    for (const h of expHeaders) {
+      if (h.paid) continue
+      const key = h.partnerId || '__none__'
+      const cur = map.get(key) ?? {
+        partner: sbPartners.find(p => p.id === h.partnerId),
+        total: 0,
+        bills: 0,
+        earliestDue: null,
+      }
+      cur.total += h.total
+      cur.bills += 1
+      if (h.dueDate && (cur.earliestDue == null || h.dueDate < cur.earliestDue)) cur.earliestDue = h.dueDate
+      map.set(key, cur)
+    }
+    return [...map.values()]
+      .map(c => ({ ...c, isOverdue: c.earliestDue != null && new Date(c.earliestDue).getTime() < todayMs }))
+      .sort((a, b) => b.total - a.total)
+  }, [expHeaders, sbPartners])
+  const totalCreditorDebt = useMemo(() => creditorsWithDebt.reduce((s, c) => s + c.total, 0), [creditorsWithDebt])
+
+  const totalAlerts = criticalTireVehicles.length + maintenanceDueVehicles.length + lowStockItems.length + customersWithDebt.length + creditorsWithDebt.length
 
   const marginPct = revenueThisMonth > 0
     ? Math.round(((revenueThisMonth - costThisMonth) / revenueThisMonth) * 100) : 0
@@ -538,6 +565,35 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                           {customersWithDebt.length > 3 && ` และอีก ${customersWithDebt.length - 3}`}
                         </div>
                       </div>
+                    </div>
+                  )}
+                  {creditorsWithDebt.length > 0 && (
+                    <div
+                      className="feed-item"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setActive('expenses.finance')}
+                      title="ดูสถานะการเงิน"
+                    >
+                      <div className="ic red"><Icon name="money" size={16} /></div>
+                      <div className="body">
+                        <div className="who">
+                          ค่าใช้จ่ายค้างชำระ {creditorsWithDebt.length} เจ้าหนี้ · รวม {db.thb(totalCreditorDebt)}
+                        </div>
+                        <div className="txt">
+                          {creditorsWithDebt
+                            .slice(0, 3)
+                            .map(c => `${c.partner?.name ?? '—'} ${db.thb(c.total)}${c.isOverdue ? ' ⚠️' : ''}`)
+                            .join(' · ')}
+                          {creditorsWithDebt.length > 3 && ` และอีก ${creditorsWithDebt.length - 3}`}
+                        </div>
+                      </div>
+                      <button
+                        className="btn sm primary"
+                        onClick={(e) => { e.stopPropagation(); setActive('expenses.finance') }}
+                        style={{ alignSelf: 'center' }}
+                      >
+                        จัดการ <Icon name="arrow-right" size={12} />
+                      </button>
                     </div>
                   )}
                 </div>
