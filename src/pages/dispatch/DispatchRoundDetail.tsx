@@ -3,7 +3,7 @@ import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord } from '../../types'
+import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -498,9 +498,11 @@ function ClosedSummary({ round, fuelRound, isManager }: { round: Dispatch; fuelR
 }
 
 export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
-  const { isManager, isAdmin } = useAuth()
+  const { isManager, isAdmin, profile } = useAuth()
   const [showEditRound, setShowEditRound] = useState(false)
   const [showDeleteRound, setShowDeleteRound] = useState(false)
+  const [showReopenConfirm, setShowReopenConfirm] = useState(false)
+  const [showRequestEdit, setShowRequestEdit] = useState(false)
   const subj = subject as { type?: string; id?: string } | null
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -515,6 +517,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
   const deleteFuelRec = useDelete('fuel_records')
   const deleteDispatch = useDelete('dispatch')
+  const insertApproval = useInsert<EditApprovalRequest>('edit_approvals')
 
   const round = useMemo(
     () => (subj?.id ? dispatches.find(d => d.id === subj.id) : undefined),
@@ -658,6 +661,24 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
               title={legs.length === 0 ? 'เพิ่มขาอย่างน้อย 1 ขาก่อน' : ''}
             >
               <Icon name="check" size={15} /> ไปปิดงาน →
+            </button>
+          )}
+          {isClosed && isAdmin && (
+            <button
+              className="btn"
+              onClick={() => setShowReopenConfirm(true)}
+              title="ตั้งสถานะรอบกลับเป็น DRAFT เพื่อแก้ไข"
+            >
+              <Icon name="edit" size={14} /> เปิดเพื่อแก้ไข
+            </button>
+          )}
+          {isClosed && !isAdmin && (
+            <button
+              className="btn"
+              onClick={() => setShowRequestEdit(true)}
+              title="ส่งคำขอแก้ไขให้แอดมิน"
+            >
+              <Icon name="bell" size={14} /> ขอแก้ไข
             </button>
           )}
           {isClosed && (
@@ -847,6 +868,81 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
           onSaved={() => {
             setShowEditRound(false)
             setToast({ kind: 'success', msg: '✅ อัปเดตข้อมูลรอบแล้ว' })
+          }}
+        />
+      )}
+
+      {showReopenConfirm && isClosed && isAdmin && (
+        <div className="modal-bg" onClick={() => setShowReopenConfirm(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+            <div className="head"><h3>เปิดรอบเพื่อแก้ไข</h3></div>
+            <div className="body">
+              <p style={{ marginBottom: 12 }}>
+                รอบ <strong className="mono" style={{ color: 'var(--primary)' }}>{round.code}</strong> ปิดอยู่
+              </p>
+              <p className="muted" style={{ fontSize: 13 }}>
+                กดยืนยันจะตั้งสถานะรอบเป็น <strong>DRAFT</strong> และพาไปหน้าปิดรอบเพื่อแก้ไขข้อมูล —
+                ปิดรอบใหม่อีกครั้งเมื่อแก้เสร็จ
+              </p>
+            </div>
+            <div className="foot">
+              <button className="btn" onClick={() => setShowReopenConfirm(false)}>ยกเลิก</button>
+              <button
+                className="btn primary"
+                onClick={async () => {
+                  try {
+                    await updateDispatch.mutateAsync({
+                      id: round.id,
+                      patch: { roundStatus: 'draft', status: 'in-progress' },
+                    })
+                    setShowReopenConfirm(false)
+                    setSubject({ type: 'round', id: round.id })
+                    setActive('dispatch.close')
+                  } catch (e) {
+                    setToast({ kind: 'error', msg: e instanceof Error ? e.message : 'เปิดรอบไม่สำเร็จ' })
+                  }
+                }}
+              >
+                <Icon name="edit" size={14} /> เปิดเพื่อแก้ไข
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRequestEdit && isClosed && !isAdmin && profile && (
+        <RequestEditRoundModal
+          round={round}
+          onClose={() => setShowRequestEdit(false)}
+          onSubmit={async (fields, reason) => {
+            try {
+              await insertApproval.mutateAsync({
+                requesterId:   profile.id,
+                requesterName: profile.display_name ?? profile.username ?? profile.email ?? 'ผู้ใช้',
+                requesterRole: (String(profile.role).toLowerCase() === 'manager' ? 'manager' : 'driver') as KPSRole,
+                vehicleId:     round.vehicleId ?? '',
+                vehiclePlate:  vehicles.find(v => v.id === round.vehicleId)?.plate ?? round.code,
+                reason,
+                changes: {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  _kind: 'dispatch_reopen',
+                  roundId: round.id,
+                  roundCode: round.code,
+                  fields,
+                } as Partial<Vehicle>,
+                changeFields: fields.map(f => ({ key: f, label: f, before: '', after: 'แก้ไข' })),
+                requestedAt:  new Date().toISOString(),
+                status:       'pending',
+                reviewerId:   null,
+                reviewerName: null,
+                reviewedAt:   null,
+                reviewNote:   '',
+              })
+              setShowRequestEdit(false)
+              setToast({ kind: 'success', msg: '✅ ส่งคำขอให้แอดมินแล้ว' })
+            } catch (e) {
+              setToast({ kind: 'error', msg: 'ส่งคำขอไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)) })
+            }
           }}
         />
       )}
@@ -1077,6 +1173,107 @@ function EditRoundModal({
           <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
           <button className="btn primary" onClick={save} disabled={busy}>
             <Icon name="check" size={14} /> {busy ? 'กำลังบันทึก…' : 'บันทึก'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Request-edit modal (employee, closed round) ─────────────────────────────
+// More structured than the basic reason-only modal in DispatchSummaryReport:
+// employee ticks which parts they want to fix so the admin sees the intent
+// straight away on the approval card.
+const EDITABLE_FIELDS: { key: string; label: string }[] = [
+  { key: 'depart',      label: 'วันที่/เวลาออกเดินทาง' },
+  { key: 'odometer',    label: 'เลขไมล์ต้น/ปลาย' },
+  { key: 'vehicle',     label: 'ทะเบียนรถ' },
+  { key: 'driver',      label: 'คนขับ' },
+  { key: 'leg_weight',  label: 'น้ำหนัก/ราคา ของขา' },
+  { key: 'fuel',        label: 'น้ำมัน (ลิตร/ราคา)' },
+  { key: 'per_diem',    label: 'เบี้ยเลี้ยง' },
+  { key: 'other_exp',   label: 'ค่าใช้จ่ายอื่น' },
+  { key: 'notes',       label: 'หมายเหตุ' },
+]
+
+function RequestEditRoundModal({
+  round, onClose, onSubmit,
+}: {
+  round: Dispatch
+  onClose: () => void
+  onSubmit: (fields: string[], reason: string) => Promise<void>
+}) {
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const toggle = (k: string) => setPicked(prev => {
+    const next = new Set(prev)
+    if (next.has(k)) next.delete(k); else next.add(k)
+    return next
+  })
+
+  const submit = async () => {
+    setErr('')
+    if (picked.size === 0) return setErr('กรุณาเลือกส่วนที่ต้องการแก้ไขอย่างน้อย 1 ข้อ')
+    if (!reason.trim()) return setErr('กรุณากรอกเหตุผล')
+    setBusy(true)
+    try { await onSubmit([...picked], reason.trim()) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 540 }}>
+        <div className="head"><h3>🔔 ขอแก้ไขรอบที่ปิดแล้ว</h3></div>
+        <div className="body">
+          {err && (
+            <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: '#DC2626' }}>{err}</div>
+          )}
+          <p style={{ marginBottom: 14, fontSize: 13 }}>
+            รอบ <strong className="mono" style={{ color: 'var(--primary)' }}>{round.code}</strong> — แอดมินจะเห็นคำขอนี้ในแดชบอร์ดและพิจารณาเปิดรอบกลับให้แก้
+          </p>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>ส่วนที่ต้องการแก้ *</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+              {EDITABLE_FIELDS.map(f => {
+                const on = picked.has(f.key)
+                return (
+                  <label key={f.key} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
+                    border: `1px solid ${on ? 'var(--primary)' : 'var(--line)'}`,
+                    background: on ? 'var(--primary-50)' : '#fff',
+                    fontSize: 13,
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() => toggle(f.key)}
+                      style={{ accentColor: 'var(--primary)' }}
+                    />
+                    <span>{f.label}</span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+
+          <Field label="เหตุผล *">
+            <textarea
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              rows={3}
+              placeholder="เช่น เลขไมล์ปลายผิด ใส่เกิน 100 km"
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+          </Field>
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" onClick={submit} disabled={busy}>
+            <Icon name="check" size={14} /> {busy ? 'กำลังส่ง…' : 'ส่งคำขอ'}
           </button>
         </div>
       </div>
