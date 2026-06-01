@@ -225,30 +225,25 @@ function CloseForm({
 
   // All floating fuel — same-vehicle entries float to the top, then everyone
   // else (so an admin can clean up an Express Fuel Log entry that was tagged
-  // to the wrong plate by attaching it to the correct round here).
-  const floatingAll = useMemo(() => {
-    const list = allFuelTxs.filter(t => t.status === 'FLOATING')
-    const roundDateMs = round?.date ? new Date(round.date).getTime() : 0
-    return list
+  // Floating fuel for THIS vehicle only — cross-vehicle items would just
+  // clutter the close screen with rows the driver/admin can't act on here.
+  const floatingForVehicle = useMemo(() => {
+    if (!round?.vehicleId) return []
+    const roundDateMs = round.date ? new Date(round.date).getTime() : 0
+    return allFuelTxs
+      .filter(t => t.status === 'FLOATING' && t.vehicleId === round.vehicleId)
       .map(t => ({
         tx: t,
-        sameVehicle: t.vehicleId === round?.vehicleId,
-        // Distance from this round's date (smaller = closer)
         dayDelta: Math.abs(new Date(t.date).getTime() - roundDateMs) / (1000 * 60 * 60 * 24),
       }))
-      .sort((a, b) => {
-        if (a.sameVehicle !== b.sameVehicle) return a.sameVehicle ? -1 : 1
-        return a.dayDelta - b.dayDelta
-      })
+      .sort((a, b) => a.dayDelta - b.dayDelta)
   }, [allFuelTxs, round?.vehicleId, round?.date])
 
-  const attachFloating = async (txId: string, retagVehicle: boolean) => {
+  const attachFloating = async (txId: string) => {
     try {
       await updateFuelTx.mutateAsync({
         id: txId,
-        patch: retagVehicle && round?.vehicleId
-          ? { tripId: roundId, status: 'TRIP_LINKED', vehicleId: round.vehicleId }
-          : { tripId: roundId, status: 'TRIP_LINKED' },
+        patch: { tripId: roundId, status: 'TRIP_LINKED' },
       })
       setToast({ kind: 'success', msg: '✅ ผูกน้ำมันลอยกับรอบนี้แล้ว' })
     } catch (e) {
@@ -902,32 +897,28 @@ function CloseForm({
 
       {/* Floating fuel quick-attach — same-vehicle entries first, then others.
           Saves bouncing to the Floating Fuel page just to link one transaction. */}
-      {floatingAll.length > 0 && !isClosed && (
+      {floatingForVehicle.length > 0 && !isClosed && (
         <>
-          <h3 className="section-title" style={{ marginBottom: 10 }}>🟡 น้ำมันลอยรอผูก ({floatingAll.length})</h3>
+          <h3 className="section-title" style={{ marginBottom: 10 }}>🟡 น้ำมันลอยรอผูก ({floatingForVehicle.length})</h3>
           <div className="card pad" style={{ marginBottom: 16, background: '#FFFBEB', border: '1px solid #FDE68A' }}>
             <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-              กดปุ่ม "ผูกกับรอบนี้" เพื่อเชื่อมกับ <span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{round.code}</span> · รายการของ <strong>รถคันนี้</strong>อยู่บนสุด
+              รายการน้ำมันของรถคันนี้ที่ยังไม่ผูกรอบ — กด "ผูกกับรอบนี้" เพื่อเชื่อมกับ <span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{round.code}</span>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {floatingAll.map(({ tx: t, sameVehicle, dayDelta }) => {
-                const isNear = sameVehicle && dayDelta <= 2
-                const plate = vehicles.find(v => v.id === t.vehicleId)?.plate ?? '—'
+              {floatingForVehicle.map(({ tx: t, dayDelta }) => {
+                const isNear = dayDelta <= 2
                 return (
                   <div
                     key={t.id}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 12,
                       padding: '8px 14px', borderRadius: 8,
-                      border: `1px solid ${isNear ? '#FBBF24' : sameVehicle ? '#FDE68A' : '#E5E7EB'}`,
-                      background: isNear ? '#FEF3C7' : sameVehicle ? '#fff' : '#F9FAFB',
-                      opacity: sameVehicle ? 1 : 0.85,
+                      border: `1px solid ${isNear ? '#FBBF24' : '#FDE68A'}`,
+                      background: isNear ? '#FEF3C7' : '#fff',
                     }}
                   >
                     <div style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>
                       <span className="mono" style={{ fontWeight: 600 }}>{db.thaiDate(t.date)}</span>
-                      <span className="muted" style={{ marginLeft: 10 }}>·</span>
-                      <span className="mono" style={{ marginLeft: 10, fontWeight: 600, color: sameVehicle ? 'var(--primary)' : 'var(--text-2)' }}>{plate}</span>
                       <span className="muted" style={{ marginLeft: 10 }}>·</span>
                       <span style={{ marginLeft: 10 }}>{t.liters.toFixed(2)} ลิตร</span>
                       <span className="muted" style={{ marginLeft: 10 }}>·</span>
@@ -939,18 +930,10 @@ function CloseForm({
                           ⭐ ใกล้วันเปิดรอบ
                         </span>
                       )}
-                      {!sameVehicle && (
-                        <span style={{ marginLeft: 10, fontSize: 10.5, fontWeight: 600, color: '#6B7280' }}>
-                          (รถคนละคัน)
-                        </span>
-                      )}
                     </div>
                     <button
                       className="btn sm primary"
-                      onClick={() => {
-                        if (!sameVehicle && !confirm(`รายการนี้เป็นของ ${plate} ไม่ใช่รถของรอบนี้\nผูกแล้วระบบจะเปลี่ยนรถของรายการเป็นรถของรอบนี้\nยืนยัน?`)) return
-                        void attachFloating(t.id, !sameVehicle)
-                      }}
+                      onClick={() => void attachFloating(t.id)}
                       disabled={updateFuelTx.isPending}
                     >
                       <Icon name="check" size={12} /> ผูกกับรอบนี้
