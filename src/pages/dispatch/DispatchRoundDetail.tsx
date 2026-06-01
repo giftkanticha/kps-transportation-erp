@@ -139,6 +139,17 @@ function LegModal({
     onSave(f)
   }
 
+  // 'บันทึกร่าง' lets the user save partial leg data and come back to fill
+  // in weight / price later (e.g. they don't have the weighbridge ticket yet).
+  // Only requires that at least one of origin / destination is set so the
+  // leg shows up in the list meaningfully.
+  const submitDraft = () => {
+    if (!f.origin.trim() && !f.destination.trim()) {
+      return alert('กรุณากรอกอย่างน้อย ต้นทาง หรือ ปลายทาง')
+    }
+    onSave(f)
+  }
+
   return (
     <div
       onClick={onCancel}
@@ -264,6 +275,13 @@ function LegModal({
           <div className="row btn-row" style={{ justifyContent: 'flex-end' }}>
             <button className="btn" onClick={onCancel}>
               <Icon name="close" size={15} /> ยกเลิก
+            </button>
+            <button
+              className="btn"
+              onClick={submitDraft}
+              title="บันทึกข้อมูลที่กรอกไว้ — เติมน้ำหนัก/ราคาภายหลังได้"
+            >
+              <Icon name="edit" size={15} /> บันทึกร่าง
             </button>
             <button className="btn primary" onClick={submit}>
               <Icon name="check" size={15} /> บันทึก
