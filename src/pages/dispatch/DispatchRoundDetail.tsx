@@ -3,7 +3,7 @@ import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound } from '../../types'
+import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -498,17 +498,23 @@ function ClosedSummary({ round, fuelRound, isManager }: { round: Dispatch; fuelR
 }
 
 export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
-  const { isManager } = useAuth()
+  const { isManager, isAdmin } = useAuth()
   const [showEditRound, setShowEditRound] = useState(false)
+  const [showDeleteRound, setShowDeleteRound] = useState(false)
   const subj = subject as { type?: string; id?: string } | null
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: allFuelRecs = [] } = useList<FuelRecord>('fuel_records')
   const insertLeg = useInsert<DispatchLeg>('dispatch_legs')
   const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
   const removeLeg = useDelete('dispatch_legs')
   const updateDispatch = useUpdate<Dispatch>('dispatch')
+  const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
+  const deleteFuelRec = useDelete('fuel_records')
+  const deleteDispatch = useDelete('dispatch')
 
   const round = useMemo(
     () => (subj?.id ? dispatches.find(d => d.id === subj.id) : undefined),
@@ -629,6 +635,16 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
           {!isClosed && (
             <button className="btn" onClick={() => setShowEditRound(true)} title="แก้ไขวันที่/เลขไมล์/คนขับ/รถ">
               <Icon name="edit" size={14} /> แก้ไขรอบ
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              className="btn"
+              style={{ color: 'var(--red)', borderColor: '#fecaca' }}
+              onClick={() => setShowDeleteRound(true)}
+              title="ลบรอบนี้ถาวร"
+            >
+              <Icon name="trash" size={14} /> ลบรอบ
             </button>
           )}
           {!isClosed && (
@@ -834,6 +850,115 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
           }}
         />
       )}
+
+      {showDeleteRound && isAdmin && (
+        <DeleteRoundModal
+          round={round}
+          linkedFuelTxs={allFuelTxs.filter(t => t.tripId === round.id)}
+          mirrorFuelRecs={allFuelRecs.filter(r => r.code?.startsWith(`TRIP-${round.code}-`))}
+          onClose={() => setShowDeleteRound(false)}
+          onConfirm={async () => {
+            try {
+              // 1) Unlink fuel transactions so they don't dangle as TRIP_LINKED
+              //    with a null trip_id (FK is ON DELETE SET NULL).
+              for (const tx of allFuelTxs.filter(t => t.tripId === round.id)) {
+                await updateFuelTx.mutateAsync({
+                  id: tx.id,
+                  patch: { tripId: null, status: 'FLOATING' },
+                })
+              }
+              // 2) Delete the fuel_records mirror (TRIP-{code}-CLOSE etc.).
+              for (const rec of allFuelRecs.filter(r => r.code?.startsWith(`TRIP-${round.code}-`))) {
+                await deleteFuelRec.mutateAsync(rec.id)
+              }
+              // 3) Delete the round — dispatch_legs cascade automatically.
+              await deleteDispatch.mutateAsync(round.id)
+              setShowDeleteRound(false)
+              setActive('dispatch.open')
+            } catch (e) {
+              setToast({ kind: 'error', msg: 'ลบไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)) })
+            }
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Delete round modal (admin only) ──────────────────────────────────────────
+function DeleteRoundModal({
+  round, linkedFuelTxs, mirrorFuelRecs, onClose, onConfirm,
+}: {
+  round: Dispatch
+  linkedFuelTxs: FuelTransaction[]
+  mirrorFuelRecs: FuelRecord[]
+  onClose: () => void
+  onConfirm: () => Promise<void>
+}) {
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const isClosed = round.roundStatus === 'closed'
+  const ok = confirm === round.code
+
+  const submit = async () => {
+    setBusy(true)
+    try { await onConfirm() } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
+        <div className="head"><h3>🗑️ ลบรอบ {round.code}</h3></div>
+        <div className="body">
+          <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: 14, marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, color: '#991b1b', marginBottom: 8, fontSize: 13.5 }}>
+              ⚠️ การลบนี้ทำถาวร ย้อนกลับไม่ได้
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: '#7f1d1d', lineHeight: 1.8 }}>
+              <li>รอบ <strong className="mono">{round.code}</strong> + ขา <strong>{round.legs?.length ?? 0}</strong> ขา จะถูกลบ</li>
+              {linkedFuelTxs.length > 0 && (
+                <li>น้ำมัน <strong>{linkedFuelTxs.length}</strong> รายการที่ผูกกับรอบนี้จะกลายเป็น "น้ำมันลอย" (ผูกใหม่ได้)</li>
+              )}
+              {mirrorFuelRecs.length > 0 && (
+                <li>บันทึก fuel_records mirror <strong>{mirrorFuelRecs.length}</strong> ของรอบนี้จะถูกลบด้วย</li>
+              )}
+              {isClosed && (
+                <li>รอบนี้สถานะ <strong>CLOSED</strong> — รายงาน P&L รายเดือนจะหายส่วนนี้</li>
+              )}
+            </ul>
+          </div>
+          <div style={{ fontSize: 13, marginBottom: 8 }}>
+            พิมพ์รหัสรอบ <strong className="mono" style={{ color: 'var(--red)' }}>{round.code}</strong> เพื่อยืนยัน:
+          </div>
+          <input
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+            placeholder={round.code}
+            autoFocus
+            style={{
+              width: '100%', height: 38, padding: '0 12px',
+              border: `2px solid ${ok ? '#16a34a' : confirm ? 'var(--red)' : 'var(--line)'}`,
+              borderRadius: 6, fontSize: 14, letterSpacing: '.05em', fontFamily: 'var(--font-mono)',
+            }}
+          />
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button
+            onClick={submit}
+            disabled={!ok || busy}
+            style={{
+              padding: '8px 18px', borderRadius: 6, fontWeight: 600, fontSize: 13,
+              border: 'none', cursor: ok && !busy ? 'pointer' : 'not-allowed',
+              background: ok ? 'var(--red)' : 'var(--bg-sunk)',
+              color: ok ? '#fff' : 'var(--text-muted)',
+              opacity: busy ? 0.6 : 1,
+            }}
+          >
+            🗑️ {busy ? 'กำลังลบ…' : 'ลบรอบนี้ถาวร'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
