@@ -120,11 +120,12 @@ async function persistRow(
   vehicles: Vehicle[],
   insertFuelTx: InsertFuelTx,
   insertFuelRec: InsertFuelRec,
+  totalOverride?: number,
 ): Promise<{ txId: string; fuelRecId: string }> {
   const vehicle = vehicles.find(v => v.id === row.vehicleId)
   const liters = parseFloat(row.liters)
   const pricePerL = parseFloat(row.pricePerL) || 35
-  const total = liters * pricePerL
+  const total = totalOverride != null ? totalOverride : liters * pricePerL
   const txId = uid('ftx')
   const fuelRecId = uid('f')
 
@@ -309,8 +310,22 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     const result = autoRoute(row.vehicleId, row.date, row.source, parseFloat(row.liters), vehicles, dispatches, fuelStock, fuelRecords)
     const updated: GridRow = { ...row, ...result, committed: result.status !== 'ERROR' }
 
+    // External-pump receipts are usually paid as a whole baht — the
+    // liters×price often lands on a .xx fraction (e.g. 1,999.55). Offer to
+    // round up to the next baht so the AP figure matches the receipt.
+    let totalOverride: number | undefined
+    if (updated.committed && row.source === 'EXTERNAL_PUMP') {
+      const raw = parseFloat(row.liters) * (parseFloat(row.pricePerL) || 35)
+      const ceil = Math.ceil(raw)
+      if (raw > 0 && Math.abs(ceil - raw) > 0.001) {
+        if (confirm(`ยอดปั๊มภายนอก = ${raw.toFixed(2)} บาท\n\nตกลง = ปัดขึ้นเป็น ${ceil.toLocaleString()} บาท\nยกเลิก = ใช้ยอดตามจริง ${raw.toFixed(2)} บาท`)) {
+          totalOverride = ceil
+        }
+      }
+    }
+
     if (updated.committed) {
-      const { txId, fuelRecId } = await persistRow(updated, vehicles, insertFuelTx, insertFuelRec)
+      const { txId, fuelRecId } = await persistRow(updated, vehicles, insertFuelTx, insertFuelRec, totalOverride)
       updated.txId = txId
       updated.fuelRecId = fuelRecId
       if (result.status === 'FLOATING') {

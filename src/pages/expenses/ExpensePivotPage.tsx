@@ -191,8 +191,8 @@ export function ExpensePivotPage() {
           <div className="head">
             <h3>ตารางสรุป — ค่าใช้จ่ายรวม ({dateRangeLabel()})</h3>
           </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="tbl" style={{ minWidth: '100%' }}>
+          <div style={{ overflowX: 'auto' }} className="pivot-scroll">
+            <table className="tbl pivot-print" style={{ minWidth: '100%' }}>
               <thead>
                 <tr>
                   <th

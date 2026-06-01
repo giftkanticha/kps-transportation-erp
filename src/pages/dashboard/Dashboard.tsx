@@ -312,10 +312,6 @@ export function Dashboard({ user, setActive }: DashboardProps) {
 
   const { data: expHeaders = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: sbPartners = [] } = useList<Partner>('partners')
-  const expUnpaid      = useMemo(() => expHeaders.filter(h => !h.paid), [expHeaders])
-  const expUnpaidTotal = useMemo(() => expUnpaid.reduce((s, h) => s + (h.total || 0), 0), [expUnpaid])
-  const plateOf   = (id: string) => vehicles.find(v => v.id === id)?.plate ?? '—'
-  const vendorOf  = (id: string) => sbPartners.find(p => p.id === id)?.name ?? '—'
 
   const onTrip    = useMemo(() => dispatch.filter(t => t.status === 'in-progress'), [dispatch])
   const scheduled = useMemo(() => dispatch.filter(t => t.status === 'scheduled'), [dispatch])
@@ -567,51 +563,6 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                       </div>
                     </div>
                   )}
-                  {creditorsWithDebt.length > 0 && (
-                    <div
-                      className="feed-item"
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => setActive('expenses.finance')}
-                      title="ดูสถานะการเงิน"
-                    >
-                      <div className="ic red"><Icon name="money" size={16} /></div>
-                      <div className="body">
-                        <div className="who">
-                          ค่าใช้จ่ายค้างชำระ {creditorsWithDebt.length} เจ้าหนี้ · รวม {db.thb(totalCreditorDebt)}
-                        </div>
-                        <div className="txt" style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 4 }}>
-                          {creditorsWithDebt.slice(0, 5).map((c, i) => (
-                            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                              <span>
-                                {c.partner?.name ?? '— ไม่ระบุ —'}
-                                <span className="muted" style={{ marginLeft: 6, fontSize: 11 }}>
-                                  ({c.bills} บิล)
-                                </span>
-                                {c.isOverdue && (
-                                  <span className="badge red" style={{ marginLeft: 6, fontSize: 10 }}>เกินกำหนด</span>
-                                )}
-                              </span>
-                              <span className="mono" style={{ fontWeight: 600, color: c.isOverdue ? 'var(--red)' : 'var(--text-1)' }}>
-                                {db.thb(c.total)}
-                              </span>
-                            </div>
-                          ))}
-                          {creditorsWithDebt.length > 5 && (
-                            <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
-                              และอีก {creditorsWithDebt.length - 5} เจ้าหนี้
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        className="btn sm primary"
-                        onClick={(e) => { e.stopPropagation(); setActive('expenses.finance') }}
-                        style={{ alignSelf: 'center' }}
-                      >
-                        จัดการ <Icon name="arrow-right" size={12} />
-                      </button>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -658,30 +609,31 @@ export function Dashboard({ user, setActive }: DashboardProps) {
             </div>
           )}
 
-          {/* Expenses pending payment (to-do) */}
-          {expUnpaid.length > 0 && (
+          {/* Expenses pending payment — grouped by creditor (เจ้าหนี้) */}
+          {creditorsWithDebt.length > 0 && (
             <div className="card">
               <div className="head">
-                <h3>🧾 ค่าใช้จ่ายค้างชำระ</h3>
-                <span className="badge amber mono">{expUnpaid.length}</span>
+                <h3>🧾 ค่าใช้จ่ายค้างชำระ (รายเจ้าหนี้)</h3>
+                <span className="badge amber mono">{creditorsWithDebt.length}</span>
               </div>
               <div>
-                {expUnpaid.slice(0, 6).map(h => (
+                {creditorsWithDebt.slice(0, 8).map((c, i) => (
                   <div
-                    key={h.id}
+                    key={i}
                     onClick={() => setActive('expenses.finance')}
                     style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 18px', cursor: 'pointer', borderTop: '1px solid var(--line)' }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600 }}>
-                        <span className="mono">{plateOf(h.vehicleId)}</span> · {vendorOf(h.partnerId)}
+                        {c.partner?.name ?? '— ไม่ระบุเจ้าหนี้ —'}
+                        {c.isOverdue && <span className="badge red" style={{ marginLeft: 6, fontSize: 10 }}>เกินกำหนด</span>}
                       </div>
                       <div className="muted" style={{ fontSize: 11.5 }}>
-                        {h.code}{h.dueDate ? ` · ครบกำหนด ${db.thaiDate(h.dueDate)}` : ''}
+                        {c.bills} บิล{c.earliestDue ? ` · ครบกำหนดเร็วสุด ${db.thaiDate(c.earliestDue)}` : ''}
                       </div>
                     </div>
-                    <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)', flexShrink: 0 }}>
-                      {db.thb(h.total)}
+                    <span className="mono" style={{ fontWeight: 700, color: c.isOverdue ? 'var(--red)' : 'var(--primary)', flexShrink: 0 }}>
+                      {db.thb(c.total)}
                     </span>
                   </div>
                 ))}
@@ -689,7 +641,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
               <div style={{ padding: '11px 18px', borderTop: '1px solid var(--line)', display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="muted" style={{ fontSize: 12.5 }}>ยอดค้างชำระรวม</span>
                 <div className="spacer" />
-                <span className="mono" style={{ fontWeight: 800, color: 'var(--primary)' }}>{db.thb(expUnpaidTotal)}</span>
+                <span className="mono" style={{ fontWeight: 800, color: 'var(--primary)' }}>{db.thb(totalCreditorDebt)}</span>
               </div>
               <div style={{ padding: '0 18px 14px' }}>
                 <button className="btn sm primary" style={{ width: '100%' }} onClick={() => setActive('expenses.finance')}>
