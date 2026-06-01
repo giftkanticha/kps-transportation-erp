@@ -62,7 +62,12 @@ function genExpCode(headers: ExpenseHeader[]): string {
     String(now.getDate()).padStart(2, '0')
   const prefix = `EXP-${yyyymmdd}-`
   const existing = headers.filter(h => h.code.startsWith(prefix))
-  return prefix + String(existing.length + 1).padStart(3, '0')
+  // length+1 leaves gaps when an expense is deleted and collides with a live row.
+  const maxSeq = existing.reduce((max, h) => {
+    const n = parseInt(h.code.slice(prefix.length), 10)
+    return Number.isNaN(n) ? max : Math.max(max, n)
+  }, 0)
+  return prefix + String(maxSeq + 1).padStart(3, '0')
 }
 function toBeCode(code: string): string {
   return code.replace(/^EXP-(\d{4})/, (_, y) => `EXP-${+y + 543}`)

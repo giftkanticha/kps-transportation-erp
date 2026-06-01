@@ -879,7 +879,13 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const insertTire = useInsert<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
-  const nextSerial = 'TIR' + String(tires.length + 1).padStart(4, '0')
+  const nextSerial = 'TIR' + String(
+    // Use max(TIR####) + 1 so deleted tires don't leave a hole that collides.
+    tires.reduce((max, t) => {
+      const m = /^TIR(\d+)$/.exec(t.serial ?? '')
+      return m ? Math.max(max, parseInt(m[1], 10)) : max
+    }, 0) + 1,
+  ).padStart(4, '0')
   const [form, setForm] = useState({
     serial: nextSerial,
     brand: 'Bridgestone',

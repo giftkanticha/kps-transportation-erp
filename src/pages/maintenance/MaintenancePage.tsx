@@ -16,9 +16,13 @@ function todayISO(): string {
 
 function nextCode(existing: Maintenance[]): string {
   const ymd = todayISO().replace(/-/g, '')
-  const todays = existing.filter(m => m.code?.startsWith('MNT-' + ymd))
-  const seq = String(todays.length + 1).padStart(3, '0')
-  return `MNT-${ymd}-${seq}`
+  const prefix = 'MNT-' + ymd + '-'
+  const todays = existing.filter(m => m.code?.startsWith(prefix))
+  const maxSeq = todays.reduce((max, m) => {
+    const n = parseInt(m.code.slice(prefix.length), 10)
+    return Number.isNaN(n) ? max : Math.max(max, n)
+  }, 0)
+  return prefix + String(maxSeq + 1).padStart(3, '0')
 }
 
 export function MaintenancePage() {
