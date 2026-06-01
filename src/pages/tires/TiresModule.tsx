@@ -9,8 +9,10 @@ import { usePrint } from '../../hooks/usePrint'
 import type { Tire, TireEvent, TireScrapSale, Vehicle } from '../../types'
 
 // ── Thresholds ────────────────────────────────────────────────────
-const KM_WARN_T = 40000
-const KM_CRIT_T = 50000
+// Truck tires (10/18/22 ล้อ) — green up to 120k, amber 120k–150k, red 150k+.
+// Earlier defaults were 40k / 50k which match passenger cars, not the fleet.
+const KM_WARN_T = 120000
+const KM_CRIT_T = 150000
 
 const kmStatus = (km: number) => {
   if (km >= KM_CRIT_T) return { color: '#dc2626', bg: '#fee2e2', label: 'ใกล้หมด', dot: 'red' }
@@ -1259,9 +1261,9 @@ function TiresLayout() {
             <div className="col" style={{ marginTop: 16, gap: 6, fontSize: 12.5 }}>
               {(
                 [
-                  ['#16a34a', '#dcfce7', 'ดี (< 40,000 km)'],
-                  ['#d97706', '#fef3c7', 'ปานกลาง (40k-50k km)'],
-                  ['#dc2626', '#fee2e2', 'ใกล้หมด (> 50,000 km)'],
+                  ['#16a34a', '#dcfce7', 'ดี (< 120,000 km)'],
+                  ['#d97706', '#fef3c7', 'ปานกลาง (120k-150k km)'],
+                  ['#dc2626', '#fee2e2', 'ใกล้หมด (> 150,000 km)'],
                   ['#94a3b8', '#f8fafc', 'สำรอง / ว่าง'],
                 ] as [string, string, string][]
               ).map(([c, bg, label]) => (
