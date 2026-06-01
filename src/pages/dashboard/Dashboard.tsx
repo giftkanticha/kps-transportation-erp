@@ -488,7 +488,12 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                     </div>
                   )}
                   {maintenanceDueVehicles.length > 0 && (
-                    <div className="feed-item">
+                    <div
+                      className="feed-item"
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setActive('maintenance')}
+                      title="ไปหน้าบำรุงรักษา"
+                    >
                       <div className="ic amber"><Icon name="wrench" size={16} /></div>
                       <div className="body">
                         <div className="who">ครบกำหนดบำรุงรักษา {maintenanceDueVehicles.length} คัน</div>
@@ -497,6 +502,13 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                           {maintenanceDueVehicles.length > 3 && ` และอีก ${maintenanceDueVehicles.length - 3}`}
                         </div>
                       </div>
+                      <button
+                        className="btn sm primary"
+                        onClick={(e) => { e.stopPropagation(); setActive('maintenance') }}
+                        style={{ alignSelf: 'center' }}
+                      >
+                        จัดการ <Icon name="arrow-right" size={12} />
+                      </button>
                     </div>
                   )}
                   {lowStockItems.length > 0 && (
