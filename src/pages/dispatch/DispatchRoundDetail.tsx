@@ -499,6 +499,7 @@ function ClosedSummary({ round, fuelRound, isManager }: { round: Dispatch; fuelR
 
 export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const { isManager } = useAuth()
+  const [showEditRound, setShowEditRound] = useState(false)
   const subj = subject as { type?: string; id?: string } | null
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -625,6 +626,11 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
           </div>
         </div>
         <div className="actions no-print">
+          {!isClosed && (
+            <button className="btn" onClick={() => setShowEditRound(true)} title="แก้ไขวันที่/เลขไมล์/คนขับ/รถ">
+              <Icon name="edit" size={14} /> แก้ไขรอบ
+            </button>
+          )}
           {!isClosed && (
             <button
               className="btn primary"
@@ -814,6 +820,141 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       )}
 
       {toast && <Toast toast={toast} onClose={() => setToast(null)} />}
+
+      {showEditRound && !isClosed && (
+        <EditRoundModal
+          round={round}
+          vehicles={vehicles}
+          employees={employees}
+          updateDispatch={updateDispatch}
+          onClose={() => setShowEditRound(false)}
+          onSaved={() => {
+            setShowEditRound(false)
+            setToast({ kind: 'success', msg: '✅ อัปเดตข้อมูลรอบแล้ว' })
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Edit Round header modal (draft only) ─────────────────────────────────────
+function EditRoundModal({
+  round, vehicles, employees, updateDispatch, onClose, onSaved,
+}: {
+  round: Dispatch
+  vehicles: Vehicle[]
+  employees: Employee[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  updateDispatch: any
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const drivers = employees.filter(e => e.position === 'คนขับ')
+  const transportVehicles = vehicles
+    .filter(v => v.groupKind === 'TRANSPORT')
+    .sort((a, b) => a.plate.localeCompare(b.plate))
+
+  const [form, setForm] = useState({
+    depart: round.depart || (round.date + 'T08:00'),
+    vehicleId: round.vehicleId ?? '',
+    driverId: round.driverId ?? '',
+    startOdometer: round.startOdometer != null ? String(round.startOdometer) : '',
+    notes: round.notes ?? '',
+  })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const save = async () => {
+    setErr('')
+    if (!form.depart) return setErr('กรุณาระบุวันที่/เวลาออกเดินทาง')
+    if (!form.vehicleId) return setErr('กรุณาเลือกรถ')
+    if (!form.driverId) return setErr('กรุณาเลือกคนขับ')
+    const startOdo = Number(form.startOdometer)
+    if (form.startOdometer === '' || isNaN(startOdo) || startOdo < 0)
+      return setErr('กรุณาระบุเลขไมล์ต้นรอบ')
+    setBusy(true)
+    try {
+      await updateDispatch.mutateAsync({
+        id: round.id,
+        patch: {
+          depart: form.depart,
+          date: form.depart.slice(0, 10),
+          vehicleId: form.vehicleId,
+          driverId: form.driverId,
+          startOdometer: startOdo,
+          notes: form.notes,
+        },
+      })
+      onSaved()
+    } catch (e) {
+      setErr('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+        <div className="head"><h3>✏️ แก้ไขข้อมูลรอบ {round.code}</h3></div>
+        <div className="body">
+          {err && (
+            <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: '#DC2626' }}>{err}</div>
+          )}
+          <div className="grid-2" style={{ gap: 14 }}>
+            <Field label="วันที่/เวลาออกเดินทาง *">
+              <input
+                type="datetime-local"
+                value={form.depart}
+                onChange={e => setForm(f => ({ ...f, depart: e.target.value }))}
+              />
+            </Field>
+            <Field label="เลขไมล์ต้นรอบ (km) *">
+              <input
+                type="number"
+                value={form.startOdometer}
+                onChange={e => setForm(f => ({ ...f, startOdometer: e.target.value }))}
+                placeholder="0"
+              />
+            </Field>
+          </div>
+          <div className="grid-2" style={{ gap: 14, marginTop: 14 }}>
+            <Field label="ทะเบียนรถ *">
+              <select value={form.vehicleId} onChange={e => setForm(f => ({ ...f, vehicleId: e.target.value }))}>
+                <option value="">— เลือกรถ —</option>
+                {transportVehicles.map(v => (
+                  <option key={v.id} value={v.id}>{v.plate} ({v.brand} · {v.type})</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="คนขับ *">
+              <select value={form.driverId} onChange={e => setForm(f => ({ ...f, driverId: e.target.value }))}>
+                <option value="">— เลือกคนขับ —</option>
+                {drivers.map(d => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <Field label="หมายเหตุ">
+              <textarea
+                value={form.notes}
+                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                rows={2}
+                style={{ width: '100%', resize: 'vertical' }}
+              />
+            </Field>
+          </div>
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" onClick={save} disabled={busy}>
+            <Icon name="check" size={14} /> {busy ? 'กำลังบันทึก…' : 'บันทึก'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
