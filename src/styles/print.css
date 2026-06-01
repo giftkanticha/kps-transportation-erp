@@ -6,8 +6,10 @@
 @page { size: A4 portrait; margin: 8mm 10mm; }
 /* Landscape reports select this named page via body.print-landscape (set by
    usePrint). Declared statically so the print engine resolves the size at
-   load time — see usePrint.ts for why dynamic @page injection failed. */
-@page landscape { size: A4 landscape; margin: 8mm; }
+   load time — see usePrint.ts for why dynamic @page injection failed.
+   NB: the page name must NOT be the keyword "landscape" — that collides with
+   the `size` orientation keyword and some engines silently drop the rule. */
+@page kpsland { size: A4 landscape; margin: 8mm; }
 
 /* ── Screen: hide print-only elements ─────────────────────────── */
 .print-only    { display: none !important; }
@@ -15,8 +17,12 @@
 
 /* ── @media print ─────────────────────────────────────────────── */
 @media print {
-  /* Landscape orientation: usePrint('landscape') adds this class to <body>. */
-  body.print-landscape { page: landscape; }
+  /* Landscape orientation: usePrint('landscape') adds this class to <body>.
+     Set `page` on the root boxes so the named page's size wins for the whole
+     printout (body alone is not always enough in Blink). */
+  html.print-landscape,
+  body.print-landscape,
+  body.print-landscape .content { page: kpsland; }
 
   /* Reveal print-only */
   .print-only    { display: block !important; }
@@ -82,14 +88,17 @@
   .pivot-print-wrap > div:first-child { display: none !important; }
   .pivot-print-wrap { display: block !important; }
   .pivot-print-wrap .print-area { width: 100% !important; }
-  .pivot-print {
+  /* NB: selectors scoped under .print-area so they out-specify the generic
+     `.print-area .tbl th { font-size: 8pt }` rule above — otherwise the pivot
+     never actually shrank to 6pt. */
+  .print-area .pivot-print {
     width: 100% !important;
     min-width: 0 !important;
     table-layout: fixed !important;
     border-collapse: collapse !important;
   }
-  .pivot-print th,
-  .pivot-print td {
+  .print-area .pivot-print th,
+  .print-area .pivot-print td {
     min-width: 0 !important;
     font-size: 6pt !important;
     padding: 1px 2px !important;
@@ -98,13 +107,13 @@
     /* sticky columns clip / overlap when printed — pin them static */
     position: static !important;
   }
-  .pivot-print .muted { font-size: 5pt !important; }
+  .print-area .pivot-print .muted { font-size: 5pt !important; }
   /* Plate column wider, partner columns share remaining space equally. */
-  .pivot-print th:first-child,
-  .pivot-print td:first-child { width: 12% !important; }
+  .print-area .pivot-print th:first-child,
+  .print-area .pivot-print td:first-child { width: 11% !important; }
   /* Last column = รวมจ่ายต่อคัน */
-  .pivot-print th:last-child,
-  .pivot-print td:last-child { width: 10% !important; }
+  .print-area .pivot-print th:last-child,
+  .print-area .pivot-print td:last-child { width: 9% !important; }
 
   /* Force the element onto a new printed page */
   .print-break { break-before: page; page-break-before: always; }

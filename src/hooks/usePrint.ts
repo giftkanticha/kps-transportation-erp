@@ -6,10 +6,15 @@ export function usePrint() {
     // fresh @page { size } right before window.print() is NOT honored by
     // Chromium, which is why landscape reports printed portrait.)
     const cls = 'print-landscape'
-    document.body.classList.toggle(cls, orientation === 'landscape')
+    const on = orientation === 'landscape'
+    document.documentElement.classList.toggle(cls, on)
+    document.body.classList.toggle(cls, on)
     window.addEventListener(
       'afterprint',
-      () => document.body.classList.remove(cls),
+      () => {
+        document.documentElement.classList.remove(cls)
+        document.body.classList.remove(cls)
+      },
       { once: true },
     )
     window.print()
