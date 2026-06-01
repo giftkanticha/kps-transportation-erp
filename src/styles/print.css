@@ -4,6 +4,10 @@
 */
 
 @page { size: A4 portrait; margin: 8mm 10mm; }
+/* Landscape reports select this named page via body.print-landscape (set by
+   usePrint). Declared statically so the print engine resolves the size at
+   load time — see usePrint.ts for why dynamic @page injection failed. */
+@page landscape { size: A4 landscape; margin: 8mm; }
 
 /* ── Screen: hide print-only elements ─────────────────────────── */
 .print-only    { display: none !important; }
@@ -11,6 +15,9 @@
 
 /* ── @media print ─────────────────────────────────────────────── */
 @media print {
+  /* Landscape orientation: usePrint('landscape') adds this class to <body>. */
+  body.print-landscape { page: landscape; }
+
   /* Reveal print-only */
   .print-only    { display: block !important; }
   .kps-print-sig { display: grid  !important; }
