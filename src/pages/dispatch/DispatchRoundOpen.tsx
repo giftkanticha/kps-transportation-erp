@@ -224,9 +224,15 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
             <Field label="เลือกรถ *">
               <select value={vehicleId} onChange={e => setVehicleId(e.target.value)}>
                 <option value="">-- เลือก --</option>
-                {vehicles.map(v => (
-                  <option key={v.id} value={v.id}>{v.plate} ({v.brand} · {v.type})</option>
-                ))}
+                {/* Only TRANSPORT-grouped vehicles can be dispatched on a haul.
+                    INTERNAL ones (forklifts, loaders, ภายในลาน, company cars)
+                    aren't relevant here and were making the dropdown overflow. */}
+                {vehicles
+                  .filter(v => v.groupKind === 'TRANSPORT')
+                  .sort((a, b) => a.plate.localeCompare(b.plate))
+                  .map(v => (
+                    <option key={v.id} value={v.id}>{v.plate} ({v.brand} · {v.type})</option>
+                  ))}
               </select>
             </Field>
             <Field label="เลือกคนขับ *">
