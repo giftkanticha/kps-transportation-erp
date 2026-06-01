@@ -20,6 +20,12 @@ const kmStatus = (km: number) => {
   return { color: '#16a34a', bg: '#dcfce7', label: 'ดี', dot: 'green' }
 }
 
+// Equipment (forklifts, loaders, grinders) shouldn't appear in the tire system.
+function useFleetVehicles() {
+  const { data = [] } = useList<Vehicle>('vehicles')
+  return useMemo(() => data.filter((v) => v.groupKind !== 'EQUIPMENT'), [data])
+}
+
 const LOC_LABEL: Record<string, { label: string; cls: string }> = {
   'in-use': { label: 'ใช้งาน', cls: 'blue' },
   spare: { label: 'สำรอง', cls: 'gray' },
@@ -326,7 +332,7 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverT
 // ── Tab 1: All Tires ─────────────────────────────────────────────
 
 function InstallTireModal({ tire, onClose, onDone }: { tire: Tire; onClose: () => void; onDone: () => void }) {
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: tires = [] } = useList<Tire>('tires')
   const updateTire = useUpdate<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
@@ -410,7 +416,7 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
   const [modal, setModal] = useState<'history' | 'swap' | 'install' | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: allTires = [] } = useList<Tire>('tires')
   const updateTire = useUpdate<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
@@ -566,7 +572,7 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
     setActive('tires.history')
   }
   const { data: events = [] } = useList<TireEvent>('tire_events')
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const brands = [...new Set(allTires.map((t) => t.brand))]
 
   const [q, setQ] = useState('')
@@ -876,7 +882,7 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
 // ── Add Tire Modal ────────────────────────────────────────────────
 function AddTireModal({ onClose }: { onClose: () => void }) {
   const { data: tires = [] } = useList<Tire>('tires')
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const insertTire = useInsert<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
   const nextSerial = 'TIR' + String(
@@ -1119,7 +1125,7 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
 
 // ── Tab 2: Layout ─────────────────────────────────────────────────
 function TiresLayout() {
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: tires = [] } = useList<Tire>('tires')
   const [picked, setPicked] = useState('')
   const [popup, setPopup] = useState<{ pos: string; tire: Tire | undefined } | null>(null)
@@ -1534,7 +1540,7 @@ function TireLayoutPrintView({ vehicle, wc, tireMap, allTires, spares }: {
 
 // ── Tire History Modal ──────────────────────────────────────────
 function TireHistoryModal({ tire, onClose }: { tire: Tire; onClose: () => void }) {
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: allEvents = [] } = useList<TireEvent>('tire_events')
   const vehicle = tire.vehicleId ? vehicles.find((v) => v.id === tire.vehicleId) : null
   const events = useMemo(
@@ -1643,7 +1649,7 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
   onClose: () => void
   onDone: () => void
 }) {
-  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const allVehicles = useFleetVehicles()
   const updateTire = useUpdate<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
   const wc = wcFrom(vehicle.type ?? '')
@@ -1757,7 +1763,7 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
 
 // ── Move to Stock Panel ───────────────────────────────────────────
 function MoveToStockPanel() {
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: tires = [] } = useList<Tire>('tires')
   const updateTire = useUpdate<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
@@ -1835,7 +1841,7 @@ function MoveToStockPanel() {
 
 // ── Tab 3: Manage & Swap ──────────────────────────────────────────
 function TiresManageFull() {
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: tires = [] } = useList<Tire>('tires')
   const { data: tireEvents = [] } = useList<TireEvent>('tire_events')
   const updateTire = useUpdate<Tire>('tires')
@@ -2392,7 +2398,7 @@ function TiresManageFull() {
 // ── Tab 4: History Timeline ───────────────────────────────────────
 function TiresHistoryFull() {
   const { data: tires = [] } = useList<Tire>('tires')
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: allEvents = [] } = useList<TireEvent>('tire_events')
   const initial = (typeof window !== 'undefined' && sessionStorage.getItem('kps_tire_history_serial')) || ''
   const [q, setQ] = useState(initial)

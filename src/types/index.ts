@@ -53,7 +53,7 @@ export interface Vehicle {
   tax: string
   insurance: string
   dispatchPermit: string
-  groupKind?: 'INTERNAL' | 'TRANSPORT'
+  groupKind?: 'INTERNAL' | 'TRANSPORT' | 'EQUIPMENT'
 }
 
 export interface Customer {

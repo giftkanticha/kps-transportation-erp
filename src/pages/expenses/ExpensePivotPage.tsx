@@ -179,7 +179,7 @@ export function ExpensePivotPage() {
       </div>
 
       {/* Sidebar + Print area */}
-      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+      <div className="pivot-print-wrap" style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         <VehiclePickerSidebar
           vehicles={allVehicles}
           picked={pickedVehicles}

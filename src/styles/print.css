@@ -70,6 +70,11 @@
 
   /* ── Expense pivot (ทะเบียน × คู่ค้า): shrink to fit landscape A4 ── */
   .pivot-scroll { overflow: visible !important; }
+  /* The sidebar + flex gap eat ~180mm of the landscape A4 width — hide them
+     on print so the pivot table gets the full page. */
+  .pivot-print-wrap > div:first-child { display: none !important; }
+  .pivot-print-wrap { display: block !important; }
+  .pivot-print-wrap .print-area { width: 100% !important; }
   .pivot-print {
     width: 100% !important;
     min-width: 0 !important;
@@ -79,14 +84,20 @@
   .pivot-print th,
   .pivot-print td {
     min-width: 0 !important;
-    font-size: 6.5pt !important;
-    padding: 1.5px 3px !important;
+    font-size: 6pt !important;
+    padding: 1px 2px !important;
     word-break: break-word !important;
     overflow-wrap: anywhere !important;
     /* sticky columns clip / overlap when printed — pin them static */
     position: static !important;
   }
-  .pivot-print .muted { font-size: 5.5pt !important; }
+  .pivot-print .muted { font-size: 5pt !important; }
+  /* Plate column wider, partner columns share remaining space equally. */
+  .pivot-print th:first-child,
+  .pivot-print td:first-child { width: 12% !important; }
+  /* Last column = รวมจ่ายต่อคัน */
+  .pivot-print th:last-child,
+  .pivot-print td:last-child { width: 10% !important; }
 
   /* Force the element onto a new printed page */
   .print-break { break-before: page; page-break-before: always; }

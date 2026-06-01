@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner } from '../../types'
+import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner, EditApprovalRequest } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
 import { canAccessRoute } from '../../lib/permissions'
 
@@ -311,6 +311,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const subUnpaidTotal = useMemo(() => subUnpaid.reduce((s, j) => s + netOf(j), 0), [subUnpaid])
 
   const { data: expHeaders = [] } = useList<ExpenseHeader>('expense_headers')
+  const { data: editApprovals = [] } = useList<EditApprovalRequest>('edit_approvals')
   const { data: sbPartners = [] } = useList<Partner>('partners')
 
   const onTrip    = useMemo(() => dispatch.filter(t => t.status === 'in-progress'), [dispatch])
@@ -402,9 +403,32 @@ export function Dashboard({ user, setActive }: DashboardProps) {
     return out.sort((a, b) => (a.status === 'critical' ? -1 : 1) - (b.status === 'critical' ? -1 : 1))
   }, [vehicles])
 
-  // No employee-request feature in the system yet — render an empty queue.
-  const pendingRequests: ReqItem[] = []
-  void dismissedReqs // keep state hook intact for future use
+  // Dispatch-reopen / vehicle-edit requests waiting on this admin's review.
+  // Filter on edit_approvals.status='pending'; dispatch_reopen items get a
+  // clearer title showing the round code so admins know what they're acting on.
+  const pendingRequests: ReqItem[] = useMemo(() => {
+    if (!canApprove) return []
+    return editApprovals
+      .filter(r => r.status === 'pending' && !dismissedReqs.has(Number(r.id)))
+      .sort((a, b) => (b.requestedAt || '').localeCompare(a.requestedAt || ''))
+      .map((r, i) => {
+        const changes = r.changes as Record<string, unknown> | undefined
+        const isReopen = changes?._kind === 'dispatch_reopen'
+        const roundCode = isReopen ? String(changes?.roundCode ?? '') : ''
+        const fields = isReopen && Array.isArray(changes?.fields) ? (changes.fields as string[]) : []
+        const title = isReopen
+          ? `ขอเปิดรอบ ${roundCode} เพื่อแก้ไข`
+          : `ขอแก้ไข ${r.vehiclePlate}`
+        const ageHrs = Math.max(0, Math.floor((Date.now() - new Date(r.requestedAt).getTime()) / 3_600_000))
+        return {
+          id: typeof r.id === 'number' ? r.id : Number(i + 1),
+          title,
+          desc: `${r.requesterName}${fields.length > 0 ? ' · ' + fields.join(', ') : ''}${r.reason ? ' — ' + r.reason : ''}`,
+          time: ageHrs < 1 ? 'ไม่กี่นาที' : ageHrs < 24 ? `${ageHrs} ชม.` : `${Math.floor(ageHrs / 24)} วัน`,
+          priority: 'warning' as const,
+        }
+      })
+  }, [editApprovals, canApprove, dismissedReqs])
 
   const iconMap:  Record<string, string> = { trip: 'package', alert: 'alert', create: 'plus', approve: 'check', invoice: 'money', fuel: 'fuel' }
   const colorMap: Record<string, string> = { alert: 'red', approve: 'green', fuel: 'amber' }
@@ -736,9 +760,10 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                     <div style={{ display: 'flex', gap: 6, flexShrink: 0, marginTop: 2 }}>
                       <button
                         style={{ background: '#10B981', color: '#fff', border: 'none', borderRadius: 7, padding: '4px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-                        onClick={() => setApprovalModal(req)}
+                        onClick={() => setActive('alerts')}
+                        title="ไปที่หน้าอนุมัติเพื่อพิจารณา"
                       >
-                        อนุมัติ
+                        พิจารณา →
                       </button>
                       <button
                         style={{ background: '#FEF2F2', color: '#EF4444', border: '1px solid #FECACA', borderRadius: 7, padding: '4px 10px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}

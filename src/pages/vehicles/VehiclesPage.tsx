@@ -96,7 +96,7 @@ function docWarn(v: Vehicle): { text: string; color: string } | null {
 
 const VEHICLE_TYPES = ['4ล้อ', '6ล้อ', '10ล้อ', '18ล้อ', '22ล้อ', 'ตู้คอนเทนเนอร์', 'พ่วงข้าง']
 
-type VehicleGroup = 'INTERNAL' | 'TRANSPORT'
+type VehicleGroup = 'INTERNAL' | 'TRANSPORT' | 'EQUIPMENT'
 
 interface VehicleEditForm {
   plate: string
@@ -318,8 +318,12 @@ function VehicleEditModal({
               <span style={{ fontWeight: 600, fontSize: 14 }}>กลุ่มรถ (ควบคุมการจ่ายน้ำมัน)</span>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
-              {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
+              {(['TRANSPORT', 'INTERNAL', 'EQUIPMENT'] as VehicleGroup[]).map(g => {
                 const active = form.groupKind === g
+                const label =
+                  g === 'TRANSPORT' ? '🚛 ขนส่ง' :
+                  g === 'INTERNAL'  ? '🏭 โรงงาน' :
+                  '⚙️ เครื่องจักร'
                 return (
                   <button
                     key={g}
@@ -334,7 +338,7 @@ function VehicleEditModal({
                       color: active ? '#1D4ED8' : 'var(--text-2)',
                     }}
                   >
-                    {g === 'INTERNAL' ? '🏭 โรงงาน (INTERNAL)' : '🚛 ขนส่ง (TRANSPORT)'}
+                    {label}
                   </button>
                 )
               })}
@@ -342,7 +346,9 @@ function VehicleEditModal({
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
               {form.groupKind === 'INTERNAL'
                 ? 'น้ำมันถูกตัดสต็อคทันที — ไม่ต้องผูกรอบงาน'
-                : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
+                : form.groupKind === 'EQUIPMENT'
+                  ? 'อุปกรณ์/เครื่องจักร — ไม่อยู่ในระบบยาง · บันทึกค่าใช้จ่ายได้ปกติ'
+                  : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
             </div>
           </div>
 

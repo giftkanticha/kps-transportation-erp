@@ -7,7 +7,7 @@ import { SegmentedFilter } from '../../components/ui/SegmentedFilter'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type VehicleGroup = 'INTERNAL' | 'TRANSPORT'
+type VehicleGroup = 'INTERNAL' | 'TRANSPORT' | 'EQUIPMENT'
 
 interface FormState {
   plate: string
@@ -24,11 +24,13 @@ interface FormState {
 const GROUP_LABEL: Record<VehicleGroup, string> = {
   INTERNAL: 'รถโรงงาน',
   TRANSPORT: 'รถขนส่ง',
+  EQUIPMENT: 'เครื่องจักร',
 }
 
 const GROUP_STYLE: Record<VehicleGroup, { background: string; color: string }> = {
   INTERNAL: { background: '#F0FDF4', color: '#166534' },
   TRANSPORT: { background: '#EFF6FF', color: '#1D4ED8' },
+  EQUIPMENT: { background: '#FEF3C7', color: '#92400E' },
 }
 
 const STATUS_LABEL: Record<Vehicle['status'], string> = {
@@ -177,8 +179,12 @@ function VehicleFormModal({
           <div>
             <label style={labelStyle}>กลุ่มรถ</label>
             <div style={{ display: 'flex', gap: 10 }}>
-              {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
+              {(['TRANSPORT', 'INTERNAL', 'EQUIPMENT'] as VehicleGroup[]).map(g => {
                 const active = form.groupKind === g
+                const label =
+                  g === 'TRANSPORT' ? '🚛 ขนส่ง' :
+                  g === 'INTERNAL'  ? '🏭 โรงงาน' :
+                  '⚙️ เครื่องจักร'
                 return (
                   <button
                     key={g}
@@ -192,7 +198,7 @@ function VehicleFormModal({
                       color: active ? '#1D4ED8' : '#64748B',
                     }}
                   >
-                    {g === 'INTERNAL' ? '🏭 รถโรงงาน' : '🚛 รถขนส่ง'}
+                    {label}
                   </button>
                 )
               })}
@@ -200,7 +206,9 @@ function VehicleFormModal({
             <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 5 }}>
               {form.groupKind === 'INTERNAL'
                 ? 'น้ำมันจะถูกตัดสต็อคทันที ไม่ต้องผูกรอบงาน'
-                : 'น้ำมันต้องผูกกับรอบงาน ถ้าไม่พบรอบจะเป็น "น้ำมันลอย"'}
+                : form.groupKind === 'EQUIPMENT'
+                  ? 'อุปกรณ์/เครื่องจักร (โฟล์คลิฟท์ · รถตัก · เครื่องโม่) — ไม่อยู่ในระบบยาง'
+                  : 'น้ำมันต้องผูกกับรอบงาน ถ้าไม่พบรอบจะเป็น "น้ำมันลอย"'}
             </div>
           </div>
 
@@ -283,6 +291,7 @@ export function VehicleManagement() {
     total: vehicles.length,
     internal: vehicles.filter(v => (v.groupKind ?? 'TRANSPORT') === 'INTERNAL').length,
     transport: vehicles.filter(v => (v.groupKind ?? 'TRANSPORT') === 'TRANSPORT').length,
+    equipment: vehicles.filter(v => v.groupKind === 'EQUIPMENT').length,
   }), [vehicles])
 
   const openAdd = () => setModal({ form: emptyForm(), editId: null })
@@ -383,8 +392,9 @@ export function VehicleManagement() {
           onChange={setFilterGroup}
           options={[
             { value: 'ALL', label: `ทั้งหมด (${stats.total})` },
-            { value: 'INTERNAL', label: `🏭 โรงงาน (${stats.internal})` },
             { value: 'TRANSPORT', label: `🚛 ขนส่ง (${stats.transport})` },
+            { value: 'INTERNAL', label: `🏭 โรงงาน (${stats.internal})` },
+            { value: 'EQUIPMENT', label: `⚙️ เครื่องจักร (${stats.equipment})` },
           ]}
         />
       </div>
