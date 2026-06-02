@@ -1,15 +1,13 @@
 /* KPS Print Stylesheet
-   @page size is injected dynamically by usePrint() per orientation.
-   Default fallback: A4 portrait 12mm margin.
+   Landscape reports are rotated 90° on a portrait page via CSS transform —
+   we no longer rely on @page orientation, which proved unreliable across
+   browsers (Chrome's print dialog often ignored size descriptors). The
+   `body.print-landscape` class (set by usePrint) triggers the rotation.
 */
 
 @page { size: A4 portrait; margin: 8mm 10mm; }
-/* Landscape reports select this named page via body.print-landscape (set by
-   usePrint). Declared statically so the print engine resolves the size at
-   load time — see usePrint.ts for why dynamic @page injection failed.
-   NB: the page name must NOT be the keyword "landscape" — that collides with
-   the `size` orientation keyword and some engines silently drop the rule. */
-@page kpsland { size: A4 landscape; margin: 8mm; }
+/* No-margin portrait page for rotated landscape content. */
+@page kpsrot { size: A4 portrait; margin: 0; }
 
 /* ── Screen: hide print-only elements ─────────────────────────── */
 .print-only    { display: none !important; }
@@ -17,12 +15,32 @@
 
 /* ── @media print ─────────────────────────────────────────────── */
 @media print {
-  /* Landscape orientation: usePrint('landscape') adds this class to <body>.
-     Set `page` on the root boxes so the named page's size wins for the whole
-     printout (body alone is not always enough in Blink). */
-  html.print-landscape,
-  body.print-landscape,
-  body.print-landscape .content { page: kpsland; }
+  /* ── Landscape via rotation ───────────────────────────────────
+     Strategy: keep the page portrait (210×297mm), but rotate the
+     `.print-area` 90° clockwise around top-left, then push it offscreen
+     to the right by 297mm. After rotation it lands occupying
+     210mm wide × 297mm tall — fitting the portrait page exactly,
+     but the *content* reads sideways = landscape on paper.
+     Math: rotate(90deg) clockwise around (297mm, 0):
+       (297,   0) → (297,   0)    [origin]
+       (594,   0) → (297, 297)    [originally top-right, now bottom-right]
+       (594, 210) → ( 87, 297)    [originally bottom-right, now bottom-left]
+       (297, 210) → ( 87,   0)    [originally bottom-left, now top-left]
+  */
+  body.print-landscape { page: kpsrot; margin: 0 !important; padding: 0 !important; }
+  body.print-landscape .print-area {
+    position: absolute !important;
+    top: 0 !important;
+    left: 297mm !important;
+    width: 297mm !important;
+    min-height: 210mm !important;
+    transform: rotate(90deg) !important;
+    transform-origin: top left !important;
+    padding: 10mm !important;
+    box-sizing: border-box !important;
+    background: #fff !important;
+  }
+
 
   /* Reveal print-only */
   .print-only    { display: block !important; }
