@@ -1,6 +1,9 @@
-/* KPS Print Stylesheet — A4 portrait by default. */
+/* KPS Print Stylesheet — A4 portrait by default; pages that need landscape
+   (e.g. wide pivot reports) opt-in via `body.print-landscape`. */
 
-@page { size: A4 portrait; margin: 8mm 10mm; }
+@page             { size: A4 portrait;  margin: 8mm 10mm; }
+@page kps-land    { size: A4 landscape; margin: 8mm 10mm; }
+body.print-landscape { page: kps-land; }
 
 /* ── Screen: hide print-only elements ─────────────────────────── */
 .print-only    { display: none !important; }
