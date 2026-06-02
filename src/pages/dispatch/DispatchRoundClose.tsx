@@ -861,7 +861,13 @@ function CloseForm({
           </Field>
         </div>
 
-        <div className="card pad" style={{ marginBottom: 14 }}>
+        <div style={{
+          marginBottom: 14,
+          background: 'var(--bg)',
+          border: '1px solid var(--line)',
+          borderRadius: 'var(--r-md)',
+          padding: '12px 14px',
+        }}>
           <div className="row" style={{ marginBottom: otherExp.length === 0 ? 0 : 10, justifyContent: 'space-between', alignItems: 'center' }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
               ค่าใช้จ่ายอื่นๆ
