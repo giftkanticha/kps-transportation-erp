@@ -845,8 +845,14 @@ function CloseForm({
           </Field>
         </div>
 
-        <div style={{ marginBottom: 8 }}>
-          <div className="row" style={{ marginBottom: 8, justifyContent: 'space-between' }}>
+        <div style={{
+          marginBottom: 14,
+          border: '1px solid var(--line)',
+          borderRadius: 10,
+          background: '#FAFBFC',
+          padding: '12px 14px',
+        }}>
+          <div className="row" style={{ marginBottom: otherExp.length === 0 ? 0 : 10, justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>ค่าใช้จ่ายอื่นๆ</span>
             {!isClosed && (
               <button className="btn sm" onClick={addExpense}>
@@ -855,46 +861,92 @@ function CloseForm({
             )}
           </div>
           {otherExp.length === 0 ? (
-            <div className="muted" style={{ fontSize: 12, padding: '6px 0' }}>— ไม่มีค่าใช้จ่ายอื่น —</div>
+            <div style={{
+              border: '1px dashed #CBD5E1',
+              borderRadius: 8,
+              padding: '14px 12px',
+              textAlign: 'center',
+              color: 'var(--text-muted)',
+              fontSize: 12,
+              background: '#fff',
+              marginTop: 10,
+            }}>
+              ยังไม่มีค่าใช้จ่ายอื่น — กด "เพิ่มรายการ" เพื่อบันทึก
+            </div>
           ) : (
-            <table className="tbl" style={{ marginBottom: 6 }}>
-              <thead>
-                <tr>
-                  <th>รายการ</th>
-                  <th className="num" style={{ width: 140 }}>จำนวน (฿)</th>
-                  {!isClosed && <th style={{ width: 50 }}></th>}
-                </tr>
-              </thead>
-              <tbody>
+            <>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: `1fr 160px ${!isClosed ? '36px' : ''}`,
+                gap: 8,
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.4px',
+                padding: '0 2px 6px',
+                borderBottom: '1px solid var(--line)',
+                marginBottom: 8,
+              }}>
+                <span>รายการ</span>
+                <span style={{ textAlign: 'right' }}>จำนวน (฿)</span>
+                {!isClosed && <span />}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {otherExp.map(e => (
-                  <tr key={e.id}>
-                    <td>
-                      <input
-                        value={e.label}
-                        onChange={ev => updateExpense(e.id, { label: ev.target.value })}
-                        placeholder="เช่น ค่าทางด่วน"
-                        disabled={isClosed}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        value={e.amount || ''}
-                        onChange={ev => updateExpense(e.id, { amount: Number(ev.target.value) || 0 })}
-                        disabled={isClosed}
-                      />
-                    </td>
+                  <div
+                    key={e.id}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: `1fr 160px ${!isClosed ? '36px' : ''}`,
+                      gap: 8,
+                      alignItems: 'center',
+                    }}
+                  >
+                    <input
+                      value={e.label}
+                      onChange={ev => updateExpense(e.id, { label: ev.target.value })}
+                      placeholder="เช่น ค่าทางด่วน"
+                      disabled={isClosed}
+                    />
+                    <input
+                      type="number"
+                      value={e.amount || ''}
+                      onChange={ev => updateExpense(e.id, { amount: Number(ev.target.value) || 0 })}
+                      disabled={isClosed}
+                      placeholder="0"
+                      style={{ textAlign: 'right', fontFamily: 'monospace' }}
+                    />
                     {!isClosed && (
-                      <td>
-                        <button className="btn ghost icon sm" onClick={() => removeExpense(e.id)} style={{ color: 'var(--red)' }}>
-                          <Icon name="close" size={13} />
-                        </button>
-                      </td>
+                      <button
+                        className="btn ghost icon sm"
+                        onClick={() => removeExpense(e.id)}
+                        style={{ color: 'var(--red)' }}
+                        title="ลบรายการ"
+                      >
+                        <Icon name="close" size={13} />
+                      </button>
                     )}
-                  </tr>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+              {otherTotal > 0 && (
+                <div style={{
+                  marginTop: 10,
+                  paddingTop: 8,
+                  borderTop: '1px solid var(--line)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: 13,
+                }}>
+                  <span style={{ color: 'var(--text-muted)' }}>รวมค่าใช้จ่ายอื่น</span>
+                  <span className="mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
+                    {db.thb(otherTotal)}
+                  </span>
+                </div>
+              )}
+            </>
           )}
         </div>
 
