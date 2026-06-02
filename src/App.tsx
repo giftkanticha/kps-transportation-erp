@@ -8,7 +8,7 @@ import { Topbar } from './components/layout/Topbar'
 import { UserManagementPage } from './pages/admin/UserManagementPage'
 import { ResetDataPage } from './pages/admin/ResetDataPage'
 import { ResetHistoryPage } from './pages/admin/ResetHistoryPage'
-import { ImportSubDriversPage } from './pages/admin/ImportSubDriversPage'
+import { ImportFilePage } from './pages/admin/ImportFilePage'
 import { Dashboard } from './pages/dashboard/Dashboard'
 import { AlertsTasksPage } from './pages/dashboard/AlertsTasksPage'
 import { VehiclesPage } from './pages/vehicles/VehiclesPage'
@@ -88,7 +88,7 @@ const crumbMap: Record<string, string> = {
   'admin.users': 'จัดการผู้ใช้งาน',
   'admin.reset': 'รีเซตข้อมูล',
   'admin.reset.history': 'ประวัติการรีเซต',
-  'admin.import-subdrivers': 'Import — รถร่วม',
+  'admin.import': 'Import File',
 }
 
 export default function App() {
@@ -239,8 +239,8 @@ export default function App() {
         return isAdmin ? <ResetDataPage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
       case 'admin.reset.history':
         return isAdmin ? <ResetHistoryPage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
-      case 'admin.import-subdrivers':
-        return isAdmin ? <ImportSubDriversPage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
+      case 'admin.import':
+        return isAdmin ? <ImportFilePage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
 
       default:
         return <Dashboard user={legacyUser} setActive={setActive} />

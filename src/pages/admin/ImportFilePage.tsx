@@ -13,7 +13,62 @@ interface ImportResult {
   errors: string[]
 }
 
-export function ImportSubDriversPage({ setActive }: { setActive: (id: string) => void }) {
+type ImportTab = 'sub-drivers' | 'tires'
+
+const TABS: { id: ImportTab; label: string; available: boolean }[] = [
+  { id: 'sub-drivers', label: 'รถร่วม / คนขับ',  available: true },
+  { id: 'tires',       label: 'ยาง',             available: false },
+]
+
+export function ImportFilePage({ setActive }: { setActive: (id: string) => void }) {
+  const [tab, setTab] = useState<ImportTab>('sub-drivers')
+
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Import File</h1>
+          <div className="page-sub">
+            เครื่องมือ import ข้อมูลแบบครั้งเดียว สำหรับ admin
+            — ตอนนี้รองรับ <strong>รถร่วม</strong> เพิ่มประเภทอื่นได้ตามต้องการ
+          </div>
+        </div>
+        <div className="actions">
+          <button className="btn" onClick={() => setActive('dashboard')}>
+            <Icon name="close" size={14} /> กลับ
+          </button>
+        </div>
+      </div>
+
+      <div className="tabs" style={{ marginBottom: 18 }}>
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            className={`tab ${tab === t.id ? 'active' : ''}`}
+            onClick={() => t.available && setTab(t.id)}
+            style={!t.available ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+            title={t.available ? '' : 'ยังไม่มีข้อมูลให้ import — ส่ง Excel มาเพื่อเพิ่ม'}
+          >
+            {t.label}{!t.available && ' (เร็วๆ นี้)'}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'sub-drivers' && <SubDriversImportTab />}
+      {tab === 'tires' && (
+        <div className="card pad" style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)' }}>
+          <Icon name="package" size={36} style={{ opacity: 0.3, marginBottom: 8 }} />
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>ยังไม่มีข้อมูลยางสำหรับ import</div>
+          <div style={{ fontSize: 12.5 }}>
+            ส่งไฟล์ Excel ของระบบยางมาในแชท จะเพิ่มเป็นแท็บนี้ให้
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SubDriversImportTab() {
   const { data: existingSubs = [] } = useList<Subcontractor>('subcontractors')
   const { data: existingDrivers = [] } = useList<SubDriver>('sub_drivers')
   const [running, setRunning] = useState(false)
@@ -128,22 +183,15 @@ export function ImportSubDriversPage({ setActive }: { setActive: (id: string) =>
 
   return (
     <div>
-      <div className="page-head">
-        <div>
-          <h1 className="page-title">Import — รถร่วม (ครั้งเดียว)</h1>
-          <div className="page-sub">
-            นำเข้าข้อมูลรถร่วม / คนขับ จาก Excel ที่อัปโหลด 26 รายการ + 11 กลุ่มขนส่ง
-            <br/>
-            <span style={{ color: '#92400E' }}>
-              ⚠ ก่อนใช้งาน ต้อง apply migration <code>0031_sub_drivers_extra_fields.sql</code> บน Supabase ก่อน
-              (เพิ่มคอลัมน์ province, follower_name, follower_id_card, account_name, vehicle_owner)
-            </span>
-          </div>
-        </div>
-        <div className="actions">
-          <button className="btn" onClick={() => setActive('subcontractors')}>
-            <Icon name="close" size={14} /> กลับ
-          </button>
+      <div
+        className="card pad"
+        style={{ marginBottom: 16, background: '#FFFBEB', borderColor: '#FDE68A' }}
+      >
+        <div style={{ fontSize: 13, color: '#92400E' }}>
+          <strong>รถร่วม / คนขับ</strong> — นำเข้าจาก Excel 26 รายการ + 11 กลุ่มขนส่ง
+          <br/>
+          ⚠ ก่อนใช้งาน ต้อง apply migration <code>0031_sub_drivers_extra_fields.sql</code> บน Supabase ก่อน
+          (เพิ่มคอลัมน์ province, follower_name, follower_id_card, account_name, vehicle_owner)
         </div>
       </div>
 
