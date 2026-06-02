@@ -173,7 +173,7 @@ function CloseForm({
   setActive,
   setSubject,
 }: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
-  const { isManager } = useAuth()
+  const { isManager, isAdmin } = useAuth()
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
@@ -248,6 +248,20 @@ function CloseForm({
       setToast({ kind: 'success', msg: '✅ ผูกน้ำมันลอยกับรอบนี้แล้ว' })
     } catch (e) {
       setToast({ kind: 'error', msg: e instanceof Error ? e.message : 'ผูกไม่สำเร็จ' })
+    }
+  }
+
+  const detachToFloating = async (tx: FuelTransaction) => {
+    const msg = `ปลดน้ำมันรายการนี้ออกจากรอบ?\n${db.thaiDate(tx.date)} · ${tx.liters.toFixed(2)} ลิตร\n\nรายการจะกลับไปอยู่ในหน้า "น้ำมันลอย" และสามารถลบหรือผูกรอบใหม่ได้`
+    if (!confirm(msg)) return
+    try {
+      await updateFuelTx.mutateAsync({
+        id: tx.id,
+        patch: { tripId: null, status: 'FLOATING' },
+      })
+      setToast({ kind: 'success', msg: '✅ ปลดออกจากรอบแล้ว — ไปดูที่หน้า "น้ำมันลอย"' })
+    } catch (e) {
+      setToast({ kind: 'error', msg: e instanceof Error ? e.message : 'ปลดไม่สำเร็จ' })
     }
   }
   const fuelNormal = linkedFuelTxs.filter(t => t.tripFuelRole === 'NORMAL')
@@ -996,8 +1010,28 @@ function CloseForm({
                   {db.thaiDate(t.date)} · {t.source === 'FACTORY_TANK' ? 'คลังโรงงาน' : 'ปั้มนอก'}
                   {t.tripFuelRole === 'NORMAL' && <span className="badge" style={{ marginLeft: 6, fontSize: 10 }}>ทั่วไป</span>}
                 </span>
-                <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: '#3B82F6' }}>
-                  {t.liters.toFixed(2)} L
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: '#3B82F6' }}>
+                    {t.liters.toFixed(2)} L
+                  </span>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => void detachToFloating(t)}
+                      title='ปลดออกจากรอบ (ส่งกลับ "น้ำมันลอย")'
+                      style={{
+                        background: 'transparent', border: '1px solid #BFDBFE',
+                        color: '#1D4ED8', borderRadius: 6, padding: '2px 8px',
+                        cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                        fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 4,
+                        whiteSpace: 'nowrap',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#DBEAFE' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                    >
+                      <Icon name="close" size={11} /> ปลด
+                    </button>
+                  )}
                 </span>
               </div>
             ))}
