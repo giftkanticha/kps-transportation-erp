@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info, SearchInput } from '../../components/ui'
+import { usePrint } from '../../hooks/usePrint'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
 interface ExpensesModuleProps {
@@ -1544,6 +1545,7 @@ const PIVOT_MONTHS = [
 
 function PivotTab() {
   const today = new Date()
+  const { print } = usePrint()
   const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: allPartners = [] } = useList<Partner>('partners')
   const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
@@ -1650,32 +1652,40 @@ function PivotTab() {
         <button
           className="btn"
           style={{ marginLeft: 'auto' }}
-          onClick={() => window.print()}
+          onClick={() => print('landscape')}
         >
           <Icon name="download" size={14} /> พิมพ์รายงาน
         </button>
       </div>
 
-      {/* ── Print header ── */}
-      <div className="print-only" style={{ padding: '0 0 14px', textAlign: 'center' }}>
-        <div style={{ fontSize: 17, fontWeight: 700 }}>รายงานสรุปค่าใช้จ่ายรายคัน × คู่ค้า</div>
-        <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>
-          {periodLabel} · KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())}
+      {/* ── Print header (matches P&L รายคัน) ── */}
+      <div className="print-only" style={{ marginBottom: 12 }}>
+        <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>
+          รายงานสรุปค่าใช้จ่ายรายคัน × คู่ค้า — {periodLabel}
+        </div>
+        <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
+          KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())} · {activeVehicles.length} คัน · {activeVendors.length} คู่ค้า
         </div>
       </div>
 
-      {activeVendors.length === 0 ? (
-        <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
-          <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
-          <div>ไม่มีข้อมูลค่าใช้จ่ายใน{periodLabel}</div>
-        </div>
-      ) : (
-        <div style={{ margin: 16 }}>
-          <div style={{
-            borderRadius: 12, border: '1px solid #E2E8F0',
-            overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-            background: '#ffffff',
-          }}>
+      {/* ── On-screen pivot table (hidden on print) ── */}
+      <div className="no-print" style={{ margin: 16 }}>
+        {activeVendors.length === 0 ? (
+          <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
+            <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
+            <div>ไม่มีข้อมูลค่าใช้จ่ายใน{periodLabel}</div>
+          </div>
+        ) : (
+          <div className="card" style={{ background: '#ffffff', overflow: 'hidden' }}>
+            <div className="head" style={{ paddingBottom: 0 }}>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="chart" size={16} />
+                ตารางสรุปค่าใช้จ่ายรายคัน × คู่ค้า
+                <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-muted)' }}>
+                  ({activeVehicles.length} คัน · {activeVendors.length} คู่ค้า)
+                </span>
+              </h3>
+            </div>
             <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
               <table className="tbl">
                 <thead>
@@ -1725,12 +1735,65 @@ function PivotTab() {
               </table>
             </div>
           </div>
+        )}
+      </div>
+
+      {/* ── Print-only: portrait-friendly per-vehicle sections (same approach as ExpensePivotPage) ── */}
+      {activeVendors.length > 0 && (
+        <div className="print-only pivot-portrait">
+          {activeVehicles
+            .filter(v => rowTotal(v.id) > 0)
+            .map(v => {
+              const rowsWithSpend = activeVendors
+                .filter(p => (matrix[v.id]?.[p.id] ?? 0) > 0)
+                .sort((a, b) => (matrix[v.id]?.[b.id] ?? 0) - (matrix[v.id]?.[a.id] ?? 0))
+              return (
+                <div key={v.id} className="pivot-portrait-section">
+                  <div className="pivot-portrait-head">
+                    <span className="plate">{v.plate}</span>
+                    <span className="meta">{v.type}</span>
+                    <span className="total">รวม {db.thb(rowTotal(v.id))}</span>
+                  </div>
+                  <table className="pivot-portrait-tbl">
+                    <tbody>
+                      {rowsWithSpend.map(p => (
+                        <tr key={p.id}>
+                          <td className="name">{p.name}</td>
+                          <td className="type">{p.type}</td>
+                          <td className="amount">{db.thb(matrix[v.id][p.id])}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            })}
+
+          <div className="pivot-portrait-section pivot-portrait-summary">
+            <div className="pivot-portrait-head">
+              <span className="plate">รวมยอดต่อคู่ค้า</span>
+              <span className="total">รวมทั้งสิ้น {db.thb(grandTotal)}</span>
+            </div>
+            <table className="pivot-portrait-tbl">
+              <tbody>
+                {[...activeVendors]
+                  .sort((a, b) => colTotal(b.id) - colTotal(a.id))
+                  .map(p => (
+                    <tr key={p.id}>
+                      <td className="name">{p.name}</td>
+                      <td className="type">{p.type}</td>
+                      <td className="amount">{db.thb(colTotal(p.id))}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
-      {/* ── Print footer ── */}
-      <div className="print-only" style={{ marginTop: 16, fontSize: 10, color: '#777', textAlign: 'center' }}>
-        * รายงานนี้สร้างจากข้อมูล Real-time · ระบบ KPS Transportation ERP
+      {/* ── Print footer (matches P&L รายคัน) ── */}
+      <div className="print-only" style={{ marginTop: 12, fontSize: 10, color: '#666', textAlign: 'center' }}>
+        * รายงานนี้สร้างจากข้อมูล Real-time · สรุปยอดค่าใช้จ่ายรายคัน × คู่ค้า · ระบบ KPS Transportation ERP
       </div>
     </div>
   )
