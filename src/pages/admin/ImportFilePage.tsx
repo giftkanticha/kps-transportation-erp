@@ -18,11 +18,10 @@ interface ImportResult {
   errors: string[]
 }
 
-type ImportTab = 'sub-drivers' | 'tires'
+type ImportTab = 'sub-drivers'
 
 const TABS: { id: ImportTab; label: string; available: boolean }[] = [
-  { id: 'sub-drivers', label: 'รถร่วม / คนขับ',  available: true },
-  { id: 'tires',       label: 'ยาง',             available: false },
+  { id: 'sub-drivers', label: 'รถร่วม / คนขับ', available: true },
 ]
 
 export function ImportFilePage({ setActive }: { setActive: (id: string) => void }) {
@@ -44,30 +43,22 @@ export function ImportFilePage({ setActive }: { setActive: (id: string) => void 
         </div>
       </div>
 
-      <div className="tabs" style={{ marginBottom: 18 }}>
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            className={`tab ${tab === t.id ? 'active' : ''}`}
-            onClick={() => t.available && setTab(t.id)}
-            style={!t.available ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
-            title={t.available ? '' : 'ยังไม่มี mapping สำหรับ Excel ประเภทนี้ — แจ้งทีมเพื่อเพิ่ม'}
-          >
-            {t.label}{!t.available && ' (เร็วๆ นี้)'}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'sub-drivers' && <SubDriversImportTab />}
-      {tab === 'tires' && (
-        <div className="card pad" style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)' }}>
-          <Icon name="package" size={36} style={{ opacity: 0.3, marginBottom: 8 }} />
-          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>ยังไม่มี mapping สำหรับไฟล์ยาง</div>
-          <div style={{ fontSize: 12.5 }}>
-            ส่งตัวอย่าง Excel ของระบบยางมาในแชท ทีมจะ map คอลัมน์ + เปิดแท็บนี้ให้
-          </div>
+      {TABS.length > 1 && (
+        <div className="tabs" style={{ marginBottom: 18 }}>
+          {TABS.map(t => (
+            <button
+              key={t.id}
+              className={`tab ${tab === t.id ? 'active' : ''}`}
+              onClick={() => t.available && setTab(t.id)}
+              style={!t.available ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
       )}
+
+      {tab === 'sub-drivers' && <SubDriversImportTab />}
     </div>
   )
 }
