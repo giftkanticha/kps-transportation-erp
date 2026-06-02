@@ -83,6 +83,8 @@ export function pendingDecisionRounds(
   period: AccountingPeriod,
 ): Dispatch[] {
   return dispatches.filter(d => {
+    // ถ้ารอบนี้ถูก carry-forward ไป period อื่นแล้ว → ไม่นับเข้า period นี้
+    if (d.accountingPeriodId && d.accountingPeriodId !== period.id) return false
     const basis = (d.depart || d.date || '').slice(0, 10)
     if (!basis) return false
     const dt = new Date(basis)
