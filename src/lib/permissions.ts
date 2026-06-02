@@ -35,7 +35,7 @@ export const isPrivileged = (user: User | null | undefined): boolean =>
 // and all summary/report pages. Managers see everything except settings/admin.
 const MANAGER_PLUS_ROUTES = new Set<string>([
   'dashboard',
-  'finance',
+  'finance', 'finance.periodClose',
   'employees', 'employees.add',
   'fuel.report', 'fuel.summary', 'fuel.reconcile', 'fuel.prices',
   'dispatch.report',  // drivers see 'dispatch.history' instead — money columns are hidden there

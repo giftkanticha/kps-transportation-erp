@@ -140,6 +140,65 @@ export interface Dispatch {
   // survives reopen. The TRIP_CLOSING ledger entry is created on actual close.
   closingFuelLiters?: number | null
   closingFuelPrice?: number | null
+  // Accounting period membership (set on save; can be re-assigned at period close
+  // via "carry forward" decision).
+  accountingPeriodId?: string | null
+  carryForwardFrom?: string | null
+  splitParentId?: string | null
+  locked?: boolean
+}
+
+export type AccountingPeriodStatus = 'OPEN' | 'PENDING_CLOSE' | 'CLOSED'
+
+export interface AccountingPeriod {
+  id: string
+  year: number
+  month: number
+  status: AccountingPeriodStatus
+  closedAt?: string | null
+  closedBy?: string | null
+  closedByName?: string | null
+  reopenedAt?: string | null
+  reopenedBy?: string | null
+  reopenReason?: string | null
+  notes: string
+  createdAt: string
+}
+
+export interface AccountingPeriodSnapshotData {
+  rounds: number
+  legs: number
+  distance: number
+  liters: number
+  revenue: number
+  fuelCost: number
+  perDiem: number
+  other: number
+  profit: number
+  avgKmPerL: number | null
+}
+
+export interface AccountingPeriodSnapshot {
+  id: string
+  periodId: string
+  vehicleId: string | null
+  plate: string
+  data: AccountingPeriodSnapshotData
+  createdAt: string
+}
+
+export interface PeriodUnlockRequest {
+  id: string
+  periodId: string
+  requesterId: string | null
+  requesterName: string
+  reason: string
+  status: 'pending' | 'approved' | 'rejected'
+  reviewerId?: string | null
+  reviewerName?: string | null
+  reviewedAt?: string | null
+  reviewNote?: string | null
+  createdAt: string
 }
 
 export interface Maintenance {

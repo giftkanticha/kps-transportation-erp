@@ -88,6 +88,7 @@ const MENU: MenuItem[] = [
     id: 'finance', label: 'การเงิน', icon: 'chart', roles: ['admin', 'manager'],
     sub: [
       { id: 'finance', label: 'P&L รายคัน', icon: 'chart' },
+      { id: 'finance.periodClose', label: 'ปิดงวดบัญชี', icon: 'check' },
     ],
   },
   {

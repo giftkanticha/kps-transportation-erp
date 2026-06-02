@@ -29,6 +29,7 @@ import { ExpensesModule } from './pages/expenses/ExpensesModule'
 import { FinancePL } from './pages/finance/FinancePL'
 import { FinanceFixed } from './pages/finance/FinanceFixed'
 import { FinanceSummary } from './pages/finance/FinanceSummary'
+import { PeriodClosePage } from './pages/finance/PeriodClosePage'
 import { VehicleManagement } from './pages/vehicles/VehicleManagement'
 import { MaintenancePage } from './pages/maintenance/MaintenancePage'
 import { CustomersPage } from './pages/customers/CustomersPage'
@@ -80,6 +81,7 @@ const crumbMap: Record<string, string> = {
   partners: 'คู่ค้า / ช่าง',
   maintenance: 'การบำรุงรักษา',
   finance: 'การเงิน • P&L รายคัน',
+  'finance.periodClose': 'การเงิน • ปิดงวดบัญชี',
   'settings.users': 'ตั้งค่า • ผู้ใช้งาน',
   'settings.company': 'ตั้งค่า • บริษัท',
   'admin.users': 'จัดการผู้ใช้งาน',
@@ -213,6 +215,8 @@ export default function App() {
         return <FinanceFixed />
       case 'finance.summary':
         return <FinanceSummary />
+      case 'finance.periodClose':
+        return <PeriodClosePage />
 
       case 'maintenance':
         return <MaintenancePage />
