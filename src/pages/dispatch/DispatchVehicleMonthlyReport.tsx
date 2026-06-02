@@ -197,9 +197,11 @@ export function DispatchVehicleMonthlyReport() {
           <Field label="ทะเบียนรถ *">
             <select value={vehicleId} onChange={e => setVehicleId(e.target.value)} style={{ width: 240 }}>
               <option value="">— เลือกทะเบียน —</option>
-              {vehicles.map(v => (
-                <option key={v.id} value={v.id}>{v.plate}{v.brand ? ` • ${v.brand}` : ''}</option>
-              ))}
+              {vehicles
+                .filter(v => (v.groupKind ?? 'TRANSPORT') === 'TRANSPORT')
+                .map(v => (
+                  <option key={v.id} value={v.id}>{v.plate}{v.brand ? ` • ${v.brand}` : ''}</option>
+                ))}
             </select>
           </Field>
           <Field label="สถานะรอบ">
