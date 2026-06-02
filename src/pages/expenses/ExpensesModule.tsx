@@ -1687,7 +1687,7 @@ function PivotTab() {
               </h3>
             </div>
             <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-              <table className="tbl">
+              <table className="tbl pivot-tbl">
                 <thead>
                   <tr>
                     <th style={{ minWidth: 110 }}>ทะเบียนรถ</th>
