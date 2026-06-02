@@ -1,13 +1,6 @@
-/* KPS Print Stylesheet
-   Landscape reports are rotated 90° on a portrait page via CSS transform —
-   we no longer rely on @page orientation, which proved unreliable across
-   browsers (Chrome's print dialog often ignored size descriptors). The
-   `body.print-landscape` class (set by usePrint) triggers the rotation.
-*/
+/* KPS Print Stylesheet — A4 portrait by default. */
 
 @page { size: A4 portrait; margin: 8mm 10mm; }
-/* No-margin portrait page for rotated landscape content. */
-@page kpsrot { size: A4 portrait; margin: 0; }
 
 /* ── Screen: hide print-only elements ─────────────────────────── */
 .print-only    { display: none !important; }
@@ -15,33 +8,6 @@
 
 /* ── @media print ─────────────────────────────────────────────── */
 @media print {
-  /* ── Landscape via rotation ───────────────────────────────────
-     Strategy: keep the page portrait (210×297mm), but rotate the
-     `.print-area` 90° clockwise around top-left, then push it offscreen
-     to the right by 297mm. After rotation it lands occupying
-     210mm wide × 297mm tall — fitting the portrait page exactly,
-     but the *content* reads sideways = landscape on paper.
-     Math: rotate(90deg) clockwise around (297mm, 0):
-       (297,   0) → (297,   0)    [origin]
-       (594,   0) → (297, 297)    [originally top-right, now bottom-right]
-       (594, 210) → ( 87, 297)    [originally bottom-right, now bottom-left]
-       (297, 210) → ( 87,   0)    [originally bottom-left, now top-left]
-  */
-  body.print-landscape { page: kpsrot; margin: 0 !important; padding: 0 !important; }
-  body.print-landscape .print-area {
-    position: absolute !important;
-    top: 0 !important;
-    left: 297mm !important;
-    width: 297mm !important;
-    min-height: 210mm !important;
-    transform: rotate(90deg) !important;
-    transform-origin: top left !important;
-    padding: 10mm !important;
-    box-sizing: border-box !important;
-    background: #fff !important;
-  }
-
-
   /* Reveal print-only */
   .print-only    { display: block !important; }
   .kps-print-sig { display: grid  !important; }
@@ -99,39 +65,73 @@
   .print-area .card .head h3 { font-size: 10pt !important; margin: 0 0 4px !important; }
   .print-area .card .head { padding: 8px 12px !important; }
 
-  /* ── Expense pivot (ทะเบียน × คู่ค้า): shrink to fit landscape A4 ── */
-  .pivot-scroll { overflow: visible !important; }
-  /* The sidebar + flex gap eat ~180mm of the landscape A4 width — hide them
-     on print so the pivot table gets the full page. */
-  .pivot-print-wrap > div:first-child { display: none !important; }
-  .pivot-print-wrap { display: block !important; }
-  .pivot-print-wrap .print-area { width: 100% !important; }
-  /* NB: selectors scoped under .print-area so they out-specify the generic
-     `.print-area .tbl th { font-size: 8pt }` rule above — otherwise the pivot
-     never actually shrank to 6pt. */
-  .print-area .pivot-print {
-    width: 100% !important;
-    min-width: 0 !important;
-    table-layout: fixed !important;
-    border-collapse: collapse !important;
+  /* ── Expense pivot — portrait-friendly per-vehicle layout ──
+     The on-screen pivot (rows × partners) is too wide for A4. For print we
+     render a separate `.pivot-portrait` block (in JSX) that turns each
+     vehicle into a vertical section with only the partners it spent on. */
+  .pivot-portrait { display: block !important; }
+  .pivot-portrait-section {
+    page-break-inside: avoid;
+    margin-bottom: 6mm;
+    border: 1px solid #cbd5e1;
+    border-radius: 3px;
+    overflow: hidden;
   }
-  .print-area .pivot-print th,
-  .print-area .pivot-print td {
-    min-width: 0 !important;
-    font-size: 6pt !important;
-    padding: 1px 2px !important;
-    word-break: break-word !important;
-    overflow-wrap: anywhere !important;
-    /* sticky columns clip / overlap when printed — pin them static */
-    position: static !important;
+  .pivot-portrait-head {
+    display: flex !important;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 8px;
+    background: #EFF6FF !important;
+    border-bottom: 1px solid #cbd5e1;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
-  .print-area .pivot-print .muted { font-size: 5pt !important; }
-  /* Plate column wider, partner columns share remaining space equally. */
-  .print-area .pivot-print th:first-child,
-  .print-area .pivot-print td:first-child { width: 11% !important; }
-  /* Last column = รวมจ่ายต่อคัน */
-  .print-area .pivot-print th:last-child,
-  .print-area .pivot-print td:last-child { width: 9% !important; }
+  .pivot-portrait-head .plate {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11pt;
+    font-weight: 700;
+    color: #1D4ED8;
+  }
+  .pivot-portrait-head .meta {
+    font-size: 8.5pt;
+    color: #475569;
+    flex: 1;
+  }
+  .pivot-portrait-head .total {
+    font-size: 10pt;
+    font-weight: 700;
+    color: #1D4ED8;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .pivot-portrait-tbl {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .pivot-portrait-tbl td {
+    border: none !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+    padding: 2px 8px !important;
+    font-size: 9pt;
+  }
+  .pivot-portrait-tbl td.name { font-weight: 600; width: 50%; }
+  .pivot-portrait-tbl td.type { color: #64748b; font-size: 8pt; width: 25%; }
+  .pivot-portrait-tbl td.amount {
+    text-align: right;
+    font-family: ui-monospace, Menlo, monospace;
+    width: 25%;
+  }
+  .pivot-portrait-summary {
+    margin-top: 8mm;
+    border-color: #16a34a;
+    page-break-before: auto;
+  }
+  .pivot-portrait-summary .pivot-portrait-head {
+    background: #F0FDF4 !important;
+    border-bottom-color: #16a34a;
+  }
+  .pivot-portrait-summary .pivot-portrait-head .plate,
+  .pivot-portrait-summary .pivot-portrait-head .total { color: #166534; }
 
   /* Force the element onto a new printed page */
   .print-break { break-before: page; page-break-before: always; }
