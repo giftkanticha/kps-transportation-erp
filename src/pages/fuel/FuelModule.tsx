@@ -338,7 +338,13 @@ function FuelReportV2() {
     return vehicles.filter(v => pickedVehicles.has(v.id))
   }, [vehicles, pickedVehicles])
 
-  const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const fmt = (n: number) => {
+    if (n <= 0) return ''
+    const cents = Math.round(n * 100) % 100
+    // .00 → ซ่อนทศนิยม / .99 → ปัดขึ้นเป็นจำนวนเต็ม
+    if (cents === 0 || cents === 99) return Math.round(n).toLocaleString('en-US')
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
   const getVal = (v: FuelVal | undefined) => metric === 'liters' ? (v?.liters || 0) : (v?.amount || 0)
   const unitLabel = metric === 'liters' ? 'ลิตร' : 'บาท'
   const unitBadge = (
@@ -514,12 +520,12 @@ function FuelReportV2() {
                           const val = getVal(monthlyMatrix[d]?.[v.id])
                           return (
                             <td key={v.id} className="num right mono" style={{ color: val > 0 ? 'var(--text-1)' : 'var(--text-faint)' }}>
-                              {val > 0 ? fmt(val) : '—'}
+                              {fmt(val)}
                             </td>
                           )
                         })}
                         <td className="num right mono" style={{ background: '#FFF8E1', fontWeight: 700, color: '#7A5A00' }}>
-                          {tot > 0 ? fmt(tot) : '—'}
+                          {fmt(tot)}
                         </td>
                       </tr>
                     )
@@ -584,7 +590,7 @@ function FuelReportV2() {
                         const val = getVal(yearlyMatrix[v.id]?.[m])
                         return (
                           <td key={m} className="num right mono" style={{ color: val > 0 ? 'var(--text-1)' : 'var(--text-faint)' }}>
-                            {val > 0 ? fmt(val) : '—'}
+                            {fmt(val)}
                           </td>
                         )
                       })}
@@ -601,7 +607,7 @@ function FuelReportV2() {
                       const tot = monthColTotal(m)
                       return (
                         <td key={m} className="num right mono" style={{ color: 'var(--primary)' }}>
-                          {tot > 0 ? fmt(tot) : '—'}
+                          {fmt(tot)}
                         </td>
                       )
                     })}

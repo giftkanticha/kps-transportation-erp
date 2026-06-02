@@ -227,14 +227,20 @@ body.print-landscape { page: kps-land; }
     font-size: 8pt;
   }
 
-  /* ── Fuel report compact mode (#9) — fit 31 rows per A4 ─────── */
-  .fuel-report-compact { font-size: 6.5pt !important; }
+  /* ── Fuel report compact mode ─────────────────────────────────
+     บีบ ​font/padding ให้พอดีหน้า แต่ขนาดใหญ่พอที่จะอ่านง่าย
+     (เดิม 6.5pt ตั้งใจให้พอดี 31 แถว/หน้า แต่บางเกินไปสำหรับการอ่าน
+     → bump เป็น 8.5pt; ตารางจะ paginate หลายหน้าตามจำเป็น) */
+  .fuel-report-compact { font-size: 8.5pt !important; }
   .fuel-report-compact th,
   .fuel-report-compact td {
-    font-size: 6.5pt !important;
-    padding: 1px 4px !important;
-    line-height: 1.15 !important;
+    font-size: 8.5pt !important;
+    padding: 2px 5px !important;
+    line-height: 1.25 !important;
+    color: #000 !important;
   }
+  .fuel-report-compact thead th { font-weight: 700 !important; }
+  .fuel-report-compact tbody td { font-weight: 500 !important; }
 }
 
 .tire-layout-print { display: none; }
