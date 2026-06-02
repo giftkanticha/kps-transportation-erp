@@ -177,7 +177,11 @@ export const db = {
   lastClosedMileage(vehicleId: string, dispatches?: Dispatch[]): number | null {
     if (!vehicleId) return null
     const rounds = (dispatches ?? db.getAll<Dispatch>('dispatch'))
-      .filter(d => d.vehicleId === vehicleId && d.roundStatus === 'closed' && d.endOdometer != null)
+      .filter(d =>
+        d.vehicleId === vehicleId
+        && (d.roundStatus === 'closed' || d.status === 'completed')
+        && d.endOdometer != null,
+      )
     if (!rounds.length) return null
     return Math.max(...rounds.map(d => d.endOdometer ?? 0))
   },
@@ -190,8 +194,14 @@ export const db = {
       String(today.getDate()).padStart(2, '0')
     const prefix = `DSP-${ymd}-`
     const todays = (dispatches ?? db.getAll<Dispatch>('dispatch')).filter(d => d.code?.startsWith(prefix))
-    const seq = String(todays.length + 1).padStart(3, '0')
-    return prefix + seq
+    // Use the largest existing sequence + 1, not length + 1 — if any of
+    // today's rounds was deleted, length leaves a gap and the same code
+    // would clash with another live row on the next insert.
+    const maxSeq = todays.reduce((max, d) => {
+      const n = parseInt(d.code.slice(prefix.length), 10)
+      return Number.isNaN(n) ? max : Math.max(max, n)
+    }, 0)
+    return prefix + String(maxSeq + 1).padStart(3, '0')
   },
 
   roundRevenue(d: Dispatch): number {
@@ -221,8 +231,11 @@ export const db = {
       String(today.getDate()).padStart(2, '0')
     const prefix = `RUND-${ymd}-`
     const todays = (rounds ?? db.getAll<FuelRound>('fuelRounds')).filter(r => r.code?.startsWith(prefix))
-    const seq = String(todays.length + 1).padStart(3, '0')
-    return prefix + seq
+    const maxSeq = todays.reduce((max, r) => {
+      const n = parseInt(r.code.slice(prefix.length), 10)
+      return Number.isNaN(n) ? max : Math.max(max, n)
+    }, 0)
+    return prefix + String(maxSeq + 1).padStart(3, '0')
   },
 
   activeFuelRoundForVehicle(vehicleId: string, rounds?: FuelRound[]): FuelRound | null {

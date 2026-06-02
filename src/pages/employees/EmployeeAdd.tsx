@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
+import { useAuth } from '../../context/AuthContext'
 import type { Employee, Vehicle } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
@@ -17,9 +18,11 @@ interface EmployeeForm {
   lineId: string
   joined: string
   licenseStatus: string
+  salary: string
 }
 
 export function EmployeeAdd({ setActive }: EmployeeAddProps) {
+  const { isManager } = useAuth()
   const { data: employees = [] } = useList<Employee>('employees')
   const insertEmployee = useInsert<Employee>('employees')
   const updateVehicle = useUpdate<Vehicle>('vehicles')
@@ -39,6 +42,7 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
     lineId: '',
     joined: '',
     licenseStatus: 'ok',
+    salary: '',
   })
   const [vehicleIds, setVehicleIds] = useState<string[]>([])
   const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
@@ -68,7 +72,8 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
         licenseStatus: form.licenseStatus as Employee['licenseStatus'],
         license: '',
         licenseExpire: '',
-        salary: 17000,
+        // Non-managers can't see/set salary — let the DB default (0) apply
+        ...(isManager ? { salary: Number(form.salary) || 0 } : {}),
         vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
         idCard: '',
         accountBank: '',
@@ -152,17 +157,26 @@ export function EmployeeAdd({ setActive }: EmployeeAddProps) {
               </Field>
             )}
           </div>
-          <Field label="สถานะ *">
-            <select
-              value={form.status}
-              onChange={e => set('status', e.target.value)}
-              style={{ maxWidth: 320 }}
-            >
-              <option value="active">ทำงาน</option>
-              <option value="leave">ลาออก</option>
-              <option value="training">อบรม</option>
-            </select>
-          </Field>
+          <div className={isManager ? 'grid-2' : ''} style={{ gap: 14 }}>
+            <Field label="สถานะ *">
+              <select value={form.status} onChange={e => set('status', e.target.value)} style={isManager ? undefined : { maxWidth: 320 }}>
+                <option value="active">ทำงาน</option>
+                <option value="leave">ลาออก</option>
+                <option value="training">อบรม</option>
+              </select>
+            </Field>
+            {isManager && (
+              <Field label="เงินเดือน (บาท/เดือน)">
+                <input
+                  type="number"
+                  value={form.salary}
+                  onChange={e => set('salary', e.target.value)}
+                  placeholder="0"
+                  min={0}
+                />
+              </Field>
+            )}
+          </div>
         </div>
 
         {/* Contact info */}
