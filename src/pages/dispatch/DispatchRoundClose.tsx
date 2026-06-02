@@ -861,15 +861,11 @@ function CloseForm({
           </Field>
         </div>
 
-        <div style={{
-          marginBottom: 14,
-          border: '1px solid var(--line)',
-          borderRadius: 10,
-          background: '#FAFBFC',
-          padding: '12px 14px',
-        }}>
+        <div className="card pad" style={{ marginBottom: 14 }}>
           <div className="row" style={{ marginBottom: otherExp.length === 0 ? 0 : 10, justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>ค่าใช้จ่ายอื่นๆ</span>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              ค่าใช้จ่ายอื่นๆ
+            </div>
             {!isClosed && (
               <button className="btn sm" onClick={addExpense}>
                 <Icon name="plus" size={13} /> เพิ่มรายการ
@@ -878,13 +874,12 @@ function CloseForm({
           </div>
           {otherExp.length === 0 ? (
             <div style={{
-              border: '1px dashed #CBD5E1',
+              border: '1px dashed var(--line)',
               borderRadius: 8,
               padding: '14px 12px',
               textAlign: 'center',
               color: 'var(--text-muted)',
               fontSize: 12,
-              background: '#fff',
               marginTop: 10,
             }}>
               ยังไม่มีค่าใช้จ่ายอื่น — กด "เพิ่มรายการ" เพื่อบันทึก
