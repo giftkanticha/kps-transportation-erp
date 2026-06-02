@@ -7,7 +7,7 @@ interface VehicleAddProps {
   setActive: (id: string) => void
 }
 
-type VehicleGroup = 'INTERNAL' | 'TRANSPORT'
+type VehicleGroup = 'INTERNAL' | 'TRANSPORT' | 'EQUIPMENT'
 
 interface VehicleForm {
   plate: string
@@ -76,7 +76,10 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
       },
       {
         onSuccess: () => setActive('vehicles'),
-        onError: (err) => alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'),
+        onError: (err) => {
+          const msg = err instanceof Error && err.message ? err.message : String(err)
+          alert('บันทึกไม่สำเร็จ: ' + (msg || 'ไม่ทราบสาเหตุ'))
+        },
       },
     )
   }
@@ -189,8 +192,12 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>กลุ่มรถ (ควบคุมการจ่ายน้ำมัน)</h3>
           </div>
           <div style={{ display: 'flex', gap: 12 }}>
-            {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
+            {(['TRANSPORT', 'INTERNAL', 'EQUIPMENT'] as VehicleGroup[]).map(g => {
               const active = form.groupKind === g
+              const label =
+                g === 'TRANSPORT' ? '🚛 ขนส่ง (TRANSPORT)' :
+                g === 'INTERNAL'  ? '🏭 โรงงาน (INTERNAL)' :
+                '⚙️ เครื่องจักร (EQUIPMENT)'
               return (
                 <button
                   key={g}
@@ -205,7 +212,7 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
                     color: active ? '#1D4ED8' : 'var(--text-2)',
                   }}
                 >
-                  {g === 'INTERNAL' ? '🏭 โรงงาน (INTERNAL)' : '🚛 ขนส่ง (TRANSPORT)'}
+                  {label}
                 </button>
               )
             })}
@@ -213,7 +220,9 @@ export function VehicleAdd({ setActive }: VehicleAddProps) {
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
             {form.groupKind === 'INTERNAL'
               ? 'น้ำมันถูกตัดสต็อคทันที — ไม่ต้องผูกรอบงาน'
-              : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
+              : form.groupKind === 'EQUIPMENT'
+                ? 'อุปกรณ์/เครื่องจักร (โฟล์คลิฟท์ · รถตัก · เครื่องโม่) — ไม่อยู่ในระบบยาง · บันทึกค่าใช้จ่ายได้ปกติ'
+                : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
           </div>
         </div>
 

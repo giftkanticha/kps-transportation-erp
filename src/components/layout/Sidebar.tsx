@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { User } from '../../types'
+import { canAccessRoute } from '../../lib/permissions'
 import { Icon } from '../ui'
 
 interface MenuItem {
@@ -13,6 +14,7 @@ interface MenuItem {
 interface SubMenuItem {
   id: string
   label: string
+  icon?: string
 }
 
 const MENU: MenuItem[] = [
@@ -20,84 +22,84 @@ const MENU: MenuItem[] = [
   {
     id: 'vehicles', label: 'จัดการรถ', icon: 'truck', roles: ['admin', 'manager', 'driver'],
     sub: [
-      { id: 'vehicles', label: 'รายการรถทั้งหมด' },
-      { id: 'vehicles.add', label: 'เพิ่มรถใหม่' },
-      { id: 'vehicles.detail', label: 'รายละเอียดรถ' },
+      { id: 'vehicles', label: 'รายการรถทั้งหมด', icon: 'truck' },
+      { id: 'vehicles.add', label: 'เพิ่มรถใหม่', icon: 'plus' },
+      { id: 'vehicles.detail', label: 'รายละเอียดรถ', icon: 'search' },
     ],
   },
   {
     id: 'employees', label: 'ข้อมูลพนักงาน', icon: 'users', roles: ['admin', 'manager'],
     sub: [
-      { id: 'employees', label: 'รายชื่อพนักงาน' },
-      { id: 'employees.add', label: 'เพิ่มพนักงานใหม่' },
+      { id: 'employees', label: 'รายชื่อพนักงาน', icon: 'users' },
+      { id: 'employees.add', label: 'เพิ่มพนักงานใหม่', icon: 'plus' },
     ],
   },
   {
     id: 'tires', label: 'ระบบยาง', icon: 'tire', roles: ['admin', 'manager'],
     sub: [
-      { id: 'tires', label: 'รายการยางทั้งหมด' },
-      { id: 'tires.layout', label: 'ผังยางปัจจุบัน' },
-      { id: 'tires.manage', label: 'จัดการและสลับยาง' },
-      { id: 'tires.history', label: 'ประวัติยางรายเส้น' },
-      { id: 'tires.scrapped', label: 'ยางหมดสภาพ' },
+      { id: 'tires', label: 'รายการยางทั้งหมด', icon: 'list' },
+      { id: 'tires.layout', label: 'ผังยางปัจจุบัน', icon: 'wheel' },
+      { id: 'tires.manage', label: 'จัดการและสลับยาง', icon: 'swap' },
+      { id: 'tires.history', label: 'ประวัติยางรายเส้น', icon: 'history' },
+      { id: 'tires.scrapped', label: 'ยางหมดสภาพ', icon: 'trash' },
     ],
   },
   {
-    id: 'fuel', label: 'ระบบน้ำมัน', icon: 'fuel', roles: ['admin', 'manager'],
+    id: 'fuel', label: 'ระบบน้ำมัน', icon: 'fuel', roles: ['admin', 'manager', 'driver'],
     sub: [
-      { id: 'fuel', label: '📊 ภาพรวมคลังน้ำมัน' },
-      { id: 'fuel.express', label: '⚡ คีย์ด่วนน้ำมัน' },
-      { id: 'fuel.floating', label: '🟡 น้ำมันลอยรอผูก' },
-      { id: 'fuel.report', label: '📋 รายงานน้ำมันรายเดือน' },
-      { id: 'fuel.summary', label: '📦 สรุปคลังน้ำมันรวม' },
+      { id: 'fuel', label: 'ภาพรวมคลังน้ำมัน', icon: 'gauge' },
+      { id: 'fuel.express', label: 'คีย์ด่วนน้ำมัน', icon: 'bolt' },
+      { id: 'fuel.floating', label: 'น้ำมันลอยรอผูก', icon: 'alert' },
+      { id: 'fuel.prices', label: 'ตั้งราคารายวัน', icon: 'money' },
+      { id: 'fuel.report', label: 'รายงานน้ำมันรายเดือน', icon: 'chart' },
+      { id: 'fuel.summary', label: 'สรุปคลังน้ำมันรวม', icon: 'package' },
     ],
   },
   {
     id: 'dispatch', label: 'งานขนส่ง', icon: 'package', roles: ['admin', 'manager', 'driver'],
     sub: [
-      { id: 'dispatch.open', label: 'เปิดงานขนส่ง' },
-      { id: 'dispatch.close', label: 'ปิดงานขนส่ง' },
-      { id: 'dispatch.report', label: 'รายงานสรุป' },
-      { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน' },
+      { id: 'dispatch.open', label: 'เปิดงานขนส่ง', icon: 'edit' },
+      { id: 'dispatch.close', label: 'ปิดงานขนส่ง', icon: 'check' },
+      { id: 'dispatch.report', label: 'รายงานสรุป', icon: 'chart' },
+      { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน', icon: 'history' },
     ],
   },
   {
     id: 'subcontractors', label: 'รถรับจ้างร่วม', icon: 'truck2', roles: ['admin', 'manager'],
     sub: [
-      { id: 'subcontractors', label: 'เปิดงาน' },
-      { id: 'subcontractors.close', label: 'ปิดงาน' },
-      { id: 'subcontractors.history', label: 'ประวัติการจ้าง' },
-      { id: 'subcontractors.drivers', label: 'คนขับรถร่วม' },
+      { id: 'subcontractors', label: 'เปิดงาน', icon: 'edit' },
+      { id: 'subcontractors.close', label: 'ปิดงาน', icon: 'check' },
+      { id: 'subcontractors.history', label: 'ประวัติการจ้าง', icon: 'history' },
+      { id: 'subcontractors.drivers', label: 'คนขับรถร่วม', icon: 'user' },
     ],
   },
   {
     id: 'expenses', label: 'ค่าใช้จ่าย', icon: 'wallet', roles: ['admin', 'manager'],
     sub: [
-      { id: 'expenses', label: 'บันทึกค่าใช้จ่าย' },
-      { id: 'expenses.finance', label: 'สถานะการเงิน' },
-      { id: 'expenses.stock', label: 'สต๊อคคลัง KPS' },
-      { id: 'expenses.report', label: 'รายงานสรุป' },
-      { id: 'expenses.vendors', label: 'ทะเบียนร้านค้า/ช่าง' },
+      { id: 'expenses', label: 'บันทึกค่าใช้จ่าย', icon: 'edit' },
+      { id: 'expenses.finance', label: 'สถานะการเงิน', icon: 'money' },
+      { id: 'expenses.stock', label: 'สต๊อคคลัง KPS', icon: 'package' },
+      { id: 'expenses.report', label: 'รายงานสรุป', icon: 'chart' },
+      { id: 'expenses.vendors', label: 'ทะเบียนร้านค้า/ช่าง', icon: 'client' },
     ],
   },
   {
     id: 'finance', label: 'การเงิน', icon: 'chart', roles: ['admin', 'manager'],
     sub: [
-      { id: 'finance', label: 'P&L รายคัน' },
+      { id: 'finance', label: 'P&L รายคัน', icon: 'chart' },
     ],
   },
   {
     id: 'settings', label: 'ตั้งค่า', icon: 'settings', roles: ['admin'],
     sub: [
-      { id: 'settings.users', label: 'จัดการผู้ใช้งาน' },
-      { id: 'settings.company', label: 'ข้อมูลบริษัท' },
+      { id: 'settings.users', label: 'จัดการผู้ใช้งาน', icon: 'users' },
+      { id: 'settings.company', label: 'ข้อมูลบริษัท', icon: 'building' },
     ],
   },
   {
     id: 'admin', label: 'Admin Panel', icon: 'settings', roles: ['admin'],
     sub: [
-      { id: 'admin.users', label: '👥 จัดการผู้ใช้ + ACL' },
-      { id: 'admin.reset', label: '🔄 รีเซตข้อมูล' },
+      { id: 'admin.users', label: 'จัดการผู้ใช้ + ACL', icon: 'users' },
     ],
   },
 ]
@@ -131,7 +133,6 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
     })
   }, [active, collapsed])
 
-  const can = (roles: string[]) => roles.includes(user.role)
   const sectionActive = (m: MenuItem) =>
     active === m.id ||
     (m.sub != null && m.sub.some(s => s.id === active)) ||
@@ -152,9 +153,12 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
       </div>
 
       <nav className="nav">
-        {MENU.filter(m => can(m.roles)).map(m => {
+        {MENU.filter(m => canAccessRoute(m.id, user.role)).map(m => {
+          const visibleSub = m.sub?.filter(s => canAccessRoute(s.id, user.role)) ?? []
+          // A section with sub-items but none accessible to this role is hidden.
+          if (m.sub && visibleSub.length === 0) return null
           const sec = sectionActive(m)
-          const hasSub = !!m.sub
+          const hasSub = visibleSub.length > 0
 
           return (
             <div className="nav-group" key={m.id}>
@@ -193,13 +197,14 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
 
               {hasSub && open[m.id] && !collapsed && (
                 <div className="subnav">
-                  {m.sub!.map(s => (
+                  {visibleSub.map(s => (
                     <div
                       key={s.id}
                       className={`subnav-item ${active === s.id ? 'active' : ''}`}
                       onClick={() => setActive(s.id)}
                     >
-                      {s.label}
+                      {s.icon && <span className="ico"><Icon name={s.icon} size={15} /></span>}
+                      <span>{s.label}</span>
                     </div>
                   ))}
                 </div>

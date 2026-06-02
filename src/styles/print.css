@@ -1,9 +1,13 @@
 /* KPS Print Stylesheet
-   @page size is injected dynamically by usePrint() per orientation.
-   Default fallback: A4 portrait 12mm margin.
+   Landscape reports are rotated 90° on a portrait page via CSS transform —
+   we no longer rely on @page orientation, which proved unreliable across
+   browsers (Chrome's print dialog often ignored size descriptors). The
+   `body.print-landscape` class (set by usePrint) triggers the rotation.
 */
 
 @page { size: A4 portrait; margin: 8mm 10mm; }
+/* No-margin portrait page for rotated landscape content. */
+@page kpsrot { size: A4 portrait; margin: 0; }
 
 /* ── Screen: hide print-only elements ─────────────────────────── */
 .print-only    { display: none !important; }
@@ -11,6 +15,33 @@
 
 /* ── @media print ─────────────────────────────────────────────── */
 @media print {
+  /* ── Landscape via rotation ───────────────────────────────────
+     Strategy: keep the page portrait (210×297mm), but rotate the
+     `.print-area` 90° clockwise around top-left, then push it offscreen
+     to the right by 297mm. After rotation it lands occupying
+     210mm wide × 297mm tall — fitting the portrait page exactly,
+     but the *content* reads sideways = landscape on paper.
+     Math: rotate(90deg) clockwise around (297mm, 0):
+       (297,   0) → (297,   0)    [origin]
+       (594,   0) → (297, 297)    [originally top-right, now bottom-right]
+       (594, 210) → ( 87, 297)    [originally bottom-right, now bottom-left]
+       (297, 210) → ( 87,   0)    [originally bottom-left, now top-left]
+  */
+  body.print-landscape { page: kpsrot; margin: 0 !important; padding: 0 !important; }
+  body.print-landscape .print-area {
+    position: absolute !important;
+    top: 0 !important;
+    left: 297mm !important;
+    width: 297mm !important;
+    min-height: 210mm !important;
+    transform: rotate(90deg) !important;
+    transform-origin: top left !important;
+    padding: 10mm !important;
+    box-sizing: border-box !important;
+    background: #fff !important;
+  }
+
+
   /* Reveal print-only */
   .print-only    { display: block !important; }
   .kps-print-sig { display: grid  !important; }
@@ -67,6 +98,43 @@
   .print-area .card { border: 1px solid #ccc !important; }
   .print-area .card .head h3 { font-size: 10pt !important; margin: 0 0 4px !important; }
   .print-area .card .head { padding: 8px 12px !important; }
+
+  /* ── Expense pivot (ทะเบียน × คู่ค้า): shrink to fit landscape A4 ── */
+  .pivot-scroll { overflow: visible !important; }
+  /* The sidebar + flex gap eat ~180mm of the landscape A4 width — hide them
+     on print so the pivot table gets the full page. */
+  .pivot-print-wrap > div:first-child { display: none !important; }
+  .pivot-print-wrap { display: block !important; }
+  .pivot-print-wrap .print-area { width: 100% !important; }
+  /* NB: selectors scoped under .print-area so they out-specify the generic
+     `.print-area .tbl th { font-size: 8pt }` rule above — otherwise the pivot
+     never actually shrank to 6pt. */
+  .print-area .pivot-print {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed !important;
+    border-collapse: collapse !important;
+  }
+  .print-area .pivot-print th,
+  .print-area .pivot-print td {
+    min-width: 0 !important;
+    font-size: 6pt !important;
+    padding: 1px 2px !important;
+    word-break: break-word !important;
+    overflow-wrap: anywhere !important;
+    /* sticky columns clip / overlap when printed — pin them static */
+    position: static !important;
+  }
+  .print-area .pivot-print .muted { font-size: 5pt !important; }
+  /* Plate column wider, partner columns share remaining space equally. */
+  .print-area .pivot-print th:first-child,
+  .print-area .pivot-print td:first-child { width: 11% !important; }
+  /* Last column = รวมจ่ายต่อคัน */
+  .print-area .pivot-print th:last-child,
+  .print-area .pivot-print td:last-child { width: 9% !important; }
+
+  /* Force the element onto a new printed page */
+  .print-break { break-before: page; page-break-before: always; }
 
   /* ── Stock history modal: flatten for print ─────────────────── */
   .hist-overlay {

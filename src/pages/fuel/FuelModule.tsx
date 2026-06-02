@@ -5,6 +5,7 @@ import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import { VehiclePickerSidebar } from '../../components/ui/VehiclePickerSidebar'
 import { usePrint } from '../../hooks/usePrint'
+import { useAuth } from '../../context/AuthContext'
 import type { CSSProperties } from 'react'
 import type { FuelRecord, Vehicle, Employee } from '../../types'
 import { FuelStockDashboard } from './FuelStockDashboard'
@@ -12,6 +13,7 @@ import { FuelInventorySummary } from './FuelInventorySummary'
 import { ExpressFuelLog } from './ExpressFuelLog'
 import { FloatingFuel } from './FloatingFuel'
 import { FuelReconciliation } from './FuelReconciliation'
+import { FuelDailyPricesPage } from './FuelDailyPricesPage'
 
 const THAI_MONTHS_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -38,13 +40,18 @@ const tabBtn = (active: boolean): CSSProperties => ({
   transition: 'all .15s',
 })
 
-const isFactoryFuel = (f: FuelRecord) =>
-  !['PTT', 'Shell', 'Bangchak', 'Esso'].some(s => f.station?.includes(s))
+// Factory-tank fuel uses the literal 'ถังโรงงาน' Thai string in
+// fuel_records.station (set by ExpressFuelLog source=FACTORY_TANK and by
+// DispatchRoundClose TRIP_CLOSING). The old exclusion-list approach
+// ('PTT' / 'Shell' / …) leaked external pump rows into the factory daily
+// table now that supplier names are Thai ('บริษัท ปตท.' etc.).
+const isFactoryFuel = (f: FuelRecord) => f.station === 'ถังโรงงาน'
 
 type FuelVal = { liters: number; amount: number }
 
 // ─── Tab 2: บันทึก ─── (Fuel record form)
 function FuelRecord() {
+  const { isManager } = useAuth()
   const [form, setForm] = useState({
     vehicleId: '',
     driverId: '',
@@ -88,8 +95,7 @@ function FuelRecord() {
     }
   }
 
-  const isExternal = (station: string) =>
-    ['PTT', 'Shell', 'Bangchak', 'Esso'].some((s) => station.includes(s))
+  const isExternal = (station: string) => station === 'ปั๊มภายนอก'
 
   return (
     <div>
@@ -238,7 +244,7 @@ function FuelRecord() {
                 <th>วันที่</th>
                 <th>ทะเบียนรถ</th>
                 <th className="right">ปริมาณ (ลิตร)</th>
-                <th className="right">จำนวนเงิน</th>
+                {isManager && <th className="right">จำนวนเงิน</th>}
                 <th>คนขับ</th>
                 <th>แหล่งน้ำมัน</th>
               </tr>
@@ -253,9 +259,11 @@ function FuelRecord() {
                     </a>
                   </td>
                   <td className="num right">{f.liters}</td>
-                  <td className="num right" style={{ fontWeight: 600 }}>
-                    {db.fmt(f.total)} บาท
-                  </td>
+                  {isManager && (
+                    <td className="num right" style={{ fontWeight: 600 }}>
+                      {db.fmt(f.total)} บาท
+                    </td>
+                  )}
                   <td>{employees.find(e => e.id === f.driverId)?.name ?? '—'}</td>
                   <td>
                     {isExternal(f.station) ? (
@@ -639,6 +647,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
     tab === 'express' ? 'express' :
     tab === 'floating' ? 'floating' :
     tab === 'reconcile' ? 'reconcile' :
+    tab === 'prices' ? 'prices' :
     'overview'
 
   return (
@@ -652,12 +661,13 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       <div className="tabs no-print" style={{ marginBottom: 22 }}>
         {(
           [
-            ['overview', 'fuel', '📊 ภาพรวม', 'fuel'],
-            ['express', 'express', '⚡ คีย์ด่วน', 'edit'],
-            ['floating', 'floating', '🟡 น้ำมันลอย', 'alert'],
-            ['report', 'report', '📋 รายงาน', 'chart'],
-            ['summary', 'summary', '📦 สรุปคลัง', 'download'],
-            ['reconcile', 'reconcile', '🔍 ตรวจสอบข้อมูล', 'search'],
+            ['overview', 'fuel', 'ภาพรวม', 'gauge'],
+            ['express', 'express', 'คีย์ด่วน', 'bolt'],
+            ['floating', 'floating', 'น้ำมันลอย', 'alert'],
+            ['prices', 'prices', 'ราคารายวัน', 'money'],
+            ['report', 'report', 'รายงาน', 'chart'],
+            ['summary', 'summary', 'สรุปคลัง', 'package'],
+            ['reconcile', 'reconcile', 'ตรวจสอบข้อมูล', 'search'],
           ] as [string, string, string, string][]
         ).map(([id, route, label, ic]) => (
           <button
@@ -677,6 +687,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       {current === 'report' && <FuelReportV2 />}
       {current === 'summary' && <FuelInventorySummary />}
       {current === 'reconcile' && <FuelReconciliation />}
+      {current === 'prices' && <FuelDailyPricesPage />}
     </div>
   )
 }

@@ -1,24 +1,25 @@
 import { useState } from 'react'
 import type { User } from '../../types'
 import { Icon } from '../ui'
+import { ChangePasswordModal } from '../auth/ChangePasswordModal'
 
 interface TopbarProps {
   user: User
   crumb: string
   onLogout: () => void
-  onReset: () => void
   onOpenAlerts: () => void
 }
 
-export function Topbar({ user, crumb, onLogout, onReset, onOpenAlerts }: TopbarProps) {
+export function Topbar({ user, crumb, onLogout, onOpenAlerts }: TopbarProps) {
   const [open, setOpen] = useState(false)
+  const [showChangePw, setShowChangePw] = useState(false)
 
   const roleLabel =
     user.role === 'admin'
       ? 'ผู้ดูแลระบบ'
       : user.role === 'manager'
       ? 'ผู้จัดการขนส่ง'
-      : 'พนักงานขับรถ'
+      : 'พนักงาน'
 
   const avatarClass =
     user.role === 'admin' ? 'violet' : user.role === 'manager' ? '' : 'amber'
@@ -73,21 +74,11 @@ export function Topbar({ user, crumb, onLogout, onReset, onOpenAlerts }: TopbarP
             style={{ top: 'calc(100% + 6px)' }}
             onClick={e => e.stopPropagation()}
           >
-            <div className="item" onClick={() => setOpen(false)}>
-              <Icon name="user" size={15} /> โปรไฟล์
-            </div>
-            <div className="item" onClick={() => setOpen(false)}>
-              <Icon name="settings" size={15} /> ตั้งค่า
-            </div>
-            <div className="sep" />
             <div
               className="item"
-              onClick={() => {
-                setOpen(false)
-                onReset()
-              }}
+              onClick={() => { setOpen(false); setShowChangePw(true) }}
             >
-              <Icon name="trash" size={15} /> รีเซ็ตข้อมูลตัวอย่าง
+              <Icon name="settings" size={15} /> เปลี่ยนรหัสผ่าน
             </div>
             <div className="sep" />
             <div
@@ -102,6 +93,8 @@ export function Topbar({ user, crumb, onLogout, onReset, onOpenAlerts }: TopbarP
           </div>
         )}
       </div>
+
+      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
     </div>
   )
 }
