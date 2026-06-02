@@ -256,10 +256,19 @@ function VehiclePicker({ vehicles, picked, onChange }: {
   onChange: (next: Set<string>) => void
 }) {
   const [search, setSearch] = useState('')
-  const visible = vehicles.filter(v =>
-    !search || v.plate.toLowerCase().includes(search.toLowerCase()),
-  )
-  const allChecked = vehicles.every(v => picked.has(v.id))
+  const matchSearch = (v: Vehicle) => !search || v.plate.toLowerCase().includes(search.toLowerCase())
+  const allChecked = vehicles.length > 0 && vehicles.every(v => picked.has(v.id))
+
+  const groups = [
+    {
+      label: '🚛 ขนส่ง',
+      vehicles: vehicles.filter(v => (v.groupKind ?? 'TRANSPORT') === 'TRANSPORT'),
+    },
+    {
+      label: '🏭 โรงงานและเครื่องจักร',
+      vehicles: vehicles.filter(v => v.groupKind === 'INTERNAL' || v.groupKind === 'EQUIPMENT'),
+    },
+  ]
 
   const toggle = (id: string) => {
     const next = new Set(picked)
@@ -269,6 +278,19 @@ function VehiclePicker({ vehicles, picked, onChange }: {
 
   const selectAll = () => onChange(new Set(vehicles.map(v => v.id)))
   const clearAll = () => onChange(new Set())
+  const setMany = (ids: string[], on: boolean) => {
+    const next = new Set(picked)
+    for (const id of ids) {
+      if (on) next.add(id); else next.delete(id)
+    }
+    onChange(next)
+  }
+
+  const renderedGroups = groups.map(g => ({
+    ...g,
+    visible: g.vehicles.filter(matchSearch),
+  }))
+  const hasAny = renderedGroups.some(g => g.visible.length > 0)
 
   return (
     <div
@@ -299,33 +321,62 @@ function VehiclePicker({ vehicles, picked, onChange }: {
       </label>
 
       <div style={{ flex: 1, overflowY: 'auto', maxHeight: 400 }}>
-        {visible.map(v => (
-          <label
-            key={v.id}
-            className="row"
-            style={{
-              gap: 8, padding: '8px 14px', cursor: 'pointer',
-              borderBottom: '1px solid var(--line)', fontSize: 12.5,
-              background: picked.has(v.id) ? 'var(--primary-50, #EFF6FF)' : 'transparent',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={picked.has(v.id)}
-              onChange={() => toggle(v.id)}
-              style={{ accentColor: 'var(--primary)' }}
-            />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="mono" style={{ fontWeight: 600, fontSize: 12 }}>{v.plate}</div>
-              <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{v.type}</div>
-            </div>
-          </label>
-        ))}
-        {visible.length === 0 && (
+        {!hasAny && (
           <div style={{ padding: 16, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
             ไม่พบทะเบียน
           </div>
         )}
+        {renderedGroups.map(g => {
+          if (g.visible.length === 0) return null
+          const groupAllChecked = g.vehicles.length > 0 && g.vehicles.every(v => picked.has(v.id))
+          return (
+            <div key={g.label}>
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 14px',
+                  background: '#F8FAFC',
+                  borderTop: '1px solid var(--line)',
+                  borderBottom: '1px solid var(--line)',
+                  fontSize: 11.5, fontWeight: 700, color: '#334155',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={groupAllChecked}
+                  onChange={e => setMany(g.vehicles.map(v => v.id), e.target.checked)}
+                  style={{ accentColor: 'var(--primary)' }}
+                />
+                <span style={{ flex: 1 }}>{g.label}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: '#64748B' }}>
+                  {g.vehicles.filter(v => picked.has(v.id)).length}/{g.vehicles.length}
+                </span>
+              </div>
+              {g.visible.map(v => (
+                <label
+                  key={v.id}
+                  className="row"
+                  style={{
+                    gap: 8, padding: '8px 14px', cursor: 'pointer',
+                    borderBottom: '1px solid var(--line)', fontSize: 12.5,
+                    background: picked.has(v.id) ? 'var(--primary-50, #EFF6FF)' : 'transparent',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={picked.has(v.id)}
+                    onChange={() => toggle(v.id)}
+                    style={{ accentColor: 'var(--primary)' }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="mono" style={{ fontWeight: 600, fontSize: 12 }}>{v.plate}</div>
+                    <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{v.type}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )
+        })}
       </div>
 
       <div className="row" style={{ padding: '10px 14px', gap: 8, borderTop: '1px solid var(--line)' }}>
