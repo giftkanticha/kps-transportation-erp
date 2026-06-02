@@ -1592,7 +1592,7 @@ function PivotTab() {
   const grandTotal = activeVendorIds.reduce((s, pid) => s + colTotal(pid), 0)
   const fmtMoney  = (n: number) => n > 0
     ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : '—'
+    : ''
 
   const activeVehicles = vehicles.filter(v => matrix[v.id])
 
@@ -1664,7 +1664,7 @@ function PivotTab() {
           รายงานสรุปค่าใช้จ่ายรายคัน × คู่ค้า — {periodLabel}
         </div>
         <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
-          KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())} · {activeVehicles.length} คัน · {activeVendors.length} คู่ค้า
+          KPS Transportation ERP · {activeVehicles.length} คัน · {activeVendors.length} คู่ค้า
         </div>
       </div>
 
@@ -1706,7 +1706,7 @@ function PivotTab() {
                     <tr key={v.id}>
                       <td>
                         <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{v.plate}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.type}</div>
+                        <div className="no-print" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.type}</div>
                       </td>
                       {activeVendors.map(p => (
                         <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>

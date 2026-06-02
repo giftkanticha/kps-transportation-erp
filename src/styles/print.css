@@ -69,18 +69,20 @@ body.print-landscape { page: kps-land; }
   .print-area .card .head { padding: 8px 12px !important; }
 
   /* ── Pivot table (sรุปรายคัน × คู่ค้า) ───────────────────────
-     คอลัมน์เยอะ → บีบฟอนต์/padding/min-width ให้พอดีหน้ากระดาษ
-     (กว้างประมาณครึ่งหนึ่งของบนหน้าจอ) */
+     คอลัมน์เยอะ → บีบฟอนต์/padding/min-width ให้พอดีหน้ากระดาษ */
   .print-area .pivot-tbl { table-layout: fixed; width: 100% !important; }
   .print-area .pivot-tbl th,
   .print-area .pivot-tbl td {
-    font-size: 6.5pt !important;
-    padding: 1px 3px !important;
+    font-size: 8.5pt !important;
+    padding: 2px 4px !important;
     min-width: 0 !important;
     white-space: normal !important;
     word-break: break-word;
     overflow-wrap: anywhere;
+    color: #000 !important;
   }
+  .print-area .pivot-tbl thead th { font-weight: 700 !important; }
+  .print-area .pivot-tbl tbody td { font-weight: 500 !important; }
   .print-area .pivot-tbl th:first-child,
   .print-area .pivot-tbl td:first-child { width: 11% !important; }
   .print-area .pivot-tbl th:last-child,
