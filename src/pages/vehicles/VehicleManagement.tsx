@@ -2,10 +2,12 @@ import { useState, useMemo } from 'react'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useRealtimeTable } from '../../hooks/useRealtime'
 import type { Vehicle } from '../../types'
+import { SearchInput } from '../../components/ui/SearchInput'
+import { SegmentedFilter } from '../../components/ui/SegmentedFilter'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type VehicleGroup = 'INTERNAL' | 'TRANSPORT'
+type VehicleGroup = 'INTERNAL' | 'TRANSPORT' | 'EQUIPMENT'
 
 interface FormState {
   plate: string
@@ -22,11 +24,13 @@ interface FormState {
 const GROUP_LABEL: Record<VehicleGroup, string> = {
   INTERNAL: 'รถโรงงาน',
   TRANSPORT: 'รถขนส่ง',
+  EQUIPMENT: 'เครื่องจักร',
 }
 
 const GROUP_STYLE: Record<VehicleGroup, { background: string; color: string }> = {
   INTERNAL: { background: '#F0FDF4', color: '#166534' },
   TRANSPORT: { background: '#EFF6FF', color: '#1D4ED8' },
+  EQUIPMENT: { background: '#FEF3C7', color: '#92400E' },
 }
 
 const STATUS_LABEL: Record<Vehicle['status'], string> = {
@@ -175,8 +179,12 @@ function VehicleFormModal({
           <div>
             <label style={labelStyle}>กลุ่มรถ</label>
             <div style={{ display: 'flex', gap: 10 }}>
-              {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
+              {(['TRANSPORT', 'INTERNAL', 'EQUIPMENT'] as VehicleGroup[]).map(g => {
                 const active = form.groupKind === g
+                const label =
+                  g === 'TRANSPORT' ? '🚛 ขนส่ง' :
+                  g === 'INTERNAL'  ? '🏭 โรงงาน' :
+                  '⚙️ เครื่องจักร'
                 return (
                   <button
                     key={g}
@@ -190,7 +198,7 @@ function VehicleFormModal({
                       color: active ? '#1D4ED8' : '#64748B',
                     }}
                   >
-                    {g === 'INTERNAL' ? '🏭 รถโรงงาน' : '🚛 รถขนส่ง'}
+                    {label}
                   </button>
                 )
               })}
@@ -198,7 +206,9 @@ function VehicleFormModal({
             <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 5 }}>
               {form.groupKind === 'INTERNAL'
                 ? 'น้ำมันจะถูกตัดสต็อคทันที ไม่ต้องผูกรอบงาน'
-                : 'น้ำมันต้องผูกกับรอบงาน ถ้าไม่พบรอบจะเป็น "น้ำมันลอย"'}
+                : form.groupKind === 'EQUIPMENT'
+                  ? 'อุปกรณ์/เครื่องจักร (โฟล์คลิฟท์ · รถตัก · เครื่องโม่) — ไม่อยู่ในระบบยาง'
+                  : 'น้ำมันต้องผูกกับรอบงาน ถ้าไม่พบรอบจะเป็น "น้ำมันลอย"'}
             </div>
           </div>
 
@@ -281,6 +291,7 @@ export function VehicleManagement() {
     total: vehicles.length,
     internal: vehicles.filter(v => (v.groupKind ?? 'TRANSPORT') === 'INTERNAL').length,
     transport: vehicles.filter(v => (v.groupKind ?? 'TRANSPORT') === 'TRANSPORT').length,
+    equipment: vehicles.filter(v => v.groupKind === 'EQUIPMENT').length,
   }), [vehicles])
 
   const openAdd = () => setModal({ form: emptyForm(), editId: null })
@@ -341,13 +352,6 @@ export function VehicleManagement() {
 
   const existingPlates = vehicles.map(v => v.plate)
 
-  const pillBtn = (active: boolean): React.CSSProperties => ({
-    padding: '5px 14px', borderRadius: 7, border: 'none', cursor: 'pointer',
-    fontSize: 13, fontWeight: active ? 600 : 400, fontFamily: 'inherit',
-    background: active ? 'var(--primary)' : 'transparent',
-    color: active ? '#fff' : 'var(--text-2)', transition: 'all .15s',
-  })
-
   return (
     <div>
       {/* Header */}
@@ -382,22 +386,17 @@ export function VehicleManagement() {
 
       {/* Filters */}
       <div className="card no-print" style={{ padding: '12px 16px', marginBottom: 14, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="ค้นหาทะเบียน, ยี่ห้อ..."
-          style={{
-            height: 34, padding: '0 12px', border: '1px solid var(--line)',
-            borderRadius: 7, fontSize: 13, fontFamily: 'inherit', outline: 'none',
-            width: 220,
-          }}
+        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาทะเบียน, ยี่ห้อ..." width={220} />
+        <SegmentedFilter
+          value={filterGroup}
+          onChange={setFilterGroup}
+          options={[
+            { value: 'ALL', label: `ทั้งหมด (${stats.total})` },
+            { value: 'TRANSPORT', label: `🚛 ขนส่ง (${stats.transport})` },
+            { value: 'INTERNAL', label: `🏭 โรงงาน (${stats.internal})` },
+            { value: 'EQUIPMENT', label: `⚙️ เครื่องจักร (${stats.equipment})` },
+          ]}
         />
-        <div style={{ background: '#F1F5F9', borderRadius: 8, padding: 3, display: 'flex', gap: 2 }}>
-          <button style={pillBtn(filterGroup === 'ALL')} onClick={() => setFilterGroup('ALL')}>ทั้งหมด ({stats.total})</button>
-          <button style={pillBtn(filterGroup === 'INTERNAL')} onClick={() => setFilterGroup('INTERNAL')}>🏭 โรงงาน ({stats.internal})</button>
-          <button style={pillBtn(filterGroup === 'TRANSPORT')} onClick={() => setFilterGroup('TRANSPORT')}>🚛 ขนส่ง ({stats.transport})</button>
-        </div>
       </div>
 
       {/* Table */}

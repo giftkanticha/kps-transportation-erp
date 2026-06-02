@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
-import { db } from './lib/db'
 import { useAuth } from './context/AuthContext'
+import { canAccessRoute } from './lib/permissions'
 import { LoginScreen } from './pages/auth/LoginScreen'
+import { ResetPasswordScreen } from './pages/auth/ResetPasswordScreen'
 import { Sidebar } from './components/layout/Sidebar'
 import { Topbar } from './components/layout/Topbar'
 import { UserManagementPage } from './pages/admin/UserManagementPage'
 import { ResetDataPage } from './pages/admin/ResetDataPage'
+import { ResetHistoryPage } from './pages/admin/ResetHistoryPage'
 import { Dashboard } from './pages/dashboard/Dashboard'
 import { AlertsTasksPage } from './pages/dashboard/AlertsTasksPage'
 import { VehiclesPage } from './pages/vehicles/VehiclesPage'
@@ -20,6 +22,7 @@ import { DispatchRoundOpen } from './pages/dispatch/DispatchRoundOpen'
 import { DispatchRoundDetail } from './pages/dispatch/DispatchRoundDetail'
 import { DispatchRoundClose } from './pages/dispatch/DispatchRoundClose'
 import { DispatchSummaryReport } from './pages/dispatch/DispatchSummaryReport'
+import { DispatchVehicleMonthlyReport } from './pages/dispatch/DispatchVehicleMonthlyReport'
 import { DispatchHistory } from './pages/dispatch/DispatchHistory'
 import { SubcontractorModule } from './pages/subcontractors/SubcontractorModule'
 import { ExpensesModule } from './pages/expenses/ExpensesModule'
@@ -53,12 +56,14 @@ const crumbMap: Record<string, string> = {
   'fuel.report': 'ระบบน้ำมัน • รายงาน',
   'fuel.summary': 'ระบบน้ำมัน • สรุปคลังน้ำมันรวม',
   'fuel.reconcile': 'ระบบน้ำมัน • ตรวจสอบข้อมูล',
+  'fuel.prices':    'ระบบน้ำมัน • ราคาน้ำมันรายวัน',
   dispatch: 'งานขนส่ง',
   'dispatch.open': 'งานขนส่ง • เปิดงาน',
   'dispatch.round': 'งานขนส่ง • รายละเอียดรอบ',
   'dispatch.close': 'งานขนส่ง • ปิดงาน',
   'dispatch.fuel': 'งานขนส่ง • รายงานประจำวัน',
   'dispatch.monthly': 'งานขนส่ง • รายงานประจำเดือน',
+  'dispatch.vehicleMonthly': 'งานขนส่ง • สรุปรายเที่ยวรายเดือน (ต่อคัน)',
   'dispatch.report': 'งานขนส่ง • รายงานสรุป',
   'dispatch.history': 'งานขนส่ง • ประวัติงาน',
   subcontractors: 'รถรับจ้างร่วม',
@@ -79,10 +84,11 @@ const crumbMap: Record<string, string> = {
   'settings.company': 'ตั้งค่า • บริษัท',
   'admin.users': 'จัดการผู้ใช้งาน',
   'admin.reset': 'รีเซตข้อมูล',
+  'admin.reset.history': 'ประวัติการรีเซต',
 }
 
 export default function App() {
-  const { legacyUser, logout, isAdmin, loading } = useAuth()
+  const { legacyUser, logout, isAdmin, loading, recoveryMode } = useAuth()
   const [active, setActive] = useState('dashboard')
   const [subject, setSubject] = useState<unknown>(null)
   const [collapsed, setCollapsed] = useState(false)
@@ -99,18 +105,22 @@ export default function App() {
     )
   }
 
+  if (recoveryMode) return <ResetPasswordScreen />
   if (!legacyUser) return <LoginScreen />
 
   const handleLogout = () => logout()
 
-  const handleReset = () => {
-    if (confirm('รีเซ็ตข้อมูลทั้งหมดและกลับไปค่าเริ่มต้น?')) {
-      db.reset()
-      window.location.reload()
-    }
-  }
-
   const renderPage = () => {
+    if (!canAccessRoute(active, legacyUser.role)) {
+      return (
+        <div className="page-head">
+          <div>
+            <h1 className="page-title">ไม่มีสิทธิ์เข้าถึง</h1>
+            <div className="page-sub">บัญชีของคุณไม่มีสิทธิ์ดูหน้านี้ — กรุณาติดต่อผู้ดูแลระบบ</div>
+          </div>
+        </div>
+      )
+    }
     switch (active) {
       case 'dashboard':
         return <Dashboard user={legacyUser} setActive={setActive} />
@@ -155,6 +165,8 @@ export default function App() {
         return <FuelModule tab="summary" setActive={setActive} />
       case 'fuel.reconcile':
         return <FuelModule tab="reconcile" setActive={setActive} />
+      case 'fuel.prices':
+        return <FuelModule tab="prices" setActive={setActive} />
 
       case 'dispatch':
       case 'dispatch.open':
@@ -169,6 +181,8 @@ export default function App() {
         return <DispatchModule tab="monthly" setActive={setActive} user={legacyUser} />
       case 'dispatch.report':
         return <DispatchSummaryReport setActive={setActive} setSubject={setSubject} />
+      case 'dispatch.vehicleMonthly':
+        return <DispatchVehicleMonthlyReport />
       case 'dispatch.history':
         return <DispatchHistory setActive={setActive} setSubject={setSubject} />
 
@@ -211,12 +225,14 @@ export default function App() {
       case 'settings.users':
         return <SettingsUsers />
       case 'settings.company':
-        return <SettingsCompany />
+        return <SettingsCompany setActive={setActive} />
 
       case 'admin.users':
         return isAdmin ? <UserManagementPage /> : <Dashboard user={legacyUser} setActive={setActive} />
       case 'admin.reset':
-        return isAdmin ? <ResetDataPage /> : <Dashboard user={legacyUser} setActive={setActive} />
+        return isAdmin ? <ResetDataPage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
+      case 'admin.reset.history':
+        return isAdmin ? <ResetHistoryPage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
 
       default:
         return <Dashboard user={legacyUser} setActive={setActive} />
@@ -238,7 +254,6 @@ export default function App() {
           user={legacyUser}
           crumb={crumbMap[active] ?? 'Dashboard'}
           onLogout={handleLogout}
-          onReset={handleReset}
           onOpenAlerts={() => setActive('alerts')}
         />
         <div className="content">{renderPage()}</div>

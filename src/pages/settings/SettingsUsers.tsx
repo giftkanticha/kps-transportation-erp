@@ -1,211 +1,374 @@
-import React, { useState } from 'react'
-import { db } from '../../lib/db'
-import { Icon, Field } from '../../components/ui'
-import type { User, KPSRole } from '../../types'
+import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useList, useUpdate } from '../../hooks/useTable'
+import { useAuth } from '../../context/AuthContext'
+import { supabase } from '../../lib/supabase'
+import { Icon } from '../../components/ui'
 
-interface UserForm {
-  name: string
-  email: string
-  role: KPSRole
+interface Profile {
+  id: string
+  displayName: string
+  username: string | null
+  email: string | null
   phone: string
-  title: string
-  avatar: string
+  role: string
+  status: string
+  createdAt: string
 }
 
-function Modal({
-  open,
-  onClose,
-  title,
-  footer,
-  children,
-}: {
-  open: boolean
-  onClose: () => void
-  title: string
-  footer: React.ReactNode
-  children: React.ReactNode
-}) {
-  if (!open) return null
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(15,23,42,.4)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 100,
-      }}
-      onClick={onClose}
-    >
-      <div
-        style={{
-          background: '#fff',
-          borderRadius: 12,
-          width: 520,
-          maxHeight: '90vh',
-          overflow: 'auto',
-          boxShadow: 'var(--shadow-lg)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div
-          style={{
-            padding: '18px 22px',
-            borderBottom: '1px solid var(--line)',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          <h3 style={{ margin: 0, fontSize: 16 }}>{title}</h3>
-          <div style={{ flex: 1 }} />
-          <button className="btn ghost icon sm" onClick={onClose}>
-            <Icon name="close" size={16} />
-          </button>
-        </div>
-        <div style={{ padding: 22 }}>{children}</div>
-        <div
-          style={{
-            padding: '14px 22px',
-            borderTop: '1px solid var(--line)',
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: 8,
-          }}
-        >
-          {footer}
-        </div>
-      </div>
-    </div>
-  )
+function thaiShortDate(iso: string): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return `${d.getDate()} ${['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'][d.getMonth()]} ${(d.getFullYear() + 543).toString().slice(-2)}`
+}
+
+const ROLES = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'EMPLOYEE'] as const
+const ROLE_LABEL: Record<string, string> = {
+  SUPER_ADMIN: 'ผู้ดูแลระบบสูงสุด', ADMIN: 'ผู้ดูแลระบบ', MANAGER: 'ผู้จัดการ', EMPLOYEE: 'พนักงาน',
+}
+const STATUS_LABEL: Record<string, string> = {
+  PENDING_APPROVAL: 'รออนุมัติ', ACTIVE: 'ใช้งาน', INACTIVE: 'ปิดใช้งาน', LOCKED: 'ถูกล็อก',
+}
+const STATUS_BADGE: Record<string, string> = {
+  PENDING_APPROVAL: 'amber', ACTIVE: 'green', INACTIVE: 'gray', LOCKED: 'red',
+}
+
+// Role pill colors (matching the .badge palette in src/styles/index.css)
+const ROLE_TONE: Record<string, { bg: string; fg: string; chevron: string }> = {
+  SUPER_ADMIN: { bg: '#FEE2E2', fg: '#991B1B', chevron: '%23991B1B' },
+  ADMIN:       { bg: '#DBEAFE', fg: '#1D4ED8', chevron: '%231D4ED8' },
+  MANAGER:     { bg: '#FEF3C7', fg: '#92400E', chevron: '%2392400E' },
+  EMPLOYEE:    { bg: '#F1F5F9', fg: '#475569', chevron: '%23475569' },
+}
+
+const rolePillStyle = (role: string, disabled: boolean) => {
+  const t = ROLE_TONE[role] ?? ROLE_TONE.EMPLOYEE
+  return {
+    appearance: 'none' as const,
+    WebkitAppearance: 'none' as const,
+    MozAppearance: 'none' as const,
+    background: `${t.bg} url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none' stroke='${t.chevron}' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M1 1l4 4 4-4'/></svg>") no-repeat right 10px center`,
+    color: t.fg,
+    border: 'none',
+    borderRadius: 999,
+    padding: '5px 26px 5px 12px',
+    fontSize: 12,
+    fontWeight: 600,
+    fontFamily: 'inherit',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.6 : 1,
+    minWidth: 130,
+  }
 }
 
 export function SettingsUsers() {
-  const users = db.getAll<User>('users')
-  const [show, setShow] = useState(false)
-  const [form, setForm] = useState<UserForm>({
-    name: '',
-    email: '',
-    role: 'manager',
-    phone: '',
-    title: '',
-    avatar: '',
-  })
+  const { profile, isAdmin } = useAuth()
+  const { data: users = [], isLoading } = useList<Profile>('user_profiles')
+  const updateProfile = useUpdate<Profile>('user_profiles')
+  const qc = useQueryClient()
+  const [busy, setBusy] = useState<string | null>(null)
+  const [editing, setEditing] = useState<Profile | null>(null)
 
-  const save = () => {
-    if (!form.name || !form.email) {
-      alert('กรุณากรอกชื่อและอีเมล')
-      return
-    }
-    db.add<User>('users', {
-      ...form,
-      id: '',
-      avatar: form.avatar || form.name.slice(0, 2),
-    })
-    setShow(false)
-    setForm({ name: '', email: '', role: 'manager', phone: '', title: '', avatar: '' })
+  const act = async (id: string, patch: Partial<Profile>) => {
+    setBusy(id)
+    try { await updateProfile.mutateAsync({ id, patch }) }
+    catch (e) { alert(e instanceof Error ? e.message : 'ดำเนินการไม่สำเร็จ') }
+    finally { setBusy(null) }
   }
+
+  const del = async (id: string, name: string) => {
+    if (!confirm(`ลบผู้ใช้ "${name}" ออกจากระบบถาวร?\n(บัญชีและข้อมูลโปรไฟล์ทั้งหมดจะถูกลบ — กู้คืนไม่ได้)`)) return
+    setBusy(id)
+    try {
+      const { error } = await supabase.rpc('admin_delete_user', { p_user_id: id })
+      if (error) throw new Error(error.message)
+      // Refresh the user list now that the row is gone.
+      qc.invalidateQueries({ queryKey: ['user_profiles'] })
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'ลบไม่สำเร็จ')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const sendReset = async (id: string, email: string | null, name: string) => {
+    if (!email) { alert('ผู้ใช้นี้ไม่มีอีเมลในระบบ ส่งลิงก์รีเซตไม่ได้'); return }
+    if (!confirm(`ส่งลิงก์รีเซตรหัสผ่านให้ ${name} (${email})?`)) return
+    setBusy(id)
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      })
+      if (error) throw new Error(error.message)
+      alert(`ส่งลิงก์ไปที่ ${email} แล้ว — แจ้งให้ตรวจอีเมลและคลิกลิงก์เพื่อตั้งรหัสผ่านใหม่`)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'ส่งลิงก์ไม่สำเร็จ')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  if (!isAdmin) {
+    return (
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">จัดการผู้ใช้งาน</h1>
+          <div className="page-sub">เฉพาะผู้ดูแลระบบเท่านั้น</div>
+        </div>
+      </div>
+    )
+  }
+
+  const pending = users.filter(u => u.status === 'PENDING_APPROVAL').length
 
   return (
     <div>
       <div className="page-head">
         <div>
           <h1 className="page-title">จัดการผู้ใช้งาน</h1>
-          <div className="page-sub">{users.length} บัญชีในระบบ</div>
+          <div className="page-sub">
+            {users.length} บัญชี{pending > 0 ? ` · ${pending} รออนุมัติ` : ''}
+          </div>
         </div>
-        <div className="actions">
-          <button className="btn primary" onClick={() => setShow(true)}>
-            <Icon name="plus" size={15} /> เพิ่มผู้ใช้
-          </button>
-        </div>
+      </div>
+
+      <div className="card" style={{ marginBottom: 16, padding: '10px 14px', fontSize: 13, color: 'var(--text-2)' }}>
+        💡 ผู้ใช้สมัครเองที่หน้าเข้าสู่ระบบ → สถานะ “รออนุมัติ” → กดอนุมัติที่นี่เพื่อเปิดใช้งาน และกำหนดสิทธิ์ได้
       </div>
 
       <div className="tbl-wrap">
         <table className="tbl">
           <thead>
             <tr>
-              <th>ชื่อ-อีเมล</th>
-              <th>ตำแหน่ง</th>
+              <th>ผู้ใช้</th>
+              <th>ชื่อผู้ใช้ (login)</th>
+              <th>อีเมล</th>
               <th>โทร</th>
               <th>สิทธิ์</th>
-              <th></th>
+              <th>สถานะ</th>
+              <th>จัดการ</th>
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
-              <tr key={u.id}>
-                <td>
-                  <div className="row" style={{ gap: 10 }}>
-                    <div
-                      className={`avatar ${u.role === 'admin' ? 'violet' : u.role === 'driver' ? 'amber' : ''}`}
+            {users.map(u => {
+              const self = u.id === profile?.id
+              const disabled = self || busy === u.id
+              return (
+                <tr key={u.id}>
+                  <td style={{ fontWeight: 500 }}>
+                    {u.displayName}
+                    {self && <span className="muted" style={{ fontSize: 11 }}> (คุณ)</span>}
+                    <div className="muted" style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>
+                      สมัคร {thaiShortDate(u.createdAt)}
+                    </div>
+                  </td>
+                  <td className="mono muted">{u.username ?? '—'}</td>
+                  <td className="mono muted" style={{ fontSize: 12 }}>{u.email ?? '—'}</td>
+                  <td className="mono muted">{u.phone || '—'}</td>
+                  <td>
+                    <select
+                      value={u.role}
+                      disabled={disabled}
+                      onChange={e => act(u.id, { role: e.target.value })}
+                      style={rolePillStyle(u.role, disabled)}
                     >
-                      {u.avatar}
+                      {ROLES.map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <span className={`badge ${STATUS_BADGE[u.status] ?? 'gray'}`}>
+                      {STATUS_LABEL[u.status] ?? u.status}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="row" style={{ gap: 6 }}>
+                      <button
+                        className="btn ghost icon sm"
+                        title="แก้ไขโปรไฟล์"
+                        onClick={() => setEditing(u)}
+                      >
+                        <Icon name="edit" size={14} />
+                      </button>
+                      {!self && (
+                        <button
+                          className="btn ghost icon sm"
+                          title="ส่งลิงก์รีเซตรหัสผ่าน"
+                          disabled={busy === u.id || !u.email}
+                          onClick={() => sendReset(u.id, u.email, u.displayName)}
+                        >
+                          <Icon name="mail" size={14} />
+                        </button>
+                      )}
+                      {u.status === 'PENDING_APPROVAL' && (
+                        <button className="btn primary sm" disabled={busy === u.id} onClick={() => act(u.id, { status: 'ACTIVE' })}>
+                          อนุมัติ
+                        </button>
+                      )}
+                      {u.status === 'ACTIVE' && !self && (
+                        <button className="btn sm" disabled={busy === u.id} onClick={() => act(u.id, { status: 'INACTIVE' })}>
+                          ปิดใช้งาน
+                        </button>
+                      )}
+                      {(u.status === 'INACTIVE' || u.status === 'LOCKED') && (
+                        <>
+                          <button className="btn sm" disabled={busy === u.id} onClick={() => act(u.id, { status: 'ACTIVE' })}>
+                            เปิดใช้งาน
+                          </button>
+                          {!self && (
+                            <button className="btn sm danger" disabled={busy === u.id} onClick={() => del(u.id, u.displayName)}>
+                              <Icon name="trash" size={13} /> ลบผู้ใช้
+                            </button>
+                          )}
+                        </>
+                      )}
+                      {self && u.status === 'ACTIVE' && <span className="muted" style={{ fontSize: 11 }}>—</span>}
                     </div>
-                    <div>
-                      <div style={{ fontWeight: 500 }}>{u.name}</div>
-                      <div className="muted" style={{ fontSize: 11.5 }}>
-                        {u.email}
-                      </div>
-                    </div>
-                  </div>
-                </td>
-                <td>{u.title}</td>
-                <td className="mono muted">{u.phone}</td>
-                <td>
-                  <span className={`role-pill ${u.role}`}>{u.role}</span>
-                </td>
-                <td>
-                  <button className="btn ghost icon sm">
-                    <Icon name="more" size={16} />
-                  </button>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                </tr>
+              )
+            })}
+            {users.length === 0 && !isLoading && (
+              <tr><td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 24 }}>ไม่มีผู้ใช้</td></tr>
+            )}
           </tbody>
         </table>
       </div>
 
-      <Modal
-        open={show}
-        onClose={() => setShow(false)}
-        title="เพิ่มผู้ใช้ใหม่"
-        footer={
-          <>
-            <button className="btn" onClick={() => setShow(false)}>
-              ยกเลิก
-            </button>
-            <button className="btn primary" onClick={save}>
-              บันทึก
-            </button>
-          </>
-        }
-      >
-        <div className="grid-2">
-          <Field label="ชื่อ-นามสกุล *">
-            <input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
-          </Field>
-          <Field label="อีเมล *">
-            <input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
-          </Field>
-          <Field label="เบอร์โทร">
-            <input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
-          </Field>
-          <Field label="ตำแหน่ง">
-            <input value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} />
-          </Field>
-          <Field label="สิทธิ์การเข้าถึง">
-            <select
-              value={form.role}
-              onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as KPSRole }))}
-            >
-              <option value="admin">Admin — เข้าถึงทุกอย่าง</option>
-              <option value="manager">Manager — จัดการขนส่ง</option>
-              <option value="driver">Driver — งานของตนเอง</option>
-            </select>
-          </Field>
+      {editing && (
+        <EditProfileModal
+          user={editing}
+          isSelf={editing.id === profile?.id}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function EditProfileModal({ user, isSelf, onClose }: {
+  user: Profile
+  isSelf: boolean
+  onClose: () => void
+}) {
+  const updateProfile = useUpdate<Profile>('user_profiles')
+  const [displayName, setDisplayName] = useState(user.displayName ?? '')
+  const [username, setUsername] = useState(user.username ?? '')
+  const [email, setEmail] = useState(user.email ?? '')
+  const [phone, setPhone] = useState(user.phone ?? '')
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const save = async () => {
+    setErr(null)
+    const dn = displayName.trim()
+    const u  = username.trim().toLowerCase()
+    const e  = email.trim().toLowerCase()
+    const ph = phone.trim()
+    const prevEmail = (user.email ?? '').toLowerCase()
+
+    // Format checks (only on invalid values — empty username is allowed).
+    if (!dn) return setErr('ชื่อ-นามสกุลห้ามว่าง')
+    if (u && !/^[a-z0-9_.]{3,}$/.test(u)) {
+      return setErr('ชื่อผู้ใช้ต้องเป็น a-z 0-9 _ . อย่างน้อย 3 ตัว')
+    }
+    if (!e || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) {
+      return setErr('อีเมลไม่ถูกต้อง')
+    }
+
+    const emailChanged = e !== prevEmail
+    const pwChanged = isSelf && (pw.length > 0 || pw2.length > 0)
+    if (pwChanged) {
+      if (pw.length < 6) return setErr('รหัสผ่านใหม่ต้องมีอย่างน้อย 6 ตัวอักษร')
+      if (pw !== pw2)    return setErr('รหัสผ่านยืนยันไม่ตรงกัน')
+    }
+
+    setBusy(true)
+    try {
+      // Email lives on auth.users — must go through the admin RPC.
+      if (emailChanged) {
+        const { error } = await supabase.rpc('admin_set_user_email', {
+          p_user_id: user.id,
+          p_email:   e,
+        })
+        if (error) throw new Error(error.message)
+      }
+      // Profile fields: always save the current form values (cheap; rows are
+      // pre-filled with the existing values so no real damage if unchanged).
+      await updateProfile.mutateAsync({
+        id: user.id,
+        patch: {
+          displayName: dn,
+          username: u || null,
+          phone: ph,
+        } as Partial<Profile>,
+      })
+      if (pwChanged) {
+        const { error } = await supabase.auth.updateUser({ password: pw })
+        if (error) throw new Error(error.message)
+      }
+      onClose()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <div className="head"><h3>แก้ไขข้อมูลผู้ใช้</h3></div>
+        <div className="body">
+          <div className="muted" style={{ fontSize: 12, marginBottom: 14 }}>
+            แก้เฉพาะช่องที่ต้องการเปลี่ยน — ช่องที่ไม่ได้แตะจะคงค่าเดิม
+          </div>
+          <div className="field" style={{ marginBottom: 14 }}>
+            <label>ชื่อ-นามสกุล</label>
+            <input value={displayName} onChange={e => setDisplayName(e.target.value)} autoFocus />
+          </div>
+          <div className="field" style={{ marginBottom: 14 }}>
+            <label>ชื่อผู้ใช้ (login)</label>
+            <input value={username} onChange={e => setUsername(e.target.value.toLowerCase())} placeholder="เช่น somchai" autoComplete="username" />
+          </div>
+          <div className="field" style={{ marginBottom: 14 }}>
+            <label>อีเมล</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@example.com" autoComplete="email" />
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>ใช้สำหรับเข้าระบบและรับลิงก์รีเซตรหัสผ่าน</div>
+          </div>
+          <div className="field" style={{ marginBottom: 4 }}>
+            <label>เบอร์โทร</label>
+            <input value={phone} onChange={e => setPhone(e.target.value)} />
+          </div>
+          {isSelf && (
+            <>
+              <div style={{ borderTop: '1px solid var(--line)', margin: '20px 0 14px' }} />
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)', marginBottom: 4 }}>เปลี่ยนรหัสผ่าน</div>
+              <div className="muted" style={{ fontSize: 11.5, marginBottom: 12 }}>เว้นว่างถ้าไม่ต้องการเปลี่ยน</div>
+              <div className="field" style={{ marginBottom: 14 }}>
+                <label>รหัสผ่านใหม่</label>
+                <input type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="อย่างน้อย 6 ตัวอักษร" autoComplete="new-password" />
+              </div>
+              <div className="field">
+                <label>ยืนยันรหัสผ่านใหม่</label>
+                <input type="password" value={pw2} onChange={e => setPw2(e.target.value)} autoComplete="new-password" />
+              </div>
+            </>
+          )}
+          {err && (
+            <div style={{ marginTop: 14, padding: '8px 12px', background: 'var(--red-50)', color: '#991b1b', borderRadius: 6, fontSize: 13 }}>
+              {err}
+            </div>
+          )}
         </div>
-      </Modal>
+        <div className="foot">
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" onClick={save} disabled={busy}>
+            {busy ? 'กำลังบันทึก…' : 'บันทึก'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

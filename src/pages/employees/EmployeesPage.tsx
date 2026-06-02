@@ -1,8 +1,9 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useList, useUpdate, useDelete } from '../../hooks/useTable'
+import { useAuth } from '../../context/AuthContext'
 import type { Employee, Vehicle } from '../../types'
-import { Icon, StatusBadge, Field } from '../../components/ui'
+import { Icon, StatusBadge, Field, SearchInput } from '../../components/ui'
 
 function isDriverPosition(pos: string): boolean {
   return pos === 'คนขับ'
@@ -218,6 +219,7 @@ interface EmployeeEditModalProps {
 }
 
 function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProps) {
+  const { isManager } = useAuth()
   const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
   const { data: allEmployees = [] } = useList<Employee>('employees')
   const updateEmployee = useUpdate<Employee>('employees')
@@ -235,6 +237,7 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
     lineId: employee.lineId,
     joined: employee.joined,
     address: employee.address ?? '',
+    salary: String(employee.salary ?? 0),
   })
   const [vehicleIds, setVehicleIds] = useState<string[]>(initialVehicleIds)
 
@@ -260,6 +263,10 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
           lineId: form.lineId,
           joined: form.joined,
           address: form.address,
+          // Salary is excluded from non-manager patches so a regular
+          // employee editing their own row (e.g. phone update) can't
+          // overwrite the salary on the server.
+          ...(isManager ? { salary: Number(form.salary) || 0 } : {}),
           vehicleId: isDriver ? (vehicleIds[0] ?? null) : null,
         },
       })
@@ -336,6 +343,17 @@ function EmployeeEditModal({ employee, onClose, onSaved }: EmployeeEditModalProp
             <Field label="วันเริ่มงาน">
               <input type="date" value={form.joined} onChange={e => set('joined', e.target.value)} />
             </Field>
+            {isManager && (
+              <Field label="เงินเดือน (บาท/เดือน)">
+                <input
+                  type="number"
+                  value={form.salary}
+                  onChange={e => set('salary', e.target.value)}
+                  placeholder="0"
+                  min={0}
+                />
+              </Field>
+            )}
           </div>
 
           <Field label="ที่อยู่">
@@ -551,33 +569,7 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
             flexWrap: 'wrap',
           }}
         >
-          <div style={{ position: 'relative', flex: 1, minWidth: 240 }}>
-            <Icon
-              name="search"
-              size={15}
-              style={{
-                position: 'absolute',
-                left: 12,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                color: 'var(--text-faint)',
-              }}
-            />
-            <input
-              value={q}
-              onChange={e => setQ(e.target.value)}
-              placeholder="ค้นหา: ชื่อ / เบอร์โทร / ID"
-              style={{
-                width: '100%',
-                height: 38,
-                padding: '0 12px 0 36px',
-                border: '1px solid var(--line)',
-                borderRadius: 8,
-                background: 'var(--bg)',
-                fontSize: 13,
-              }}
-            />
-          </div>
+          <SearchInput value={q} onChange={setQ} placeholder="ค้นหา: ชื่อ / เบอร์โทร / ID" />
           <FilterCheckGroup
             label="สถานะ"
             options={[

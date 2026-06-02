@@ -179,7 +179,7 @@ export function ExpensePivotPage() {
       </div>
 
       {/* Sidebar + Print area */}
-      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+      <div className="pivot-print-wrap no-print" style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         <VehiclePickerSidebar
           vehicles={allVehicles}
           picked={pickedVehicles}
@@ -191,8 +191,8 @@ export function ExpensePivotPage() {
           <div className="head">
             <h3>ตารางสรุป — ค่าใช้จ่ายรวม ({dateRangeLabel()})</h3>
           </div>
-          <div style={{ overflowX: 'auto' }}>
-            <table className="tbl" style={{ minWidth: '100%' }}>
+          <div style={{ overflowX: 'auto' }} className="pivot-scroll">
+            <table className="tbl pivot-print" style={{ minWidth: '100%' }}>
               <thead>
                 <tr>
                   <th
@@ -351,6 +351,62 @@ export function ExpensePivotPage() {
           KPS Transportation ERP — สรุปค่าใช้จ่ายรวมรายคัน × คู่ค้า · ตัวเลขในหน่วยบาท
         </div>
         </div>
+      </div>
+
+      {/* ── Print-only: portrait-friendly per-vehicle sections ──
+         The on-screen pivot is too wide for A4; here each vehicle becomes
+         its own block listing only the partners it actually paid. */}
+      <div className="print-only pivot-portrait">
+        {vehicles
+          .filter((v) => rowTotal(v.id) > 0)
+          .map((v) => {
+            const rowsWithSpend = activeVendors
+              .filter((p) => (matrix[v.id]?.[p.id] || 0) > 0)
+              .sort((a, b) => (matrix[v.id]?.[b.id] || 0) - (matrix[v.id]?.[a.id] || 0))
+            return (
+              <div key={v.id} className="pivot-portrait-section">
+                <div className="pivot-portrait-head">
+                  <span className="plate">{v.plate}</span>
+                  <span className="meta">{v.brand} · {v.type}</span>
+                  <span className="total">รวม {db.thb(rowTotal(v.id))}</span>
+                </div>
+                <table className="pivot-portrait-tbl">
+                  <tbody>
+                    {rowsWithSpend.map((p) => (
+                      <tr key={p.id}>
+                        <td className="name">{p.name}</td>
+                        <td className="type">{p.type}</td>
+                        <td className="amount">{db.thb(matrix[v.id][p.id])}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          })}
+
+        {/* Per-vendor totals */}
+        {activeVendors.length > 0 && (
+          <div className="pivot-portrait-section pivot-portrait-summary">
+            <div className="pivot-portrait-head">
+              <span className="plate">รวมยอดต่อคู่ค้า</span>
+              <span className="total">รวมทั้งสิ้น {db.thb(grandTotal)}</span>
+            </div>
+            <table className="pivot-portrait-tbl">
+              <tbody>
+                {[...activeVendors]
+                  .sort((a, b) => colTotal(b.id) - colTotal(a.id))
+                  .map((p) => (
+                    <tr key={p.id}>
+                      <td className="name">{p.name}</td>
+                      <td className="type">{p.type}</td>
+                      <td className="amount">{db.thb(colTotal(p.id))}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   )

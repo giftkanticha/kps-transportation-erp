@@ -182,6 +182,7 @@ function CloseForm({
     if (startR && endAt < startR.at) return setToast({ kind: 'error', msg: 'เวลาต้องหลังเวลาเปิดรอบ' })
 
     setSaving(true)
+    let ok = false
     try {
       const endRefill: FuelRefill = {
         id: uid('rf'),
@@ -207,6 +208,7 @@ function CloseForm({
         })
       }
 
+      ok = true
       setToast({ kind: 'success', msg: `✅ ปิดรอบ ${round.code} เรียบร้อย` })
       setTimeout(() => {
         setSubject(null)
@@ -214,7 +216,10 @@ function CloseForm({
       }, 1200)
     } catch (err) {
       setToast({ kind: 'error', msg: err instanceof Error ? err.message : 'ปิดรอบไม่สำเร็จ' })
-      setSaving(false)
+    } finally {
+      // Reset on failure so the user can retry; on success the page navigates away
+      // shortly anyway, but reset is harmless either way.
+      if (!ok) setSaving(false)
     }
   }
 

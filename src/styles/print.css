@@ -1,9 +1,9 @@
-/* KPS Print Stylesheet
-   @page size is injected dynamically by usePrint() per orientation.
-   Default fallback: A4 portrait 12mm margin.
-*/
+/* KPS Print Stylesheet — A4 portrait by default; pages that need landscape
+   (e.g. wide pivot reports) opt-in via `body.print-landscape`. */
 
-@page { size: A4 portrait; margin: 8mm 10mm; }
+@page             { size: A4 portrait;  margin: 8mm 10mm; }
+@page kps-land    { size: A4 landscape; margin: 8mm 10mm; }
+body.print-landscape { page: kps-land; }
 
 /* ── Screen: hide print-only elements ─────────────────────────── */
 .print-only    { display: none !important; }
@@ -67,6 +67,97 @@
   .print-area .card { border: 1px solid #ccc !important; }
   .print-area .card .head h3 { font-size: 10pt !important; margin: 0 0 4px !important; }
   .print-area .card .head { padding: 8px 12px !important; }
+
+  /* ── Pivot table (sรุปรายคัน × คู่ค้า) ───────────────────────
+     คอลัมน์เยอะ → บีบฟอนต์/padding/min-width ให้พอดีหน้ากระดาษ */
+  .print-area .pivot-tbl { table-layout: fixed; width: 100% !important; }
+  .print-area .pivot-tbl th,
+  .print-area .pivot-tbl td {
+    font-size: 8.5pt !important;
+    padding: 2px 4px !important;
+    min-width: 0 !important;
+    white-space: normal !important;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    color: #000 !important;
+  }
+  .print-area .pivot-tbl thead th { font-weight: 700 !important; }
+  .print-area .pivot-tbl tbody td { font-weight: 500 !important; }
+  .print-area .pivot-tbl th:first-child,
+  .print-area .pivot-tbl td:first-child { width: 11% !important; }
+  .print-area .pivot-tbl th:last-child,
+  .print-area .pivot-tbl td:last-child { width: 10% !important; }
+
+  /* ── Expense pivot — portrait-friendly per-vehicle layout ──
+     The on-screen pivot (rows × partners) is too wide for A4. For print we
+     render a separate `.pivot-portrait` block (in JSX) that turns each
+     vehicle into a vertical section with only the partners it spent on. */
+  .pivot-portrait { display: block !important; }
+  .pivot-portrait-section {
+    page-break-inside: avoid;
+    margin-bottom: 6mm;
+    border: 1px solid #cbd5e1;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .pivot-portrait-head {
+    display: flex !important;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 8px;
+    background: #EFF6FF !important;
+    border-bottom: 1px solid #cbd5e1;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .pivot-portrait-head .plate {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11pt;
+    font-weight: 700;
+    color: #1D4ED8;
+  }
+  .pivot-portrait-head .meta {
+    font-size: 8.5pt;
+    color: #475569;
+    flex: 1;
+  }
+  .pivot-portrait-head .total {
+    font-size: 10pt;
+    font-weight: 700;
+    color: #1D4ED8;
+    font-family: ui-monospace, Menlo, monospace;
+  }
+  .pivot-portrait-tbl {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .pivot-portrait-tbl td {
+    border: none !important;
+    border-bottom: 1px solid #f1f5f9 !important;
+    padding: 2px 8px !important;
+    font-size: 9pt;
+  }
+  .pivot-portrait-tbl td.name { font-weight: 600; width: 50%; }
+  .pivot-portrait-tbl td.type { color: #64748b; font-size: 8pt; width: 25%; }
+  .pivot-portrait-tbl td.amount {
+    text-align: right;
+    font-family: ui-monospace, Menlo, monospace;
+    width: 25%;
+  }
+  .pivot-portrait-summary {
+    margin-top: 8mm;
+    border-color: #16a34a;
+    page-break-before: auto;
+  }
+  .pivot-portrait-summary .pivot-portrait-head {
+    background: #F0FDF4 !important;
+    border-bottom-color: #16a34a;
+  }
+  .pivot-portrait-summary .pivot-portrait-head .plate,
+  .pivot-portrait-summary .pivot-portrait-head .total { color: #166534; }
+
+  /* Force the element onto a new printed page */
+  .print-break { break-before: page; page-break-before: always; }
 
   /* ── Stock history modal: flatten for print ─────────────────── */
   .hist-overlay {
@@ -136,14 +227,20 @@
     font-size: 8pt;
   }
 
-  /* ── Fuel report compact mode (#9) — fit 31 rows per A4 ─────── */
-  .fuel-report-compact { font-size: 6.5pt !important; }
+  /* ── Fuel report compact mode ─────────────────────────────────
+     บีบ ​font/padding ให้พอดีหน้า แต่ขนาดใหญ่พอที่จะอ่านง่าย
+     (เดิม 6.5pt ตั้งใจให้พอดี 31 แถว/หน้า แต่บางเกินไปสำหรับการอ่าน
+     → bump เป็น 8.5pt; ตารางจะ paginate หลายหน้าตามจำเป็น) */
+  .fuel-report-compact { font-size: 8.5pt !important; }
   .fuel-report-compact th,
   .fuel-report-compact td {
-    font-size: 6.5pt !important;
-    padding: 1px 4px !important;
-    line-height: 1.15 !important;
+    font-size: 8.5pt !important;
+    padding: 2px 5px !important;
+    line-height: 1.25 !important;
+    color: #000 !important;
   }
+  .fuel-report-compact thead th { font-weight: 700 !important; }
+  .fuel-report-compact tbody td { font-weight: 500 !important; }
 }
 
 .tire-layout-print { display: none; }

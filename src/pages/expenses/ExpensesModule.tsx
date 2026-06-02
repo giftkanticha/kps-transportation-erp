@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
-import { Icon, Field, Info } from '../../components/ui'
+import { Icon, Field, Info, SearchInput } from '../../components/ui'
+import { usePrint } from '../../hooks/usePrint'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
 interface ExpensesModuleProps {
@@ -62,7 +63,12 @@ function genExpCode(headers: ExpenseHeader[]): string {
     String(now.getDate()).padStart(2, '0')
   const prefix = `EXP-${yyyymmdd}-`
   const existing = headers.filter(h => h.code.startsWith(prefix))
-  return prefix + String(existing.length + 1).padStart(3, '0')
+  // length+1 leaves gaps when an expense is deleted and collides with a live row.
+  const maxSeq = existing.reduce((max, h) => {
+    const n = parseInt(h.code.slice(prefix.length), 10)
+    return Number.isNaN(n) ? max : Math.max(max, n)
+  }, 0)
+  return prefix + String(maxSeq + 1).padStart(3, '0')
 }
 function toBeCode(code: string): string {
   return code.replace(/^EXP-(\d{4})/, (_, y) => `EXP-${+y + 543}`)
@@ -90,18 +96,19 @@ export function ExpensesModule({ tab, setActive }: ExpensesModuleProps) {
       <div className="tabs" style={{ marginBottom: 22 }}>
         {(
           [
-            ['record', '', 'บันทึกค่าใช้จ่าย'],
-            ['finance', 'finance', 'สถานะการเงิน'],
-            ['stock', 'stock', 'สต็อคคลัง KPS'],
-            ['report', 'report', 'รายงานสรุป'],
-            ['vendors', 'vendors', 'ทะเบียนร้านค้า/ช่าง'],
-          ] as [string, string, string][]
-        ).map(([id, route, label]) => (
+            ['record', '', 'บันทึกค่าใช้จ่าย', 'edit'],
+            ['finance', 'finance', 'สถานะการเงิน', 'money'],
+            ['stock', 'stock', 'สต็อคคลัง KPS', 'package'],
+            ['report', 'report', 'รายงานสรุป', 'chart'],
+            ['vendors', 'vendors', 'ทะเบียนร้านค้า/ช่าง', 'client'],
+          ] as [string, string, string, string][]
+        ).map(([id, route, label, ic]) => (
           <button
             key={id}
             className={`tab ${current === id ? 'active' : ''}`}
             onClick={() => setActive('expenses' + (route ? '.' + route : ''))}
           >
+            <Icon name={ic} size={14} style={{ marginRight: 6, verticalAlign: -3 }} />
             {label}
           </button>
         ))}
@@ -290,36 +297,40 @@ function ExpenseFormBody({
             </Field>
           </div>
 
-          {docCode && (
-            <div style={{ marginTop: 10 }}>
-              <Field label="เลขที่เอกสาร (อัตโนมัติ)">
-                <input
-                  readOnly
-                  value={toBeCode(docCode)}
-                  style={{
-                    background: 'var(--bg-2, #F1F5F9)', color: 'var(--text-muted)',
-                    cursor: 'default', borderRadius: 8, border: '1px solid #E2E8F0',
-                    padding: '8px 14px', fontSize: 13, fontFamily: 'var(--mono)', maxWidth: 280,
-                  }}
-                />
-              </Field>
+          <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            {docCode && (
+              <div style={{ flex: '0 0 260px', minWidth: 220 }}>
+                <Field label="เลขที่เอกสาร (อัตโนมัติ)">
+                  <input
+                    readOnly
+                    value={toBeCode(docCode)}
+                    style={{
+                      width: '100%', height: 44,
+                      background: 'var(--bg-sunk)', color: 'var(--text-muted)',
+                      cursor: 'default', borderRadius: 'var(--r-md)', border: '1px solid var(--line)',
+                      padding: '0 14px', fontSize: 13, fontFamily: 'var(--mono)',
+                    }}
+                  />
+                </Field>
+              </div>
+            )}
+            <div
+              style={{
+                flex: 1, minWidth: 240, height: 44,
+                padding: '0 18px',
+                background: 'var(--primary-50)',
+                borderRadius: 'var(--r-md)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>ยอดรวมสุทธิ</span>
+              <div className="spacer" />
+              <span className="mono" style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary)' }}>
+                {netTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท
+              </span>
             </div>
-          )}
-
-          <div
-            style={{
-              padding: '14px 18px',
-              background: 'var(--primary-50)',
-              borderRadius: 8,
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <span style={{ fontWeight: 500 }}>ยอดรวมสุทธิ:</span>
-            <div className="spacer" />
-            <span className="mono" style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary)' }}>
-              {netTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท
-            </span>
           </div>
         </div>
       </div>
@@ -492,37 +503,41 @@ function ExpRecord() {
       alert('กรุณาเพิ่มรายการอย่างน้อย 1 รายการ')
       return
     }
-    const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
-    const h = await insertHeader.mutateAsync({
-      code: genExpCode(allHeaders),
-      date: hdr.date,
-      vehicleId: hdr.vehicleId,
-      partnerId: hdr.partnerId,
-      odometer: Number(hdr.odometer) || 0,
-      paid: hdr.paid === 'paid',
-      dueDate: hdr.dueDate,
-      total: netTotal,
-      lineCount: lines.length,
-      note: lines.map((l) => l.item).filter(Boolean).join(', '),
-    })
-    for (const l of lines) {
-      const { id: _id, ...rest } = l
-      void _id
-      await insertLine.mutateAsync({
-        ...rest,
-        headerId: h.id,
-        amount: (l.qty || 0) * (l.unitPrice || 0),
+    try {
+      const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
+      const h = await insertHeader.mutateAsync({
+        code: genExpCode(allHeaders),
+        date: hdr.date,
+        vehicleId: hdr.vehicleId,
+        partnerId: hdr.partnerId,
+        odometer: Number(hdr.odometer) || 0,
+        paid: hdr.paid === 'paid',
+        dueDate: hdr.dueDate,
+        total: netTotal,
+        lineCount: lines.length,
+        note: lines.map((l) => l.item).filter(Boolean).join(', '),
       })
-    }
-    // Apply stock deduction for KPS warehouse
-    if (isKPSPartner(hdr.partnerId, partners)) {
-      for (const d of buildStockDeltas(lines, -1, stocks)) {
-        await updateStock.mutateAsync(d)
+      for (const l of lines) {
+        const { id: _id, ...rest } = l
+        void _id
+        await insertLine.mutateAsync({
+          ...rest,
+          headerId: h.id,
+          amount: (l.qty || 0) * (l.unitPrice || 0),
+        })
       }
+      // Apply stock deduction for KPS warehouse
+      if (isKPSPartner(hdr.partnerId, partners)) {
+        for (const d of buildStockDeltas(lines, -1, stocks)) {
+          await updateStock.mutateAsync(d)
+        }
+      }
+      alert('บันทึกเรียบร้อย')
+      setHdr(emptyHeader())
+      setLines([emptyLine()])
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-    alert('บันทึกเรียบร้อย')
-    setHdr(emptyHeader())
-    setLines([emptyLine()])
   }
 
   const handleReset = () => {
@@ -686,54 +701,58 @@ function ExpenseEditModal({
       alert('กรุณาเลือกรถและช่าง/ร้านค้า')
       return
     }
-    const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
+    try {
+      const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
 
-    // Revert old stock impact
-    if (wasKPS) {
-      for (const d of buildStockDeltas(oldLines, +1, stocks)) {
-        await updateStock.mutateAsync(d)
+      // Revert old stock impact
+      if (wasKPS) {
+        for (const d of buildStockDeltas(oldLines, +1, stocks)) {
+          await updateStock.mutateAsync(d)
+        }
       }
-    }
 
-    // Remove old lines
-    for (const l of oldLines) {
-      await deleteLine.mutateAsync(l.id)
-    }
+      // Remove old lines
+      for (const l of oldLines) {
+        await deleteLine.mutateAsync(l.id)
+      }
 
-    // Update header
-    await updateHeader.mutateAsync({
-      id: header.id,
-      patch: {
-        ...hdr,
-        paid: hdr.paid === 'paid',
-        odometer: Number(hdr.odometer) || 0,
-        total: netTotal,
-        lineCount: lines.length,
-        note: lines.map((l) => l.item).filter(Boolean).join(', '),
-      },
-    })
-
-    // Add new lines
-    for (const l of lines) {
-      const { id: _id, ...rest } = l
-      void _id
-      await insertLine.mutateAsync({
-        ...rest,
-        headerId: header.id,
-        amount: (l.qty || 0) * (l.unitPrice || 0),
+      // Update header
+      await updateHeader.mutateAsync({
+        id: header.id,
+        patch: {
+          ...hdr,
+          paid: hdr.paid === 'paid',
+          odometer: Number(hdr.odometer) || 0,
+          total: netTotal,
+          lineCount: lines.length,
+          note: lines.map((l) => l.item).filter(Boolean).join(', '),
+        },
       })
-    }
 
-    // Apply new stock impact
-    if (isKPSPartner(hdr.partnerId, partners)) {
-      for (const d of buildStockDeltas(lines, -1, stocks)) {
-        await updateStock.mutateAsync(d)
+      // Add new lines
+      for (const l of lines) {
+        const { id: _id, ...rest } = l
+        void _id
+        await insertLine.mutateAsync({
+          ...rest,
+          headerId: header.id,
+          amount: (l.qty || 0) * (l.unitPrice || 0),
+        })
       }
-    }
 
-    alert('บันทึกการแก้ไขเรียบร้อย')
-    onSaved()
-    onClose()
+      // Apply new stock impact
+      if (isKPSPartner(hdr.partnerId, partners)) {
+        for (const d of buildStockDeltas(lines, -1, stocks)) {
+          await updateStock.mutateAsync(d)
+        }
+      }
+
+      alert('บันทึกการแก้ไขเรียบร้อย')
+      onSaved()
+      onClose()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   return (
@@ -871,7 +890,7 @@ function ExpFinance() {
   const { data: stocks = [] } = useList<StockItem>('stock_items')
   const [editing, setEditing] = useState<ExpenseHeader | null>(null)
 
-  const today = new Date('2026-05-17')
+  const today = (() => { const d = new Date(); d.setHours(0,0,0,0); return d })()
   const unpaidHeaders = headers.filter((h) => !h.paid)
   const overdue = unpaidHeaders.filter((h) => h.dueDate && new Date(h.dueDate) < today)
   const totalUnpaid = unpaidHeaders.reduce((s, h) => s + h.total, 0)
@@ -1042,6 +1061,7 @@ function ExpFinance() {
 }
 
 // ─── Tab 3: สต๊อคคลัง KPS ────────────────────────────────────────────────────
+// ─── Tab 3: สต๊อคคลัง KPS ────────────────────────────────────────────────────
 
 function SellPriceCell({ item, onSaved }: { item: StockItem; onSaved: () => void }) {
   const updateStock = useUpdate<StockItem>('stock_items')
@@ -1195,73 +1215,77 @@ function ExpStock() {
     const p = parseFloat(form.unitPrice) || 0
     if (q <= 0) { alert('กรุณากรอกจำนวน'); return }
     if (p <= 0) { alert('กรุณากรอกราคาต่อหน่วย'); return }
+    if (isNewPartner && !form.newPartnerName.trim()) { alert('กรุณากรอกชื่อคู่ค้าใหม่'); return }
+    if (isNewItem    && !form.newName.trim())        { alert('กรุณากรอกชื่อสินค้าใหม่'); return }
 
-    // New vendor: create it in the shared partners registry first.
-    let partnerId = form.partnerId
-    if (isNewPartner) {
-      if (!form.newPartnerName.trim()) { alert('กรุณากรอกชื่อคู่ค้าใหม่'); return }
-      const nextNum = allPartners.reduce((max, x) => {
-        const n = parseInt(x.code.replace(/\D/g, ''), 10)
-        return isNaN(n) ? max : Math.max(max, n)
-      }, 0) + 1
-      const createdPartner = await insertPartner.mutateAsync({
-        code: 'VND-' + String(nextNum).padStart(3, '0'),
-        name: form.newPartnerName.trim(),
-        type: form.newPartnerType,
-        status: 'active',
-      })
-      partnerId = createdPartner.id
-    }
+    try {
+      // New vendor: create it in the shared partners registry first.
+      let partnerId = form.partnerId
+      if (isNewPartner) {
+        const nextNum = allPartners.reduce((max, x) => {
+          const n = parseInt(x.code.replace(/\D/g, ''), 10)
+          return isNaN(n) ? max : Math.max(max, n)
+        }, 0) + 1
+        const createdPartner = await insertPartner.mutateAsync({
+          code: 'VND-' + String(nextNum).padStart(3, '0'),
+          name: form.newPartnerName.trim(),
+          type: form.newPartnerType,
+          status: 'active',
+        })
+        partnerId = createdPartner.id
+      }
 
-    // New stock item: create it first, then receive into it.
-    if (isNewItem) {
-      if (!form.newName.trim()) { alert('กรุณากรอกชื่อสินค้าใหม่'); return }
-      const created = await insertStock.mutateAsync({
-        code: 'ST-' + Date.now().toString().slice(-6),
-        name: form.newName.trim(),
-        category: form.newCategory,
-        unit: form.newUnit.trim() || 'ชิ้น',
-        qtyIn: q, qtyOut: 0, qty: q,
-        unitCost: p, reorderAt: 0,
+      // New stock item: create it first, then receive into it.
+      if (isNewItem) {
+        const created = await insertStock.mutateAsync({
+          code: 'ST-' + Date.now().toString().slice(-6),
+          name: form.newName.trim(),
+          category: form.newCategory,
+          unit: form.newUnit.trim() || 'ชิ้น',
+          qtyIn: q, qtyOut: 0, qty: q,
+          unitCost: p, reorderAt: 0,
+        })
+        await insertReceipt.mutateAsync({
+          date: form.date, partnerId, stockItemId: created.id,
+          qty: q, unitPrice: p, total: q * p,
+        })
+        alert('เพิ่มสินค้าใหม่และรับเข้าคลังเรียบร้อย')
+        setForm(emptyReceive)
+        return
+      }
+
+      const s = stock.find((x) => x.id === form.stockItemId)
+      if (!s) return
+
+      // Weighted average cost
+      const oldValue = s.qty * s.unitCost
+      const newValue = q * p
+      const newQty = s.qty + q
+      const newAvgCost = newQty > 0 ? (oldValue + newValue) / newQty : p
+
+      await updateStock.mutateAsync({
+        id: s.id,
+        patch: {
+          qty: newQty,
+          qtyIn: s.qtyIn + q,
+          unitCost: Math.round(newAvgCost * 100) / 100,
+        },
       })
+
       await insertReceipt.mutateAsync({
-        date: form.date, partnerId, stockItemId: created.id,
-        qty: q, unitPrice: p, total: q * p,
+        date: form.date,
+        partnerId,
+        stockItemId: s.id,
+        qty: q,
+        unitPrice: p,
+        total: q * p,
       })
-      alert('เพิ่มสินค้าใหม่และรับเข้าคลังเรียบร้อย')
+
+      alert('รับสินค้าเข้าคลังเรียบร้อย')
       setForm(emptyReceive)
-      return
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-
-    const s = stock.find((x) => x.id === form.stockItemId)
-    if (!s) return
-
-    // Weighted average cost
-    const oldValue = s.qty * s.unitCost
-    const newValue = q * p
-    const newQty = s.qty + q
-    const newAvgCost = newQty > 0 ? (oldValue + newValue) / newQty : p
-
-    await updateStock.mutateAsync({
-      id: s.id,
-      patch: {
-        qty: newQty,
-        qtyIn: s.qtyIn + q,
-        unitCost: Math.round(newAvgCost * 100) / 100,
-      },
-    })
-
-    await insertReceipt.mutateAsync({
-      date: form.date,
-      partnerId,
-      stockItemId: s.id,
-      qty: q,
-      unitPrice: p,
-      total: q * p,
-    })
-
-    alert('รับสินค้าเข้าคลังเรียบร้อย')
-    setForm(emptyReceive)
   }
 
   return (
@@ -1521,6 +1545,7 @@ const PIVOT_MONTHS = [
 
 function PivotTab() {
   const today = new Date()
+  const { print } = usePrint()
   const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: allPartners = [] } = useList<Partner>('partners')
   const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
@@ -1565,9 +1590,15 @@ function PivotTab() {
   const rowTotal  = (vid: string) => Object.values(matrix[vid] ?? {}).reduce((s, v) => s + v, 0)
   const colTotal  = (pid: string) => Object.values(matrix).reduce((s, row) => s + (row[pid] ?? 0), 0)
   const grandTotal = activeVendorIds.reduce((s, pid) => s + colTotal(pid), 0)
-  const fmtMoney  = (n: number) => n > 0
-    ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : '—'
+  const fmtMoney  = (n: number) => {
+    if (n <= 0) return ''
+    const cents = Math.round(n * 100) % 100
+    // .00 → ซ่อนทศนิยม / .99 → ปัดขึ้นเป็นจำนวนเต็ม (Math.round จัดการ .99 → +1 ให้แล้ว)
+    if (cents === 0 || cents === 99) {
+      return Math.round(n).toLocaleString('en-US')
+    }
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
 
   const activeVehicles = vehicles.filter(v => matrix[v.id])
 
@@ -1619,7 +1650,7 @@ function PivotTab() {
           </span>
           <span style={{ color: 'var(--text-muted)' }}>
             ยอดรวม <strong style={{ color: 'var(--primary)' }}>
-              ฿{grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ฿{fmtMoney(grandTotal)}
             </strong>
           </span>
         </div>
@@ -1627,39 +1658,45 @@ function PivotTab() {
         <button
           className="btn"
           style={{ marginLeft: 'auto' }}
-          onClick={() => window.print()}
+          onClick={() => print('landscape')}
         >
           <Icon name="download" size={14} /> พิมพ์รายงาน
         </button>
       </div>
 
-      {/* ── Print header ── */}
-      <div className="print-only" style={{ padding: '0 0 14px', textAlign: 'center' }}>
-        <div style={{ fontSize: 17, fontWeight: 700 }}>รายงานสรุปค่าใช้จ่ายรายคัน × คู่ค้า</div>
-        <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>
-          {periodLabel} · KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())}
+      {/* ── Print header (matches P&L รายคัน) ── */}
+      <div className="print-only" style={{ marginBottom: 12 }}>
+        <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>
+          รายงานสรุปค่าใช้จ่ายรายคัน × คู่ค้า — {periodLabel}
+        </div>
+        <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
+          KPS Transportation ERP · {activeVehicles.length} คัน · {activeVendors.length} คู่ค้า
         </div>
       </div>
 
-      {activeVendors.length === 0 ? (
-        <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
-          <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
-          <div>ไม่มีข้อมูลค่าใช้จ่ายใน{periodLabel}</div>
-        </div>
-      ) : (
-        <div style={{ margin: 16 }}>
-          <div style={{
-            borderRadius: 12, border: '1px solid #E2E8F0',
-            overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-            background: '#ffffff',
-          }}>
+      {/* ── Pivot table (shown on both screen and print) ── */}
+      <div style={{ margin: 16 }}>
+        {activeVendors.length === 0 ? (
+          <div className="no-print" style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
+            <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
+            <div>ไม่มีข้อมูลค่าใช้จ่ายใน{periodLabel}</div>
+          </div>
+        ) : (
+          <div className="card print-area" style={{ background: '#ffffff', overflow: 'hidden' }}>
+            <div className="head no-print" style={{ paddingBottom: 0 }}>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="chart" size={16} />
+                ตารางสรุปค่าใช้จ่ายรายคัน × คู่ค้า
+                <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-muted)' }}>
+                  ({activeVehicles.length} คัน · {activeVendors.length} คู่ค้า)
+                </span>
+              </h3>
+            </div>
             <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-              <table className="tbl">
+              <table className="tbl pivot-tbl">
                 <thead>
                   <tr>
-                    <th style={{ minWidth: 110, position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)', zIndex: 2 }}>
-                      ทะเบียนรถ
-                    </th>
+                    <th style={{ minWidth: 110 }}>ทะเบียนรถ</th>
                     {activeVendors.map(p => (
                       <th key={p.id} className="num right" style={{ minWidth: 120, whiteSpace: 'nowrap' }}>
                         {p.name}
@@ -1673,9 +1710,9 @@ function PivotTab() {
                 <tbody>
                   {activeVehicles.map(v => (
                     <tr key={v.id}>
-                      <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>
+                      <td>
                         <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{v.plate}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.type}</div>
+                        <div className="no-print" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.type}</div>
                       </td>
                       {activeVendors.map(p => (
                         <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>
@@ -1688,26 +1725,26 @@ function PivotTab() {
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
-                    <td style={{ position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)' }}>รวมต่อคู่ค้า</td>
+                    <td>รวมต่อคู่ค้า</td>
                     {activeVendors.map(p => (
                       <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>
                         {fmtMoney(colTotal(p.id))}
                       </td>
                     ))}
                     <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
-                      {grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {fmtMoney(grandTotal)}
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* ── Print footer ── */}
-      <div className="print-only" style={{ marginTop: 16, fontSize: 10, color: '#777', textAlign: 'center' }}>
-        * รายงานนี้สร้างจากข้อมูล Real-time · ระบบ KPS Transportation ERP
+      {/* ── Print footer (matches P&L รายคัน) ── */}
+      <div className="print-only" style={{ marginTop: 12, fontSize: 10, color: '#666', textAlign: 'center' }}>
+        * รายงานนี้สร้างจากข้อมูล Real-time · สรุปยอดค่าใช้จ่ายรายคัน × คู่ค้า · ระบบ KPS Transportation ERP
       </div>
     </div>
   )
@@ -1916,7 +1953,7 @@ function typeColor(t: string): string {
   return 'gray'
 }
 
-const PARTNER_TYPES = ['ช่างภายนอก', 'ร้านอะไหล่', 'ร้านค้าทั่วไป', 'คลัง KPS', 'อื่นๆ']
+const PARTNER_TYPES = ['ช่างภายนอก', 'ร้านอะไหล่', 'ร้านค้าทั่วไป', 'คลัง KPS', 'ซัพพลายเออร์น้ำมัน', 'อื่นๆ']
 
 function VendorEditModal({
   partner,
@@ -1958,13 +1995,17 @@ function VendorEditModal({
 
   const save = async () => {
     if (!form.name.trim()) { alert('กรุณากรอกชื่อร้านค้า/ช่าง'); return }
-    if (isNew) {
-      await insertPartner.mutateAsync({ ...form, balance: 0 })
-    } else {
-      await updatePartner.mutateAsync({ id: partner!.id, patch: form })
+    try {
+      if (isNew) {
+        await insertPartner.mutateAsync({ ...form, balance: 0 })
+      } else {
+        await updatePartner.mutateAsync({ id: partner!.id, patch: form })
+      }
+      onSaved()
+      onClose()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-    onSaved()
-    onClose()
   }
 
   return (
@@ -2106,20 +2147,7 @@ function ExpVendors() {
             </div>
           </div>
           <div className="spacer" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="ค้นหา ชื่อ / เบอร์โทร / เลขผู้เสียภาษี..."
-            style={{
-              height: 34,
-              padding: '0 12px',
-              border: '1px solid var(--line)',
-              borderRadius: 8,
-              background: 'var(--bg)',
-              fontSize: 13,
-              width: 280,
-            }}
-          />
+          <SearchInput value={q} onChange={setQ} placeholder="ค้นหา ชื่อ / เบอร์โทร / เลขผู้เสียภาษี..." width={280} />
           <button className="btn primary" onClick={() => setAddNew(true)}>
             <Icon name="plus" size={14} /> เพิ่มใหม่
           </button>

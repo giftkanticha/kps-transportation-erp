@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction, FuelStock } from '../../types'
+import { useAuth } from '../../context/AuthContext'
+import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction, FuelStock, FuelRecord } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -92,6 +93,7 @@ function tonToDwInput(weightTon: number | null | undefined, mode: DispatchLeg['p
 function DraftRoundsList({
   setSubject,
 }: { setSubject: (s: unknown) => void }) {
+  const { isManager } = useAuth()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: dispatches = [] } = useDispatches()
@@ -119,7 +121,7 @@ function DraftRoundsList({
                   <th>คนขับ</th>
                   <th>ออกเดินทาง</th>
                   <th className="num">จำนวนขา</th>
-                  <th className="num right">รายได้</th>
+                  {isManager && <th className="num right">รายได้</th>}
                   <th></th>
                 </tr>
               </thead>
@@ -138,7 +140,7 @@ function DraftRoundsList({
                       <td>{dr?.name ?? '—'}</td>
                       <td className="num muted">{db.thaiDate(d.depart || d.date)}</td>
                       <td className="num">{d.legs?.length ?? 0}</td>
-                      <td className="num right">{db.thb(db.roundRevenue(d))}</td>
+                      {isManager && <td className="num right">{db.thb(db.roundRevenue(d))}</td>}
                       <td onClick={e => e.stopPropagation()}>
                         <button className="btn primary sm" onClick={() => setSubject({ type: 'round', id: d.id })}>
                           ปิดงาน →
@@ -171,6 +173,7 @@ function CloseForm({
   setActive,
   setSubject,
 }: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
+  const { isManager, isAdmin } = useAuth()
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
@@ -181,6 +184,12 @@ function CloseForm({
   const updateDispatch = useUpdate<Dispatch>('dispatch')
   const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
   const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
+  // Mirror the TRIP_CLOSING into fuel_records too — that's the legacy table
+  // FinancePL + FuelInventorySummary read from, so without this the closing
+  // fuel never shows up under 'น้ำมันในโรงงาน' on the P&L.
+  const { data: allFuelRecs = [] } = useList<FuelRecord>('fuel_records')
+  const insertFuelRec = useInsert<FuelRecord>('fuel_records')
+  const updateFuelRec = useUpdate<FuelRecord>('fuel_records')
   const round = useMemo(() => dispatches.find(d => d.id === roundId), [dispatches, roundId])
   const vehicle = vehicles.find(v => v.id === round?.vehicleId)
   const driver = employees.find(e => e.id === round?.driverId)
@@ -193,6 +202,7 @@ function CloseForm({
   const [roundNotes, setRoundNotes] = useState('')
   const [closingFuelLiters, setClosingFuelLiters] = useState('')
   const [closingFuelPrice, setClosingFuelPrice] = useState('')
+  const [closingFuelDate, setClosingFuelDate]   = useState('')
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
   const initedRef = useRef<string | null>(null)
@@ -212,6 +222,48 @@ function CloseForm({
   const ownClosingTx = fuelClosing.find(t => t.entryMethod === 'TRIP_CLOSE') ?? null
   const externalClosing = fuelClosing.filter(t => t.entryMethod !== 'TRIP_CLOSE')
   const hasExternalClosing = externalClosing.length > 0
+
+  // All floating fuel — same-vehicle entries float to the top, then everyone
+  // else (so an admin can clean up an Express Fuel Log entry that was tagged
+  // Floating fuel for THIS vehicle only — cross-vehicle items would just
+  // clutter the close screen with rows the driver/admin can't act on here.
+  const floatingForVehicle = useMemo(() => {
+    if (!round?.vehicleId) return []
+    const roundDateMs = round.date ? new Date(round.date).getTime() : 0
+    return allFuelTxs
+      .filter(t => t.status === 'FLOATING' && t.vehicleId === round.vehicleId)
+      .map(t => ({
+        tx: t,
+        dayDelta: Math.abs(new Date(t.date).getTime() - roundDateMs) / (1000 * 60 * 60 * 24),
+      }))
+      .sort((a, b) => a.dayDelta - b.dayDelta)
+  }, [allFuelTxs, round?.vehicleId, round?.date])
+
+  const attachFloating = async (txId: string) => {
+    try {
+      await updateFuelTx.mutateAsync({
+        id: txId,
+        patch: { tripId: roundId, status: 'TRIP_LINKED' },
+      })
+      setToast({ kind: 'success', msg: '✅ ผูกน้ำมันลอยกับรอบนี้แล้ว' })
+    } catch (e) {
+      setToast({ kind: 'error', msg: e instanceof Error ? e.message : 'ผูกไม่สำเร็จ' })
+    }
+  }
+
+  const detachToFloating = async (tx: FuelTransaction) => {
+    const msg = `ปลดน้ำมันรายการนี้ออกจากรอบ?\n${db.thaiDate(tx.date)} · ${tx.liters.toFixed(2)} ลิตร\n\nรายการจะกลับไปอยู่ในหน้า "น้ำมันลอย" และสามารถลบหรือผูกรอบใหม่ได้`
+    if (!confirm(msg)) return
+    try {
+      await updateFuelTx.mutateAsync({
+        id: tx.id,
+        patch: { tripId: null, status: 'FLOATING' },
+      })
+      setToast({ kind: 'success', msg: '✅ ปลดออกจากรอบแล้ว — ไปดูที่หน้า "น้ำมันลอย"' })
+    } catch (e) {
+      setToast({ kind: 'error', msg: e instanceof Error ? e.message : 'ปลดไม่สำเร็จ' })
+    }
+  }
   const fuelNormal = linkedFuelTxs.filter(t => t.tripFuelRole === 'NORMAL')
   const sumIntermediate = fuelIntermediate.reduce((s, t) => s + t.liters, 0)
   const sumNormal = fuelNormal.reduce((s, t) => s + t.liters, 0)
@@ -247,6 +299,14 @@ function CloseForm({
       // dispatch row itself, so it survives reopen reliably).
       setClosingFuelLiters(round.closingFuelLiters != null ? String(round.closingFuelLiters) : '')
       setClosingFuelPrice(round.closingFuelPrice != null ? String(round.closingFuelPrice) : '')
+      // Default closing-fuel date: existing TRIP_CLOSING tx > round.date > today.
+      // This is what gets stamped on the fuel ledger so backdated trips don't
+      // pull from today's stock balance.
+      setClosingFuelDate(
+        ownClosingTx?.date
+        ?? round.date
+        ?? new Date().toISOString().slice(0, 10),
+      )
     }
 
     if (legsInitedRef.current !== legSig) {
@@ -368,6 +428,16 @@ function CloseForm({
     try {
       const newLegs = buildLegsPatch(mode === 'close')
       if (mode === 'close') {
+        // Per-leg เบี้ยเลี้ยง is required at close time. Empty string is
+        // ambiguous (forgot? meant zero?) — make the user type 0 explicitly
+        // if no per-diem was paid.
+        for (let i = 0; i < legs.length; i++) {
+          if (legs[i].legType === 'return') continue
+          const raw = legStates[i]?.perDiem ?? ''
+          if (raw === '' || isNaN(Number(raw))) {
+            throw new Error(`ขา ${i + 1}: กรุณากรอกเบี้ยเลี้ยง (ถ้าไม่มีให้ใส่ 0)`)
+          }
+        }
         const err = validateClose(newLegs)
         if (err) throw new Error(err)
         // Over-threshold loss and overweight (delivered > loaded) are both allowed
@@ -399,10 +469,16 @@ function CloseForm({
         // fuel module already recorded one. Draft never touches the ledger — its
         // liters/price live on the dispatch row (below) and convert here on close.
         if (!hasExternalClosing) {
+          const txDate = closingFuelDate || round.date || new Date().toISOString().slice(0, 10)
+          // Each round gets a single deterministic fuel_records.code so we can
+          // upsert without tracking a separate FK on the dispatch row.
+          const recCode = `TRIP-${round.code}-CLOSE`
+          const existingRec = allFuelRecs.find(r => r.code === recCode)
+
           if (closingL > 0 && !ownClosingTx) {
             await insertFuelTx.mutateAsync({
               id: uid('ftx'),
-              date: new Date().toISOString().slice(0, 10),
+              date: txDate,
               vehicleId: round.vehicleId ?? '',
               liters: closingL,
               pricePerL: closingPrice,
@@ -420,8 +496,34 @@ function CloseForm({
           } else if (closingL > 0 && ownClosingTx) {
             await updateFuelTx.mutateAsync({
               id: ownClosingTx.id,
-              patch: { liters: closingL, pricePerL: closingPrice, total: closingL * closingPrice },
+              patch: { date: txDate, liters: closingL, pricePerL: closingPrice, total: closingL * closingPrice },
             })
+          }
+
+          // Mirror to fuel_records (legacy ledger that drives P&L + daily
+          // factory-fuel summary). station='ถังโรงงาน' is what isFactoryStation
+          // matches against.
+          if (closingL > 0) {
+            const recPayload = {
+              vehicleId: round.vehicleId ?? '',
+              driverId: null,
+              station: 'ถังโรงงาน',
+              liters: closingL,
+              pricePerL: closingPrice,
+              total: closingL * closingPrice,
+              odometer: em ?? 0,
+              date: txDate,
+              type: 'diesel',
+            }
+            if (existingRec) {
+              await updateFuelRec.mutateAsync({ id: existingRec.id, patch: recPayload })
+            } else {
+              await insertFuelRec.mutateAsync({
+                id: uid('frec'),
+                code: recCode,
+                ...recPayload,
+              })
+            }
           }
         }
         // Final fuel = INTERMEDIATE + NORMAL + TRIP_CLOSING (NOT TRIP_OPENING)
@@ -518,10 +620,12 @@ function CloseForm({
             <div className="muted" style={{ fontSize: 11 }}>จำนวนขา</div>
             <div style={{ fontSize: 14, fontWeight: 600 }}>{legs.length} ขา</div>
           </div>
-          <div>
-            <div className="muted" style={{ fontSize: 11 }}>รายได้ค่าขนส่ง</div>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--green)' }}>{db.thb(revenue)}</div>
-          </div>
+          {isManager && (
+            <div>
+              <div className="muted" style={{ fontSize: 11 }}>รายได้ค่าขนส่ง</div>
+              <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--green)' }}>{db.thb(revenue)}</div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -560,9 +664,13 @@ function CloseForm({
                     {l.customerId ? (customers.find(c => c.id === l.customerId)?.name ?? '—') : '—'}
                     {' • '}{l.cargoType || '—'}
                     {' • '}<span className="badge" style={{ fontSize: 10.5 }}>{legTypeLabel(l.legType)}</span>
-                    {' • '}<span className="badge" style={{ fontSize: 10.5 }}>
-                      {isLump ? 'เหมา' : l.priceMode === 'per_kg' ? `${db.fmt(l.price)} ฿/กก.` : `${db.fmt(l.price)} ฿/ตัน`}
-                    </span>
+                    {isManager && (
+                      <>
+                        {' • '}<span className="badge" style={{ fontSize: 10.5 }}>
+                          {isLump ? 'เหมา' : l.priceMode === 'per_kg' ? `${db.fmt(l.price)} ฿/กก.` : `${db.fmt(l.price)} ฿/ตัน`}
+                        </span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -601,9 +709,40 @@ function CloseForm({
                       placeholder={isPerKg ? '0' : '0.00'}
                       disabled={isClosed}
                     />
+                    {/* For per_ton: when the entered value would be more than
+                        100 ตัน or 3x the loaded weight, assume the user typed
+                        the kg figure from the weighbridge by mistake and offer
+                        a one-click conversion. */}
+                    {!isPerKg && !isLump && dwTon > 0 && (
+                      (dwTon > 100 || (l.weight && dwTon > l.weight * 3)) ? (
+                        <div style={{ fontSize: 11, marginTop: 4, color: 'var(--red)', fontWeight: 600, lineHeight: 1.6 }}>
+                          ⚠️ {dwTon.toLocaleString()} ตัน สูงผิดปกติ — น่าจะกรอกจากใบชั่ง (กก.) ผิดหน่วย
+                          {!isClosed && (
+                            <>
+                              {' '}
+                              <button
+                                type="button"
+                                onClick={() => updateLegState(i, { deliveredWeight: String(dwTon / 1000) })}
+                                style={{
+                                  marginLeft: 4, padding: '2px 8px', fontSize: 11, fontWeight: 600,
+                                  background: 'var(--red)', color: '#fff', border: 'none',
+                                  borderRadius: 4, cursor: 'pointer',
+                                }}
+                              >
+                                แปลงเป็น {(dwTon / 1000).toLocaleString()} ตัน
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                          = {(dwTon * 1000).toLocaleString()} กก.
+                        </div>
+                      )
+                    )}
                   </Field>
                 )}
-                <Field label="เบี้ยเลี้ยง (฿)">
+                <Field label="เบี้ยเลี้ยง (฿) *">
                   <input
                     type="number"
                     value={ls.perDiem}
@@ -611,6 +750,9 @@ function CloseForm({
                     placeholder="0"
                     disabled={isClosed}
                   />
+                  <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                    ใส่ 0 ถ้าไม่มี
+                  </div>
                 </Field>
               </div>
 
@@ -632,7 +774,7 @@ function CloseForm({
                               </span>
                       }
                     </span>
-                    {!isLump && (
+                    {!isLump && isManager && (
                       <span className="muted">
                         ค่าขนส่งใหม่:{' '}
                         <span className="mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>
@@ -767,6 +909,57 @@ function CloseForm({
         </Field>
       </div>
 
+      {/* Floating fuel quick-attach — same-vehicle entries first, then others.
+          Saves bouncing to the Floating Fuel page just to link one transaction. */}
+      {floatingForVehicle.length > 0 && !isClosed && (
+        <>
+          <h3 className="section-title" style={{ marginBottom: 10 }}>🟡 น้ำมันลอยรอผูก ({floatingForVehicle.length})</h3>
+          <div className="card pad" style={{ marginBottom: 16, background: '#FFFBEB', border: '1px solid #FDE68A' }}>
+            <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+              รายการน้ำมันของรถคันนี้ที่ยังไม่ผูกรอบ — กด "ผูกกับรอบนี้" เพื่อเชื่อมกับ <span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{round.code}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {floatingForVehicle.map(({ tx: t, dayDelta }) => {
+                const isNear = dayDelta <= 2
+                return (
+                  <div
+                    key={t.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '8px 14px', borderRadius: 8,
+                      border: `1px solid ${isNear ? '#FBBF24' : '#FDE68A'}`,
+                      background: isNear ? '#FEF3C7' : '#fff',
+                    }}
+                  >
+                    <div style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>
+                      <span className="mono" style={{ fontWeight: 600 }}>{db.thaiDate(t.date)}</span>
+                      <span className="muted" style={{ marginLeft: 10 }}>·</span>
+                      <span style={{ marginLeft: 10 }}>{t.liters.toFixed(2)} ลิตร</span>
+                      <span className="muted" style={{ marginLeft: 10 }}>·</span>
+                      <span style={{ marginLeft: 10, fontSize: 11 }}>
+                        {t.source === 'FACTORY_TANK' ? '🏭 ถังโรงงาน' : '⛽ ปั๊มภายนอก'}
+                      </span>
+                      {isNear && (
+                        <span style={{ marginLeft: 10, fontSize: 10.5, fontWeight: 700, color: '#92400E' }}>
+                          ⭐ ใกล้วันเปิดรอบ
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      className="btn sm primary"
+                      onClick={() => void attachFloating(t.id)}
+                      disabled={updateFuelTx.isPending}
+                    >
+                      <Icon name="check" size={12} /> ผูกกับรอบนี้
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Fuel lifecycle card */}
       <h3 className="section-title" style={{ marginBottom: 10 }}>น้ำมันในรอบ</h3>
       <div className="card pad" style={{ marginBottom: 16 }}>
@@ -817,8 +1010,28 @@ function CloseForm({
                   {db.thaiDate(t.date)} · {t.source === 'FACTORY_TANK' ? 'คลังโรงงาน' : 'ปั้มนอก'}
                   {t.tripFuelRole === 'NORMAL' && <span className="badge" style={{ marginLeft: 6, fontSize: 10 }}>ทั่วไป</span>}
                 </span>
-                <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: '#3B82F6' }}>
-                  {t.liters.toFixed(2)} L
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <span className="mono" style={{ fontSize: 12, fontWeight: 600, color: '#3B82F6' }}>
+                    {t.liters.toFixed(2)} L
+                  </span>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => void detachToFloating(t)}
+                      title='ปลดออกจากรอบ (ส่งกลับ "น้ำมันลอย")'
+                      style={{
+                        background: 'transparent', border: '1px solid #BFDBFE',
+                        color: '#1D4ED8', borderRadius: 6, padding: '2px 8px',
+                        cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                        fontFamily: 'inherit', display: 'inline-flex', alignItems: 'center', gap: 4,
+                        whiteSpace: 'nowrap',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#DBEAFE' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+                    >
+                      <Icon name="close" size={11} /> ปลด
+                    </button>
+                  )}
                 </span>
               </div>
             ))}
@@ -852,7 +1065,19 @@ function CloseForm({
             ))
           ) : (
             <>
-              <div className="grid-2" style={{ gap: 12 }}>
+              <div className="grid-3" style={{ gap: 12 }}>
+                <Field label="วันที่เติม">
+                  <input
+                    type="date"
+                    value={closingFuelDate}
+                    max={new Date().toISOString().slice(0, 10)}
+                    onChange={e => setClosingFuelDate(e.target.value)}
+                    disabled={isClosed}
+                  />
+                  <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                    วันที่ที่ใช้ตัดสต๊อกถังโรงงาน (รองรับย้อนหลัง)
+                  </div>
+                </Field>
                 <Field label="จำนวนน้ำมันเติมปลายรอบ (ลิตร)">
                   <input
                     type="number"
@@ -934,28 +1159,32 @@ function CloseForm({
         }}
       >
         <div className="row" style={{ gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div>
-            <div className="muted" style={{ fontSize: 10.5 }}>รายได้</div>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--green)' }}>{db.thb(revenue)}</div>
-          </div>
-          <div>
-            <div className="muted" style={{ fontSize: 10.5 }}>ค่าน้ำมัน</div>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(fuelCost)}</div>
-          </div>
-          <div>
-            <div className="muted" style={{ fontSize: 10.5 }}>เบี้ยเลี้ยง</div>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(perDiemTotal)}</div>
-          </div>
-          <div>
-            <div className="muted" style={{ fontSize: 10.5 }}>อื่นๆ</div>
-            <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(otherTotal)}</div>
-          </div>
-          <div style={{ borderLeft: '1px solid var(--line)', paddingLeft: 24 }}>
-            <div className="muted" style={{ fontSize: 10.5 }}>กำไรสุทธิ</div>
-            <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
-              {db.thb(profit)}
-            </div>
-          </div>
+          {isManager && (
+            <>
+              <div>
+                <div className="muted" style={{ fontSize: 10.5 }}>รายได้</div>
+                <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: 'var(--green)' }}>{db.thb(revenue)}</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 10.5 }}>ค่าน้ำมัน</div>
+                <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(fuelCost)}</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 10.5 }}>เบี้ยเลี้ยง</div>
+                <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(perDiemTotal)}</div>
+              </div>
+              <div>
+                <div className="muted" style={{ fontSize: 10.5 }}>อื่นๆ</div>
+                <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(otherTotal)}</div>
+              </div>
+              <div style={{ borderLeft: '1px solid var(--line)', paddingLeft: 24 }}>
+                <div className="muted" style={{ fontSize: 10.5 }}>กำไรสุทธิ</div>
+                <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {db.thb(profit)}
+                </div>
+              </div>
+            </>
+          )}
           <div>
             <div className="muted" style={{ fontSize: 10.5 }}>ระยะทาง</div>
             <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.fmt(distance)} km</div>

@@ -53,7 +53,7 @@ export interface Vehicle {
   tax: string
   insurance: string
   dispatchPermit: string
-  groupKind?: 'INTERNAL' | 'TRANSPORT'
+  groupKind?: 'INTERNAL' | 'TRANSPORT' | 'EQUIPMENT'
 }
 
 export interface Customer {
@@ -262,6 +262,20 @@ export interface FuelStock {
   pricePerL: number
   invoiceNo: string
   total: number
+  expenseHeaderId?: string | null  // FK → expense_headers when this purchase is also booked as AP
+}
+
+// Manager-set reference price per source per date. Drivers' fuel entries
+// pull from this table so they don't have to (and aren't supposed to)
+// know the day's price.
+export interface FuelDailyPrice {
+  id: string
+  date: string         // YYYY-MM-DD
+  source: 'EXTERNAL_PUMP' | 'FACTORY_TANK'
+  pricePerL: number
+  notes: string
+  setBy?: string | null
+  createdAt?: string
 }
 
 export interface Expense {

@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import { Icon } from '../../components/ui'
+import { Icon, SearchInput } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
 import type { Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance, Expense, ExpenseHeader, Employee } from '../../types'
 
@@ -282,21 +282,7 @@ function VehiclePicker({ vehicles, picked, onChange }: {
             {picked.size}/{vehicles.length} คัน
           </span>
         </div>
-        <div style={{ position: 'relative' }}>
-          <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
-            <Icon name="search" size={13} />
-          </span>
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="ค้นหาทะเบียน..."
-            style={{
-              width: '100%', padding: '5px 8px 5px 28px',
-              border: '1px solid #CBD5E1', borderRadius: 6,
-              fontSize: 12.5, background: 'var(--bg)',
-            }}
-          />
-        </div>
+        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาทะเบียน..." width="100%" />
       </div>
 
       <label
@@ -446,6 +432,7 @@ export function FinancePL() {
   const [year, setYear]       = useState(today.getFullYear())
   const [month, setMonth]     = useState(today.getMonth())
   const [viewMode, setViewMode] = useState<ViewMode>('monthly')
+  const [onlyWithData, setOnlyWithData] = useState(true)
 
   const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
   const { data: dispatches = [] } = useDispatches()
@@ -520,8 +507,16 @@ export function FinancePL() {
   const totals       = useMemo(() => sumRows(rows), [rows])
   const yearlyTotals = useMemo(() => sumRows(yearlyRows), [yearlyRows])
 
-  const activeTotals  = viewMode === 'yearly' ? yearlyTotals : totals
-  const activeRows    = viewMode === 'yearly' ? yearlyRows : rows
+  const activeRowsRaw = viewMode === 'yearly' ? yearlyRows : rows
+  // 'มียอด' = the truck actually had revenue / fuel / expense activity this
+  // period — not just the baseline driver salary that makes idle trucks show
+  // a flat -17,000. Hiding those keeps the table to what matters.
+  const hasActivity = (r: VehicleRow) =>
+    r.rev !== 0 || r.fuelIn !== 0 || r.fuelOut !== 0 || r.allowance !== 0 || r.expense !== 0 || r.interest !== 0
+  const activeRows    = onlyWithData ? activeRowsRaw.filter(hasActivity) : activeRowsRaw
+  const activeTotals  = onlyWithData
+    ? sumRows(activeRows)
+    : (viewMode === 'yearly' ? yearlyTotals : totals)
   const isProfit      = activeTotals.profit >= 0
 
   const inputStyle: React.CSSProperties = {
@@ -600,6 +595,20 @@ export function FinancePL() {
               ภาพรวมรายปี
             </button>
           </div>
+
+          <label
+            className="row no-print"
+            style={{ gap: 6, cursor: 'pointer', fontSize: 13, color: 'var(--text-muted)', userSelect: 'none' }}
+            title="ซ่อนรถที่ไม่มีรายรับ/น้ำมัน/ค่าใช้จ่ายในงวดนี้"
+          >
+            <input
+              type="checkbox"
+              checked={onlyWithData}
+              onChange={e => setOnlyWithData(e.target.checked)}
+              style={{ accentColor: 'var(--primary)' }}
+            />
+            แสดงเฉพาะที่มียอด
+          </label>
 
           <div style={{ width: 1, height: 24, background: '#E2E8F0' }} />
 
