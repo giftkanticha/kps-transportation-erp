@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info, SearchInput } from '../../components/ui'
+import { usePrint } from '../../hooks/usePrint'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
 interface ExpensesModuleProps {
@@ -1544,6 +1545,7 @@ const PIVOT_MONTHS = [
 
 function PivotTab() {
   const today = new Date()
+  const { print } = usePrint()
   const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: allPartners = [] } = useList<Partner>('partners')
   const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
@@ -1650,45 +1652,51 @@ function PivotTab() {
         <button
           className="btn"
           style={{ marginLeft: 'auto' }}
-          onClick={() => window.print()}
+          onClick={() => print('landscape')}
         >
           <Icon name="download" size={14} /> พิมพ์รายงาน
         </button>
       </div>
 
       {/* ── Print header ── */}
-      <div className="print-only" style={{ padding: '0 0 14px', textAlign: 'center' }}>
-        <div style={{ fontSize: 17, fontWeight: 700 }}>รายงานสรุปค่าใช้จ่ายรายคัน × คู่ค้า</div>
-        <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>
-          {periodLabel} · KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())}
+      <div className="print-only" style={{ marginBottom: 12 }}>
+        <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>
+          รายงานสรุปค่าใช้จ่ายรายคัน × คู่ค้า — {periodLabel}
+        </div>
+        <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
+          KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())} · {activeVehicles.length} คัน · {activeVendors.length} คู่ค้า
         </div>
       </div>
 
-      {activeVendors.length === 0 ? (
-        <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
-          <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
-          <div>ไม่มีข้อมูลค่าใช้จ่ายใน{periodLabel}</div>
-        </div>
-      ) : (
-        <div style={{ margin: 16 }}>
-          <div style={{
-            borderRadius: 12, border: '1px solid #E2E8F0',
-            overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-            background: '#ffffff',
-          }}>
+      {/* ── Main content ── */}
+      <div style={{ padding: 16 }}>
+        <div className="card print-area" style={{ background: '#ffffff' }}>
+          <div className="head no-print" style={{ paddingBottom: 0 }}>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Icon name="chart" size={16} />
+              ตารางสรุปค่าใช้จ่ายรายคัน × คู่ค้า
+              <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-muted)' }}>
+                ({activeVehicles.length} คัน · {activeVendors.length} คู่ค้า)
+              </span>
+            </h3>
+          </div>
+
+          {activeVendors.length === 0 ? (
+            <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
+              ไม่มีข้อมูลค่าใช้จ่ายใน{periodLabel}
+            </div>
+          ) : (
             <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
               <table className="tbl">
                 <thead>
                   <tr>
-                    <th style={{ minWidth: 110, position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)', zIndex: 2 }}>
-                      ทะเบียนรถ
-                    </th>
+                    <th style={{ minWidth: 110 }}>ทะเบียนรถ</th>
                     {activeVendors.map(p => (
                       <th key={p.id} className="num right" style={{ minWidth: 120, whiteSpace: 'nowrap' }}>
                         {p.name}
                       </th>
                     ))}
-                    <th className="num right" style={{ minWidth: 120, fontWeight: 700, color: 'var(--primary)', whiteSpace: 'nowrap' }}>
+                    <th className="num right" style={{ minWidth: 120, fontWeight: 700, whiteSpace: 'nowrap' }}>
                       รวมต่อคัน
                     </th>
                   </tr>
@@ -1696,7 +1704,7 @@ function PivotTab() {
                 <tbody>
                   {activeVehicles.map(v => (
                     <tr key={v.id}>
-                      <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>
+                      <td>
                         <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{v.plate}</div>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.type}</div>
                       </td>
@@ -1711,7 +1719,7 @@ function PivotTab() {
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
-                    <td style={{ position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)' }}>รวมต่อคู่ค้า</td>
+                    <td>รวมต่อคู่ค้า</td>
                     {activeVendors.map(p => (
                       <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>
                         {fmtMoney(colTotal(p.id))}
@@ -1724,13 +1732,13 @@ function PivotTab() {
                 </tbody>
               </table>
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* ── Print footer ── */}
-      <div className="print-only" style={{ marginTop: 16, fontSize: 10, color: '#777', textAlign: 'center' }}>
-        * รายงานนี้สร้างจากข้อมูล Real-time · ระบบ KPS Transportation ERP
+      <div className="print-only" style={{ marginTop: 12, fontSize: 10, color: '#666', textAlign: 'center' }}>
+        * รายงานนี้สร้างจากข้อมูล Real-time · สรุปยอดค่าใช้จ่ายรายคัน × คู่ค้า · ระบบ KPS Transportation ERP
       </div>
     </div>
   )
