@@ -102,6 +102,7 @@ const MENU: MenuItem[] = [
     id: 'admin', label: 'Admin Panel', icon: 'settings', roles: ['admin'],
     sub: [
       { id: 'admin.users', label: 'จัดการผู้ใช้ + ACL', icon: 'users' },
+      { id: 'admin.import-subdrivers', label: 'Import — รถร่วม', icon: 'download' },
     ],
   },
 ]

@@ -445,6 +445,11 @@ export interface SubDriver {
   vehicleTypes?: string[]
   truckDump?: 'dump' | 'no-dump'
   cpAccess?: 'yes' | 'no'
+  province?: string
+  followerName?: string
+  followerIdCard?: string
+  accountName?: string
+  vehicleOwner?: string
 }
 
 export interface SubJob {
