@@ -336,6 +336,22 @@ function CloseForm({
   }
 
   const isClosed = round.roundStatus === 'closed'
+  const isLocked = round.locked === true
+
+  if (isLocked) {
+    return (
+      <div className="card pad" style={{ maxWidth: 560, margin: '40px auto', textAlign: 'center' }}>
+        <h2 style={{ marginTop: 0 }}>🔒 รอบนี้ถูกล็อก</h2>
+        <p className="muted" style={{ fontSize: 13, marginBottom: 16 }}>
+          งวดบัญชีของรอบนี้ถูกปิดแล้ว ข้อมูลไม่สามารถแก้ไขได้<br/>
+          ต้องให้ admin ปลดล็อกงวดก่อน (เมนู <strong>การเงิน › ปิดงวดบัญชี</strong>)
+        </p>
+        <button className="btn" onClick={() => { setSubject(null); setActive('dispatch.close') }}>
+          ← กลับ
+        </button>
+      </div>
+    )
+  }
 
   const updateLegState = (i: number, patch: Partial<LegCloseState>) => {
     setLegStates(s => s.map((ls, ix) => (ix === i ? { ...ls, ...patch } : ls)))

@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
-import { useList, useInsert } from '../../hooks/useTable'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import {
   useAccountingPeriods,
@@ -34,7 +34,9 @@ export function PeriodClosePage() {
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: unlockRequests = [] } = useList<PeriodUnlockRequest>('period_unlock_requests')
   const insertUnlockReq = useInsert<PeriodUnlockRequest>('period_unlock_requests')
+  const updateUnlockReq = useUpdate<PeriodUnlockRequest>('period_unlock_requests')
 
   const [activePeriod, setActivePeriod] = useState<AccountingPeriod | null>(null)
   const [toast, setToast] = useState<Toast>(null)
@@ -60,6 +62,7 @@ export function PeriodClosePage() {
     qc.invalidateQueries({ queryKey: ['accounting_periods'] })
     qc.invalidateQueries({ queryKey: ['dispatch'] })
     qc.invalidateQueries({ queryKey: ['accounting_period_snapshots'] })
+    qc.invalidateQueries({ queryKey: ['period_unlock_requests'] })
   }
 
   // ── List view ────────────────────────────────────────────────────────────
@@ -75,6 +78,98 @@ export function PeriodClosePage() {
             </div>
           </div>
         </div>
+
+        {/* Admin only: pending unlock requests */}
+        {isAdmin && unlockRequests.filter(r => r.status === 'pending').length > 0 && (
+          <div className="card" style={{ marginBottom: 16, borderColor: '#F59E0B' }}>
+            <div className="head" style={{ background: '#FEF3C7' }}>
+              <h3>🔔 คำขอปลดล็อกงวด ({unlockRequests.filter(r => r.status === 'pending').length})</h3>
+            </div>
+            <div className="tbl-wrap" style={{ border: 'none' }}>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>งวด</th>
+                    <th>ผู้ขอ</th>
+                    <th>เหตุผล</th>
+                    <th>เมื่อ</th>
+                    <th style={{ width: 220 }}>การกระทำ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unlockRequests.filter(r => r.status === 'pending').map(req => {
+                    const p = periods.find(pp => pp.id === req.periodId)
+                    return (
+                      <tr key={req.id}>
+                        <td><strong>{p ? formatPeriodLabel(p) : '—'}</strong></td>
+                        <td>{req.requesterName || '—'}</td>
+                        <td style={{ maxWidth: 300, whiteSpace: 'normal' }}>{req.reason}</td>
+                        <td className="muted">{db.thaiDate(req.createdAt)}</td>
+                        <td>
+                          <button
+                            className="btn sm primary"
+                            disabled={busy || !p}
+                            onClick={async () => {
+                              if (!p) return
+                              if (!confirm(`ปลดล็อก ${formatPeriodLabel(p)} ตามคำขอของ ${req.requesterName}?`)) return
+                              setBusy(true)
+                              try {
+                                await reopenPeriod(p.id, profile?.id ?? null, req.reason)
+                                await updateUnlockReq.mutateAsync({
+                                  id: req.id,
+                                  patch: {
+                                    status: 'approved',
+                                    reviewerId: profile?.id ?? null,
+                                    reviewerName: profile?.display_name ?? profile?.username ?? profile?.email ?? '',
+                                    reviewedAt: new Date().toISOString(),
+                                  },
+                                })
+                                setToast({ kind: 'ok', text: 'อนุมัติและปลดล็อกแล้ว' })
+                                refresh()
+                              } catch (e) {
+                                setToast({ kind: 'err', text: e instanceof Error ? e.message : 'ล้มเหลว' })
+                              } finally { setBusy(false) }
+                            }}
+                          >
+                            ✓ อนุมัติ + ปลดล็อก
+                          </button>
+                          <button
+                            className="btn sm"
+                            disabled={busy}
+                            style={{ marginLeft: 6 }}
+                            onClick={async () => {
+                              const note = prompt('เหตุผลที่ปฏิเสธ:') ?? ''
+                              if (!note.trim()) return
+                              setBusy(true)
+                              try {
+                                await updateUnlockReq.mutateAsync({
+                                  id: req.id,
+                                  patch: {
+                                    status: 'rejected',
+                                    reviewerId: profile?.id ?? null,
+                                    reviewerName: profile?.display_name ?? profile?.username ?? profile?.email ?? '',
+                                    reviewedAt: new Date().toISOString(),
+                                    reviewNote: note.trim(),
+                                  },
+                                })
+                                setToast({ kind: 'ok', text: 'ปฏิเสธคำขอแล้ว' })
+                                refresh()
+                              } catch (e) {
+                                setToast({ kind: 'err', text: e instanceof Error ? e.message : 'ล้มเหลว' })
+                              } finally { setBusy(false) }
+                            }}
+                          >
+                            ✗ ปฏิเสธ
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         <div className="card">
           <div className="head">

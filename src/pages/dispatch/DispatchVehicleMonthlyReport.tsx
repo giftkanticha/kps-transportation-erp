@@ -2,8 +2,9 @@ import { useState, useMemo } from 'react'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
+import { useAccountingPeriods, findPeriod } from '../../hooks/useAccountingPeriods'
 import { usePrint } from '../../hooks/usePrint'
-import type { Vehicle, Employee, Dispatch, FuelRound } from '../../types'
+import type { Vehicle, Employee, Dispatch, FuelRound, AccountingPeriodSnapshot } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 const THAI_MONTHS = [
@@ -48,11 +49,18 @@ export function DispatchVehicleMonthlyReport() {
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: dispatch = [] } = useDispatches()
   const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: periods = [] } = useAccountingPeriods()
+  const { data: snapshots = [] } = useList<AccountingPeriodSnapshot>('accounting_period_snapshots')
   const { print } = usePrint()
 
   const { start, endExclusive } = monthBounds(year, month)
   const selVehicle = vehicles.find(v => v.id === vehicleId)
   const defaultDriver = employees.find(e => e.id === selVehicle?.driverId)
+  const period = findPeriod(periods, year, month)
+  const isPeriodClosed = period?.status === 'CLOSED'
+  const snapshot = isPeriodClosed && vehicleId
+    ? snapshots.find(s => s.periodId === period?.id && s.vehicleId === vehicleId)
+    : null
 
   // รอบที่เปิดงาน (depart) อยู่ในเดือน/ปีที่เลือก + เป็นรถคันนั้น
   const rounds = useMemo<Dispatch[]>(() => {
@@ -132,6 +140,14 @@ export function DispatchVehicleMonthlyReport() {
 
   // Totals (per รอบ — ไม่นับซ้ำต่อ leg)
   const totals = useMemo(() => {
+    // เมื่อปิดงวดแล้ว → อ่านจาก snapshot (ตัวเลข final, ไม่คำนวณใหม่)
+    if (snapshot) {
+      const d = snapshot.data
+      return {
+        revenue: d.revenue, fuelCost: d.fuelCost, perDiem: d.perDiem, other: d.other,
+        profit: d.profit, distance: d.distance, liters: d.liters, avgKmPerL: d.avgKmPerL,
+      }
+    }
     let revenue = 0, fuelCost = 0, perDiem = 0, other = 0, distance = 0, liters = 0
     rounds.forEach(r => {
       const fuelRound = db.fuelRoundOfDispatch(r.id, fuelRounds)
@@ -146,7 +162,7 @@ export function DispatchVehicleMonthlyReport() {
     const profit = revenue - fuelCost - perDiem - other
     const avgKmPerL = liters > 0 && distance > 0 ? distance / liters : null
     return { revenue, fuelCost, perDiem, other, profit, distance, liters, avgKmPerL }
-  }, [rounds, fuelRounds])
+  }, [rounds, fuelRounds, snapshot])
 
   const crossMonthCount = legRows.filter(r => r.crossMonth).length
   const abnormalCount = rounds.filter(r => {
@@ -244,6 +260,21 @@ export function DispatchVehicleMonthlyReport() {
               })()}{' · '}พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())}
             </div>
           </div>
+
+          {/* Period status banner */}
+          {isPeriodClosed && (
+            <div
+              style={{
+                padding: '8px 12px', marginBottom: 10, borderRadius: 6, fontSize: 12,
+                background: '#DCFCE7', border: '1px solid #16A34A',
+              }}
+            >
+              🔒 <strong>งวดนี้ปิดบัญชีแล้ว</strong>
+              {period?.closedAt && ` · ปิดเมื่อ ${db.thaiDate(period.closedAt)}`}
+              {period?.closedByName && ` โดย ${period.closedByName}`}
+              {snapshot && ' · ตัวเลขจาก snapshot (ไม่เปลี่ยนแม้ dispatch ถูกแก้)'}
+            </div>
+          )}
 
           {/* Info banners */}
           {crossMonthCount > 0 && (
