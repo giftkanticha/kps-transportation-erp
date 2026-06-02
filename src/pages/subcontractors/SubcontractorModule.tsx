@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import type { SubDriver, SubJob, User, Vehicle } from '../../types'
+import type { SubDriver, SubJob, Subcontractor, User, Vehicle } from '../../types'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info, PrintButton, SearchInput } from '../../components/ui'
@@ -1121,6 +1121,7 @@ function DriverActionMenu({ driver, isAdmin, onEdit, onDelete, onChanged }: Driv
 function SubDriversList({ user }: { user?: User }) {
   const isAdmin = user?.role === 'admin'
   const { data: drivers = [] } = useList<SubDriver>('sub_drivers')
+  const { data: subs = [] } = useList<Subcontractor>('subcontractors')
   const { data: allJobs = [] } = useList<SubJob>('sub_jobs')
   const deleteDriver = useDelete('sub_drivers')
   const [q, setQ] = useState('')
@@ -1128,7 +1129,16 @@ function SubDriversList({ user }: { user?: User }) {
   const [addNew, setAddNew] = useState(false)
   const [deleting, setDeleting] = useState<SubDriver | null>(null)
 
-  const filtered = drivers.filter(d => !q || d.name.toLowerCase().includes(q.toLowerCase()) || d.phone.includes(q) || d.plate.toLowerCase().includes(q.toLowerCase()))
+  const subById = new Map(subs.map(s => [s.id, s]))
+  const groupName = (d: SubDriver) => subById.get(d.subId)?.name ?? ''
+
+  const filtered = drivers.filter(d =>
+    !q
+    || d.name.toLowerCase().includes(q.toLowerCase())
+    || d.phone.includes(q)
+    || d.plate.toLowerCase().includes(q.toLowerCase())
+    || groupName(d).toLowerCase().includes(q.toLowerCase()),
+  )
   const today = new Date()
 
   const confirmDelete = async () => {
@@ -1164,7 +1174,7 @@ function SubDriversList({ user }: { user?: User }) {
         <SearchInput
           value={q}
           onChange={setQ}
-          placeholder="ค้นหาชื่อ / เบอร์โทร / ทะเบียน..."
+          placeholder="ค้นหาชื่อ / เบอร์โทร / ทะเบียน / กลุ่มขนส่ง..."
           style={{ marginTop: 14, maxWidth: 360 }}
         />
       </div>
@@ -1174,6 +1184,7 @@ function SubDriversList({ user }: { user?: User }) {
           <thead>
             <tr>
               <th>รหัส/ชื่อ-นามสกุล</th>
+              <th>กลุ่มขนส่ง</th>
               <th>เบอร์โทร</th>
               <th>ทะเบียนรถ</th>
               <th>ดั้ม</th>
@@ -1196,6 +1207,11 @@ function SubDriversList({ user }: { user?: User }) {
                   <td>
                     <div style={{ fontWeight: 500 }}>{d.name}</div>
                     <div className="muted mono" style={{ fontSize: 11.5 }}>{d.code}</div>
+                  </td>
+                  <td>
+                    {groupName(d)
+                      ? <span style={{ fontWeight: 500 }}>{groupName(d)}</span>
+                      : <span className="muted" style={{ fontSize: 12 }}>—</span>}
                   </td>
                   <td className="mono">{d.phone}</td>
                   <td>
@@ -1246,7 +1262,7 @@ function SubDriversList({ user }: { user?: User }) {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={10}>
                   <div className="empty">ไม่พบข้อมูลคนขับ</div>
                 </td>
               </tr>
