@@ -95,7 +95,7 @@ export function DispatchVehicleMonthlyReport() {
           crossMonth,
           code: r.code,
           status,
-          cargo: '—',
+          cargo: '',
           weight: null,
           deliveredWeight: null,
           price: null,
@@ -115,7 +115,7 @@ export function DispatchVehicleMonthlyReport() {
           crossMonth: i === 0 ? crossMonth : false,
           code: i === 0 ? r.code : '',
           status: i === 0 ? status : status,
-          cargo: l.cargo || [l.origin, l.destination].filter(Boolean).join(' - ') || '—',
+          cargo: l.cargo || [l.origin, l.destination].filter(Boolean).join(' - ') || '',
           weight: l.weight ?? null,
           deliveredWeight: l.deliveredWeight ?? null,
           price: l.price ?? null,
@@ -157,20 +157,20 @@ export function DispatchVehicleMonthlyReport() {
     return kmPerL != null && kmPerL < DSP_KMPL_THRESHOLD
   }).length
 
-  const numFmt = (v: number | null | undefined) => (v != null && v !== 0 ? db.fmt(v) : '–')
+  const numFmt = (v: number | null | undefined) => (v != null && v !== 0 ? db.fmt(v) : '')
   const priceFmt = (v: number | null | undefined) =>
-    v != null && v !== 0 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '–'
+    v != null && v !== 0 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''
 
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head no-print">
         <div>
           <h1 className="page-title">สรุปรายเที่ยวรายเดือน (ต่อคัน)</h1>
           <div className="page-sub">
             เลือกทะเบียน + เดือน — นับเฉพาะรอบที่ <strong>วันเปิดงาน</strong> อยู่ในเดือนนั้น (เที่ยวคร่อมเดือนยังคงอยู่ในเดือนที่เปิด)
           </div>
         </div>
-        <div className="actions no-print">
+        <div className="actions">
           <button className="btn primary" onClick={() => print('landscape')} disabled={!vehicleId}>
             <Icon name="download" size={15} /> พิมพ์ / PDF
           </button>
@@ -295,7 +295,7 @@ export function DispatchVehicleMonthlyReport() {
                       <td className="muted">{i + 1}</td>
                       <td className="num muted">{r.depart}</td>
                       <td className="num muted">
-                        {r.returnAt || '–'}
+                        {r.returnAt || ''}
                         {r.crossMonth && <span style={{ color: '#B45309', marginLeft: 4 }} title="ปิดงานคนละเดือน">↗</span>}
                       </td>
                       <td className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>
@@ -313,12 +313,12 @@ export function DispatchVehicleMonthlyReport() {
                       <td className="num">{numFmt(r.liters)}</td>
                       <td className="num">{numFmt(r.endOdometer)}</td>
                       <td className="num">
-                        {r.kmPerL != null
-                          ? <span style={{
-                              color: r.kmPerL < DSP_KMPL_THRESHOLD ? '#A32D2D' : '#166534',
-                              fontWeight: 600,
-                            }}>{r.kmPerL.toFixed(2)}</span>
-                          : <span className="muted">–</span>}
+                        {r.kmPerL != null && (
+                          <span style={{
+                            color: r.kmPerL < DSP_KMPL_THRESHOLD ? '#A32D2D' : '#166534',
+                            fontWeight: 600,
+                          }}>{r.kmPerL.toFixed(2)}</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -334,81 +334,36 @@ export function DispatchVehicleMonthlyReport() {
             </div>
           </div>
 
-          {/* Totals */}
+          {/* Totals — compact 1-row summary */}
           {rounds.length > 0 && (
             <div
               style={{
-                padding: '12px 16px', marginBottom: 20,
-                border: '2px solid #000', borderRadius: 4,
+                padding: '6px 10px',
+                border: '1px solid #000', borderRadius: 3,
+                fontSize: 11, lineHeight: 1.5,
+                display: 'flex', flexWrap: 'wrap', gap: '4px 14px',
+                alignItems: 'baseline',
                 pageBreakInside: 'avoid', breakInside: 'avoid',
               }}
             >
-              <h3 style={{ margin: '0 0 10px 0', fontSize: 14 }}>
-                สรุปรวมเดือน {THAI_MONTHS[month - 1]} พ.ศ. {year + 543}
-              </h3>
-              <div className="grid-4" style={{ gap: 12, fontSize: 12 }}>
-                <div>
-                  <div style={{ color: '#666' }}>รวมรอบ</div>
-                  <div className="mono" style={{ fontSize: 16, fontWeight: 700 }}>{rounds.length} รอบ · {legRows.length} เที่ยว</div>
-                </div>
-                <div>
-                  <div style={{ color: '#666' }}>ระยะทางรวม</div>
-                  <div className="mono" style={{ fontSize: 16, fontWeight: 700 }}>{db.fmt(totals.distance)} กม.</div>
-                </div>
-                <div>
-                  <div style={{ color: '#666' }}>น้ำมันรวม</div>
-                  <div className="mono" style={{ fontSize: 16, fontWeight: 700 }}>
-                    {db.fmt(totals.liters)} ลิตร
-                    {totals.avgKmPerL != null && (
-                      <span style={{ fontSize: 11, color: '#666', fontWeight: 400, marginLeft: 6 }}>
-                        ({totals.avgKmPerL.toFixed(2)} กม./ล.)
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: '#666' }}>รายได้รวม</div>
-                  <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: '#166534' }}>{db.thb(totals.revenue)}</div>
-                </div>
-                <div>
-                  <div style={{ color: '#666' }}>ค่าน้ำมัน</div>
-                  <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(totals.fuelCost)}</div>
-                </div>
-                <div>
-                  <div style={{ color: '#666' }}>เบี้ยเลี้ยง</div>
-                  <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(totals.perDiem)}</div>
-                </div>
-                <div>
-                  <div style={{ color: '#666' }}>ค่าใช้จ่ายอื่น</div>
-                  <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(totals.other)}</div>
-                </div>
-                <div>
-                  <div style={{ color: '#666' }}>กำไรสุทธิ</div>
-                  <div className="mono" style={{
-                    fontSize: 16, fontWeight: 700,
-                    color: totals.profit >= 0 ? '#166534' : '#A32D2D',
-                  }}>{db.thb(totals.profit)}</div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Signatures */}
-          {rounds.length > 0 && (
-            <div
-              style={{
-                marginTop: 40,
-                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 40,
-                pageBreakInside: 'avoid', breakInside: 'avoid',
-              }}
-            >
-              {['ผู้จัดทำ', 'ผู้ตรวจสอบ', 'ผู้อนุมัติ'].map(label => (
-                <div key={label} style={{ textAlign: 'center' }}>
-                  <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 50, fontSize: 13 }}>{label}</div>
-                  <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>(.....................................)</div>
-                  <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
-                </div>
-              ))}
+              <strong style={{ fontSize: 12 }}>สรุปรวม:</strong>
+              <span><span style={{ color: '#666' }}>รอบ </span><strong>{rounds.length}</strong> · <span style={{ color: '#666' }}>เที่ยว </span><strong>{legRows.length}</strong></span>
+              <span><span style={{ color: '#666' }}>ระยะทาง </span><strong className="mono">{db.fmt(totals.distance)}</strong> กม.</span>
+              <span>
+                <span style={{ color: '#666' }}>น้ำมัน </span><strong className="mono">{db.fmt(totals.liters)}</strong> ล.
+                {totals.avgKmPerL != null && <span style={{ color: '#666' }}> ({totals.avgKmPerL.toFixed(2)} กม./ล.)</span>}
+              </span>
+              <span><span style={{ color: '#666' }}>รายได้ </span><strong className="mono" style={{ color: '#166534' }}>{db.thb(totals.revenue)}</strong></span>
+              <span><span style={{ color: '#666' }}>ค่าน้ำมัน </span><strong className="mono">{db.thb(totals.fuelCost)}</strong></span>
+              <span><span style={{ color: '#666' }}>เบี้ยเลี้ยง </span><strong className="mono">{db.thb(totals.perDiem)}</strong></span>
+              <span><span style={{ color: '#666' }}>อื่นๆ </span><strong className="mono">{db.thb(totals.other)}</strong></span>
+              <span style={{ marginLeft: 'auto' }}>
+                <span style={{ color: '#666' }}>กำไรสุทธิ </span>
+                <strong className="mono" style={{
+                  fontSize: 13,
+                  color: totals.profit >= 0 ? '#166534' : '#A32D2D',
+                }}>{db.thb(totals.profit)}</strong>
+              </span>
             </div>
           )}
         </div>
