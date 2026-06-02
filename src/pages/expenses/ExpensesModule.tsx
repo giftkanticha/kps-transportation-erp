@@ -1668,16 +1668,16 @@ function PivotTab() {
         </div>
       </div>
 
-      {/* ── On-screen pivot table (hidden on print) ── */}
-      <div className="no-print" style={{ margin: 16 }}>
+      {/* ── Pivot table (shown on both screen and print) ── */}
+      <div style={{ margin: 16 }}>
         {activeVendors.length === 0 ? (
-          <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
+          <div className="no-print" style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
             <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
             <div>ไม่มีข้อมูลค่าใช้จ่ายใน{periodLabel}</div>
           </div>
         ) : (
-          <div className="card" style={{ background: '#ffffff', overflow: 'hidden' }}>
-            <div className="head" style={{ paddingBottom: 0 }}>
+          <div className="card print-area" style={{ background: '#ffffff', overflow: 'hidden' }}>
+            <div className="head no-print" style={{ paddingBottom: 0 }}>
               <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Icon name="chart" size={16} />
                 ตารางสรุปค่าใช้จ่ายรายคัน × คู่ค้า
@@ -1690,9 +1690,7 @@ function PivotTab() {
               <table className="tbl">
                 <thead>
                   <tr>
-                    <th style={{ minWidth: 110, position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)', zIndex: 2 }}>
-                      ทะเบียนรถ
-                    </th>
+                    <th style={{ minWidth: 110 }}>ทะเบียนรถ</th>
                     {activeVendors.map(p => (
                       <th key={p.id} className="num right" style={{ minWidth: 120, whiteSpace: 'nowrap' }}>
                         {p.name}
@@ -1706,7 +1704,7 @@ function PivotTab() {
                 <tbody>
                   {activeVehicles.map(v => (
                     <tr key={v.id}>
-                      <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>
+                      <td>
                         <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{v.plate}</div>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.type}</div>
                       </td>
@@ -1721,7 +1719,7 @@ function PivotTab() {
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
-                    <td style={{ position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)' }}>รวมต่อคู่ค้า</td>
+                    <td>รวมต่อคู่ค้า</td>
                     {activeVendors.map(p => (
                       <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>
                         {fmtMoney(colTotal(p.id))}
@@ -1737,59 +1735,6 @@ function PivotTab() {
           </div>
         )}
       </div>
-
-      {/* ── Print-only: portrait-friendly per-vehicle sections (same approach as ExpensePivotPage) ── */}
-      {activeVendors.length > 0 && (
-        <div className="print-only pivot-portrait">
-          {activeVehicles
-            .filter(v => rowTotal(v.id) > 0)
-            .map(v => {
-              const rowsWithSpend = activeVendors
-                .filter(p => (matrix[v.id]?.[p.id] ?? 0) > 0)
-                .sort((a, b) => (matrix[v.id]?.[b.id] ?? 0) - (matrix[v.id]?.[a.id] ?? 0))
-              return (
-                <div key={v.id} className="pivot-portrait-section">
-                  <div className="pivot-portrait-head">
-                    <span className="plate">{v.plate}</span>
-                    <span className="meta">{v.type}</span>
-                    <span className="total">รวม {db.thb(rowTotal(v.id))}</span>
-                  </div>
-                  <table className="pivot-portrait-tbl">
-                    <tbody>
-                      {rowsWithSpend.map(p => (
-                        <tr key={p.id}>
-                          <td className="name">{p.name}</td>
-                          <td className="type">{p.type}</td>
-                          <td className="amount">{db.thb(matrix[v.id][p.id])}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )
-            })}
-
-          <div className="pivot-portrait-section pivot-portrait-summary">
-            <div className="pivot-portrait-head">
-              <span className="plate">รวมยอดต่อคู่ค้า</span>
-              <span className="total">รวมทั้งสิ้น {db.thb(grandTotal)}</span>
-            </div>
-            <table className="pivot-portrait-tbl">
-              <tbody>
-                {[...activeVendors]
-                  .sort((a, b) => colTotal(b.id) - colTotal(a.id))
-                  .map(p => (
-                    <tr key={p.id}>
-                      <td className="name">{p.name}</td>
-                      <td className="type">{p.type}</td>
-                      <td className="amount">{db.thb(colTotal(p.id))}</td>
-                    </tr>
-                  ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {/* ── Print footer (matches P&L รายคัน) ── */}
       <div className="print-only" style={{ marginTop: 12, fontSize: 10, color: '#666', textAlign: 'center' }}>
