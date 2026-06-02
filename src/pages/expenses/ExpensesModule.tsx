@@ -1590,9 +1590,15 @@ function PivotTab() {
   const rowTotal  = (vid: string) => Object.values(matrix[vid] ?? {}).reduce((s, v) => s + v, 0)
   const colTotal  = (pid: string) => Object.values(matrix).reduce((s, row) => s + (row[pid] ?? 0), 0)
   const grandTotal = activeVendorIds.reduce((s, pid) => s + colTotal(pid), 0)
-  const fmtMoney  = (n: number) => n > 0
-    ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : ''
+  const fmtMoney  = (n: number) => {
+    if (n <= 0) return ''
+    const cents = Math.round(n * 100) % 100
+    // .00 → ซ่อนทศนิยม / .99 → ปัดขึ้นเป็นจำนวนเต็ม (Math.round จัดการ .99 → +1 ให้แล้ว)
+    if (cents === 0 || cents === 99) {
+      return Math.round(n).toLocaleString('en-US')
+    }
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
 
   const activeVehicles = vehicles.filter(v => matrix[v.id])
 
@@ -1644,7 +1650,7 @@ function PivotTab() {
           </span>
           <span style={{ color: 'var(--text-muted)' }}>
             ยอดรวม <strong style={{ color: 'var(--primary)' }}>
-              ฿{grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ฿{fmtMoney(grandTotal)}
             </strong>
           </span>
         </div>
@@ -1726,7 +1732,7 @@ function PivotTab() {
                       </td>
                     ))}
                     <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
-                      {grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {fmtMoney(grandTotal)}
                     </td>
                   </tr>
                 </tbody>
