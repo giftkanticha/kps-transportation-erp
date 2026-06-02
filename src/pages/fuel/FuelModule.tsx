@@ -462,7 +462,6 @@ function FuelReportV2() {
         <p className="co">KPS Transportations</p>
         <p className="ttl">รายงานการใช้น้ำมัน{viewMode === 'yearly' ? 'ภาพรวมรายปี' : 'รายเดือน'} — {sourceLabel} ({metric === 'liters' ? 'จำนวนลิตร' : 'จำนวนเงิน'})</p>
         <p className="sub">{periodLabel}</p>
-        <p className="ts">พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</p>
       </div>
 
       {/* Sidebar + main */}
@@ -471,6 +470,16 @@ function FuelReportV2() {
           vehicles={vehicles}
           picked={pickedVehicles}
           onChange={setPickedVehicles}
+          groups={[
+            {
+              label: '🚛 ขนส่ง',
+              vehicles: vehicles.filter(v => (v.groupKind ?? 'TRANSPORT') === 'TRANSPORT'),
+            },
+            {
+              label: '🏭 โรงงานและอุปกรณ์',
+              vehicles: vehicles.filter(v => v.groupKind === 'INTERNAL' || v.groupKind === 'EQUIPMENT'),
+            },
+          ]}
         />
 
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -625,22 +634,6 @@ function FuelReportV2() {
         </div>
       </div>
 
-      {/* Signature block (print only) */}
-      <div
-        className="print-only"
-        style={{ marginTop: 40, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 60, pageBreakInside: 'avoid', breakInside: 'avoid' }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 50, fontSize: 13 }}>ผู้จัดทำ</div>
-          <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>(.....................................)  </div>
-          <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 50, fontSize: 13 }}>ผู้อนุมัติ</div>
-          <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>(.....................................)  </div>
-          <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
-        </div>
-      </div>
     </div>
   )
 }
