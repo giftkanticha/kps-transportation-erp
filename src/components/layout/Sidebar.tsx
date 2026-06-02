@@ -61,6 +61,7 @@ const MENU: MenuItem[] = [
       { id: 'dispatch.open', label: 'เปิดงานขนส่ง', icon: 'edit' },
       { id: 'dispatch.close', label: 'ปิดงานขนส่ง', icon: 'check' },
       { id: 'dispatch.report', label: 'รายงานสรุป', icon: 'chart' },
+      { id: 'dispatch.vehicleMonthly', label: 'สรุปรายเที่ยวรายเดือน (ต่อคัน)', icon: 'calendar' },
       { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน', icon: 'history' },
     ],
   },
