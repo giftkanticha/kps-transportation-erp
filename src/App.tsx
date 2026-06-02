@@ -22,6 +22,7 @@ import { DispatchRoundOpen } from './pages/dispatch/DispatchRoundOpen'
 import { DispatchRoundDetail } from './pages/dispatch/DispatchRoundDetail'
 import { DispatchRoundClose } from './pages/dispatch/DispatchRoundClose'
 import { DispatchSummaryReport } from './pages/dispatch/DispatchSummaryReport'
+import { DispatchVehicleMonthlyReport } from './pages/dispatch/DispatchVehicleMonthlyReport'
 import { DispatchHistory } from './pages/dispatch/DispatchHistory'
 import { SubcontractorModule } from './pages/subcontractors/SubcontractorModule'
 import { ExpensesModule } from './pages/expenses/ExpensesModule'
@@ -62,6 +63,7 @@ const crumbMap: Record<string, string> = {
   'dispatch.close': 'งานขนส่ง • ปิดงาน',
   'dispatch.fuel': 'งานขนส่ง • รายงานประจำวัน',
   'dispatch.monthly': 'งานขนส่ง • รายงานประจำเดือน',
+  'dispatch.vehicleMonthly': 'งานขนส่ง • สรุปรายเที่ยวรายเดือน (ต่อคัน)',
   'dispatch.report': 'งานขนส่ง • รายงานสรุป',
   'dispatch.history': 'งานขนส่ง • ประวัติงาน',
   subcontractors: 'รถรับจ้างร่วม',
@@ -179,6 +181,8 @@ export default function App() {
         return <DispatchModule tab="monthly" setActive={setActive} user={legacyUser} />
       case 'dispatch.report':
         return <DispatchSummaryReport setActive={setActive} setSubject={setSubject} />
+      case 'dispatch.vehicleMonthly':
+        return <DispatchVehicleMonthlyReport />
       case 'dispatch.history':
         return <DispatchHistory setActive={setActive} setSubject={setSubject} />
 

@@ -883,6 +883,7 @@ const REPORT_GROUPS: { title: string; reports: { id: string; label: string; desc
     reports: [
       { id: 'dispatch.report',  label: 'รายงานสรุปงานขนส่ง',     desc: 'KPI ต่อรอบ + แบบฟอร์มรายเที่ยว · พิมพ์ PDF', icon: 'chart' },
       { id: 'dispatch.monthly', label: 'รายงานรายเดือน',          desc: 'สรุปงานขนส่งแยกตามเดือน',                  icon: 'calendar' },
+      { id: 'dispatch.vehicleMonthly', label: 'สรุปรายเที่ยวรายเดือน (ต่อคัน)', desc: 'พิมพ์รายเที่ยวต่อทะเบียน · นับตามวันเปิดงาน', icon: 'calendar' },
       { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน',       desc: 'ดูประวัติงานทั้งหมด',                       icon: 'history' },
     ],
   },
