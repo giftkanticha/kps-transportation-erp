@@ -3,18 +3,27 @@ import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
+import { SearchInput } from '../../components/ui/SearchInput'
 import { Info } from '../../components/ui/Info'
 import { usePrint } from '../../hooks/usePrint'
 import type { Tire, TireEvent, TireScrapSale, Vehicle } from '../../types'
 
 // ── Thresholds ────────────────────────────────────────────────────
-const KM_WARN_T = 40000
-const KM_CRIT_T = 50000
+// Truck tires (10/18/22 ล้อ) — green up to 120k, amber 120k–150k, red 150k+.
+// Earlier defaults were 40k / 50k which match passenger cars, not the fleet.
+const KM_WARN_T = 120000
+const KM_CRIT_T = 150000
 
 const kmStatus = (km: number) => {
   if (km >= KM_CRIT_T) return { color: '#dc2626', bg: '#fee2e2', label: 'ใกล้หมด', dot: 'red' }
   if (km >= KM_WARN_T) return { color: '#d97706', bg: '#fef3c7', label: 'ปานกลาง', dot: 'amber' }
   return { color: '#16a34a', bg: '#dcfce7', label: 'ดี', dot: 'green' }
+}
+
+// Equipment (forklifts, loaders, grinders) shouldn't appear in the tire system.
+function useFleetVehicles() {
+  const { data = [] } = useList<Vehicle>('vehicles')
+  return useMemo(() => data.filter((v) => v.groupKind !== 'EQUIPMENT'), [data])
 }
 
 const LOC_LABEL: Record<string, { label: string; cls: string }> = {
@@ -323,7 +332,7 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverT
 // ── Tab 1: All Tires ─────────────────────────────────────────────
 
 function InstallTireModal({ tire, onClose, onDone }: { tire: Tire; onClose: () => void; onDone: () => void }) {
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: tires = [] } = useList<Tire>('tires')
   const updateTire = useUpdate<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
@@ -343,17 +352,21 @@ function InstallTireModal({ tire, onClose, onDone }: { tire: Tire; onClose: () =
     if (!vehicleId) { alert('กรุณาเลือกรถ'); return }
     if (!position) { alert('กรุณาเลือกตำแหน่ง'); return }
     if (occupied[position]) { alert('ตำแหน่งนี้มียางอยู่แล้ว — เลือกตำแหน่งว่าง หรือใช้ "สลับยาง"'); return }
-    const odo = vehicle?.odometer ?? 0
-    const today = new Date().toISOString().slice(0, 10)
-    await updateTire.mutateAsync({
-      id: tire.id,
-      patch: { status: 'in-use', vehicleId, position, installedDate: today, installedOdometer: odo },
-    })
-    await insertEvent.mutateAsync({
-      tireId: tire.id, vehicleId, eventType: 'install', date: today,
-      odometer: odo, fromPos: null, toPos: position, note: 'ติดตั้งจากคลัง', userId: 'e10',
-    })
-    onDone()
+    try {
+      const odo = vehicle?.odometer ?? 0
+      const today = new Date().toISOString().slice(0, 10)
+      await updateTire.mutateAsync({
+        id: tire.id,
+        patch: { status: 'in-use', vehicleId, position, installedDate: today, installedOdometer: odo },
+      })
+      await insertEvent.mutateAsync({
+        tireId: tire.id, vehicleId, eventType: 'install', date: today,
+        odometer: odo, fromPos: null, toPos: position, note: 'ติดตั้งจากคลัง', userId: 'e10',
+      })
+      onDone()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   return (
@@ -403,7 +416,7 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
   const [modal, setModal] = useState<'history' | 'swap' | 'install' | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: allTires = [] } = useList<Tire>('tires')
   const updateTire = useUpdate<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
@@ -559,7 +572,7 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
     setActive('tires.history')
   }
   const { data: events = [] } = useList<TireEvent>('tire_events')
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const brands = [...new Set(allTires.map((t) => t.brand))]
 
   const [q, setQ] = useState('')
@@ -668,33 +681,7 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
         {/* Filters */}
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
           <div className="row" style={{ gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
-              <Icon
-                name="search"
-                size={14}
-                style={{
-                  position: 'absolute',
-                  left: 12,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--text-faint)',
-                }}
-              />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="ค้นหา เลขซีเรียล / ยี่ห้อ"
-                style={{
-                  width: '100%',
-                  height: 38,
-                  padding: '0 12px 0 36px',
-                  border: '1px solid var(--line)',
-                  borderRadius: 8,
-                  background: 'var(--bg)',
-                  fontSize: 13,
-                }}
-              />
-            </div>
+            <SearchInput value={q} onChange={setQ} placeholder="ค้นหา เลขซีเรียล / ยี่ห้อ" />
             {/* Status checkboxes */}
             <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
               <span
@@ -895,10 +882,16 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
 // ── Add Tire Modal ────────────────────────────────────────────────
 function AddTireModal({ onClose }: { onClose: () => void }) {
   const { data: tires = [] } = useList<Tire>('tires')
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const insertTire = useInsert<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
-  const nextSerial = 'TIR' + String(tires.length + 1).padStart(4, '0')
+  const nextSerial = 'TIR' + String(
+    // Use max(TIR####) + 1 so deleted tires don't leave a hole that collides.
+    tires.reduce((max, t) => {
+      const m = /^TIR(\d+)$/.exec(t.serial ?? '')
+      return m ? Math.max(max, parseInt(m[1], 10)) : max
+    }, 0) + 1,
+  ).padStart(4, '0')
   const [form, setForm] = useState({
     serial: nextSerial,
     brand: 'Bridgestone',
@@ -926,35 +919,39 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
       alert('กรุณาเลือกรถที่จะติดตั้งยาง')
       return
     }
-    const finalVehicleId = (form.status === 'in-use' || form.status === 'spare') ? (form.vehicleId || null) : null
-    const finalPosition = form.status === 'in-use' ? (form.position || null) : null
-    const newTire = await insertTire.mutateAsync({
-      serial: form.serial,
-      brand: form.brand === 'อื่นๆ' ? (form.customBrand.trim() || 'อื่นๆ') : form.brand,
-      model: form.model,
-      size: form.size,
-      installedDate: form.installedDate,
-      installedOdometer: +(form.installedOdometer) || 0,
-      accumulatedKm: 0,
-      status: form.status as Tire['status'],
-      vehicleId: finalVehicleId,
-      position: finalPosition,
-    })
-    if (form.status === 'in-use' && finalVehicleId) {
-      await insertEvent.mutateAsync({
-        tireId: newTire.id,
+    try {
+      const finalVehicleId = (form.status === 'in-use' || form.status === 'spare') ? (form.vehicleId || null) : null
+      const finalPosition = form.status === 'in-use' ? (form.position || null) : null
+      const newTire = await insertTire.mutateAsync({
+        serial: form.serial,
+        brand: form.brand === 'อื่นๆ' ? (form.customBrand.trim() || 'อื่นๆ') : form.brand,
+        model: form.model,
+        size: form.size,
+        installedDate: form.installedDate,
+        installedOdometer: +(form.installedOdometer) || 0,
+        accumulatedKm: 0,
+        status: form.status as Tire['status'],
         vehicleId: finalVehicleId,
-        eventType: 'install',
-        date: form.installedDate,
-        odometer: +(form.installedOdometer) || 0,
-        fromPos: null,
-        toPos: finalPosition,
-        note: 'ยางใหม่',
-        userId: 'e10',
+        position: finalPosition,
       })
+      if (form.status === 'in-use' && finalVehicleId) {
+        await insertEvent.mutateAsync({
+          tireId: newTire.id,
+          vehicleId: finalVehicleId,
+          eventType: 'install',
+          date: form.installedDate,
+          odometer: +(form.installedOdometer) || 0,
+          fromPos: null,
+          toPos: finalPosition,
+          note: 'ยางใหม่',
+          userId: 'e10',
+        })
+      }
+      alert('เพิ่มยางเรียบร้อย')
+      onClose()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-    alert('เพิ่มยางเรียบร้อย')
-    onClose()
   }
 
   return (
@@ -1128,7 +1125,7 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
 
 // ── Tab 2: Layout ─────────────────────────────────────────────────
 function TiresLayout() {
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: tires = [] } = useList<Tire>('tires')
   const [picked, setPicked] = useState('')
   const [popup, setPopup] = useState<{ pos: string; tire: Tire | undefined } | null>(null)
@@ -1276,9 +1273,9 @@ function TiresLayout() {
             <div className="col" style={{ marginTop: 16, gap: 6, fontSize: 12.5 }}>
               {(
                 [
-                  ['#16a34a', '#dcfce7', 'ดี (< 40,000 km)'],
-                  ['#d97706', '#fef3c7', 'ปานกลาง (40k-50k km)'],
-                  ['#dc2626', '#fee2e2', 'ใกล้หมด (> 50,000 km)'],
+                  ['#16a34a', '#dcfce7', 'ดี (< 120,000 km)'],
+                  ['#d97706', '#fef3c7', 'ปานกลาง (120k-150k km)'],
+                  ['#dc2626', '#fee2e2', 'ใกล้หมด (> 150,000 km)'],
                   ['#94a3b8', '#f8fafc', 'สำรอง / ว่าง'],
                 ] as [string, string, string][]
               ).map(([c, bg, label]) => (
@@ -1543,7 +1540,7 @@ function TireLayoutPrintView({ vehicle, wc, tireMap, allTires, spares }: {
 
 // ── Tire History Modal ──────────────────────────────────────────
 function TireHistoryModal({ tire, onClose }: { tire: Tire; onClose: () => void }) {
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: allEvents = [] } = useList<TireEvent>('tire_events')
   const vehicle = tire.vehicleId ? vehicles.find((v) => v.id === tire.vehicleId) : null
   const events = useMemo(
@@ -1652,7 +1649,7 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
   onClose: () => void
   onDone: () => void
 }) {
-  const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const allVehicles = useFleetVehicles()
   const updateTire = useUpdate<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
   const wc = wcFrom(vehicle.type ?? '')
@@ -1665,25 +1662,29 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
 
   const confirm = async () => {
     if (!toPos || toPos === fromPos) return
-    const odometer = vehicle.odometer ?? 0
-    const km1 = computeAccumKm(tire, allVehicles)
-    await updateTire.mutateAsync({ id: tire.id, patch: { position: toPos, accumulatedKm: km1, installedOdometer: odometer } })
-    if (toTire) {
-      const km2 = computeAccumKm(toTire, allVehicles)
-      await updateTire.mutateAsync({ id: toTire.id, patch: { position: fromPos, accumulatedKm: km2, installedOdometer: odometer } })
+    try {
+      const odometer = vehicle.odometer ?? 0
+      const km1 = computeAccumKm(tire, allVehicles)
+      await updateTire.mutateAsync({ id: tire.id, patch: { position: toPos, accumulatedKm: km1, installedOdometer: odometer } })
+      if (toTire) {
+        const km2 = computeAccumKm(toTire, allVehicles)
+        await updateTire.mutateAsync({ id: toTire.id, patch: { position: fromPos, accumulatedKm: km2, installedOdometer: odometer } })
+      }
+      await insertEvent.mutateAsync({
+        tireId: tire.id,
+        vehicleId: vehicle.id,
+        eventType: 'swap',
+        date: new Date().toISOString().slice(0, 10),
+        odometer,
+        fromPos,
+        toPos,
+        note: note.trim() || (toTire ? `สลับกับ ${toTire.serial}` : 'ย้ายไปตำแหน่งว่าง'),
+        userId: 'e10',
+      })
+      onDone()
+    } catch (e) {
+      alert('สลับยางไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-    await insertEvent.mutateAsync({
-      tireId: tire.id,
-      vehicleId: vehicle.id,
-      eventType: 'swap',
-      date: new Date().toISOString().slice(0, 10),
-      odometer,
-      fromPos,
-      toPos,
-      note: note.trim() || (toTire ? `สลับกับ ${toTire.serial}` : 'ย้ายไปตำแหน่งว่าง'),
-      userId: 'e10',
-    })
-    onDone()
   }
 
   return (
@@ -1762,7 +1763,7 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
 
 // ── Move to Stock Panel ───────────────────────────────────────────
 function MoveToStockPanel() {
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: tires = [] } = useList<Tire>('tires')
   const updateTire = useUpdate<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
@@ -1840,7 +1841,7 @@ function MoveToStockPanel() {
 
 // ── Tab 3: Manage & Swap ──────────────────────────────────────────
 function TiresManageFull() {
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: tires = [] } = useList<Tire>('tires')
   const { data: tireEvents = [] } = useList<TireEvent>('tire_events')
   const updateTire = useUpdate<Tire>('tires')
@@ -2397,7 +2398,7 @@ function TiresManageFull() {
 // ── Tab 4: History Timeline ───────────────────────────────────────
 function TiresHistoryFull() {
   const { data: tires = [] } = useList<Tire>('tires')
-  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const vehicles = useFleetVehicles()
   const { data: allEvents = [] } = useList<TireEvent>('tire_events')
   const initial = (typeof window !== 'undefined' && sessionStorage.getItem('kps_tire_history_serial')) || ''
   const [q, setQ] = useState(initial)
@@ -2696,14 +2697,18 @@ function SellScrapModal({ tire, onClose, onSaved }: { tire: Tire; onClose: () =>
 
   const save = async () => {
     if (!buyer || !price) { alert('กรุณากรอกผู้ซื้อและราคา'); return }
-    await insertSale.mutateAsync({
-      tireId: tire.id, serial: tire.serial,
-      buyer: buyer.trim(), price: +price || 0,
-      date: new Date().toISOString().slice(0, 10), userId: 'e10',
-    })
-    await updateTire.mutateAsync({ id: tire.id, patch: { status: 'sold' } })
-    onSaved()
-    onClose()
+    try {
+      await insertSale.mutateAsync({
+        tireId: tire.id, serial: tire.serial,
+        buyer: buyer.trim(), price: +price || 0,
+        date: new Date().toISOString().slice(0, 10), userId: 'e10',
+      })
+      await updateTire.mutateAsync({ id: tire.id, patch: { status: 'sold' } })
+      onSaved()
+      onClose()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   return (

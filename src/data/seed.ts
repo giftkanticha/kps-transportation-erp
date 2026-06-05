@@ -5,6 +5,7 @@ import type {
   Vehicle,
   Customer,
   Subcontractor,
+  Route,
   Dispatch,
   Maintenance,
   Tire,
@@ -66,6 +67,17 @@ const subcontractors: Subcontractor[] = [
   { id: 'sc2', code: 'SUB-002', name: 'บริษัท ภาคพิเศษ ขนส่ง', contact: 'K. Wichai', phone: '086-111-2233', vehicles: 14, rating: 4.5, openJobs: 1, totalPaid: 2180000, status: 'active' },
   { id: 'sc3', code: 'SUB-003', name: 'ห้างหุ้นส่วน ส.โชคชัย',  contact: 'เจ๊แดง',    phone: '089-555-7788', vehicles: 5,  rating: 4.4, openJobs: 0, totalPaid: 680000,  status: 'active' },
   { id: 'sc4', code: 'SUB-004', name: 'เด่นชัย Transport',      contact: 'K. Den',    phone: '087-321-9900', vehicles: 11, rating: 4.8, openJobs: 3, totalPaid: 1820000, status: 'active' },
+]
+
+const routes: Route[] = [
+  { id: 'r-bkk-cnx', code: 'RTE-001', name: 'KPS → เชียงใหม่',         origin: 'กรุงเทพมหานคร',          destination: 'เชียงใหม่',         distanceKm: 700, defaultPriceMode: 'per_ton', defaultPrice: 3600,  defaultPerDiem: 800,  customerId: 'c4', cargoType: 'ทั่วไป',     active: true, notes: '' },
+  { id: 'r-kor-bna', code: 'RTE-002', name: 'โคราช → บางนา',            origin: 'นครราชสีมา',             destination: 'บางนา DC',          distanceKm: 260, defaultPriceMode: 'per_ton', defaultPrice: 2200,  defaultPerDiem: 600,  customerId: 'c1', cargoType: 'บรรจุไม่ได้', active: true, notes: '' },
+  { id: 'r-bna-kor', code: 'RTE-003', name: 'บางนา → โคราช',            origin: 'บางนา DC',               destination: 'นครราชสีมา',        distanceKm: 260, defaultPriceMode: 'lump',    defaultPrice: 18800, defaultPerDiem: 600,  customerId: 'c1', cargoType: 'บรรจุไม่ได้', active: true, notes: '' },
+  { id: 'r-ryg-pty', code: 'RTE-004', name: 'ระยอง → พัทยา',            origin: 'ระยอง',                  destination: 'พัทยา',             distanceKm: 80,  defaultPriceMode: 'per_ton', defaultPrice: 1500,  defaultPerDiem: 400,  customerId: 'c5', cargoType: 'ทั่วไป',     active: true, notes: '' },
+  { id: 'r-mtt-ldk', code: 'RTE-005', name: 'มาบตาพุด → ลาดกระบัง',     origin: 'ระยอง (PTT Map Ta Phut)', destination: 'ลาดกระบัง ICD',     distanceKm: 200, defaultPriceMode: 'per_ton', defaultPrice: 840,   defaultPerDiem: 400,  customerId: 'c2', cargoType: 'เคมี/IBC',  active: true, notes: '' },
+  { id: 'r-bna-kkn', code: 'RTE-006', name: 'บางนา → ขอนแก่น',          origin: 'บางนา DC',               destination: 'ขอนแก่น Hub',       distanceKm: 449, defaultPriceMode: 'per_ton', defaultPrice: 1770,  defaultPerDiem: 800,  customerId: 'c4', cargoType: 'ทั่วไป',     active: true, notes: '' },
+  { id: 'r-srb-lcb', code: 'RTE-007', name: 'สระบุรี → แหลมฉบัง',       origin: 'สระบุรี โรงงาน 2',       destination: 'แหลมฉบัง Port',     distanceKm: 180, defaultPriceMode: 'lump',    defaultPrice: 16200, defaultPerDiem: 400,  customerId: 'c1', cargoType: 'ตู้คอนเทนเนอร์', active: true, notes: '' },
+  { id: 'r-spk-cnx', code: 'RTE-008', name: 'สมุทรปราการ → เชียงใหม่',  origin: 'สมุทรปราการ คลังสินค้า', destination: 'เชียงใหม่ คลัง 3',  distanceKm: 696, defaultPriceMode: 'per_ton', defaultPrice: 1811,  defaultPerDiem: 1200, customerId: 'c6', cargoType: 'เคมี',       active: true, notes: '' },
 ]
 
 const dispatch: Dispatch[] = [
@@ -301,6 +313,7 @@ export const SEED: AppState = {
   vehicles,
   customers,
   subcontractors,
+  routes,
   dispatch,
   maintenance,
   tires,

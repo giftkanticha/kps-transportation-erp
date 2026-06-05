@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
-import { db } from './lib/db'
 import { useAuth } from './context/AuthContext'
+import { canAccessRoute } from './lib/permissions'
 import { LoginScreen } from './pages/auth/LoginScreen'
+import { ResetPasswordScreen } from './pages/auth/ResetPasswordScreen'
 import { Sidebar } from './components/layout/Sidebar'
 import { Topbar } from './components/layout/Topbar'
 import { UserManagementPage } from './pages/admin/UserManagementPage'
 import { ResetDataPage } from './pages/admin/ResetDataPage'
+import { ResetHistoryPage } from './pages/admin/ResetHistoryPage'
 import { Dashboard } from './pages/dashboard/Dashboard'
 import { AlertsTasksPage } from './pages/dashboard/AlertsTasksPage'
 import { VehiclesPage } from './pages/vehicles/VehiclesPage'
@@ -21,6 +23,7 @@ import { DispatchRoundDetail } from './pages/dispatch/DispatchRoundDetail'
 import { DispatchRoundClose } from './pages/dispatch/DispatchRoundClose'
 import { DispatchSummaryReport } from './pages/dispatch/DispatchSummaryReport'
 import { DispatchHistory } from './pages/dispatch/DispatchHistory'
+import { DispatchRouteReport } from './pages/dispatch/DispatchRouteReport'
 import { SubcontractorModule } from './pages/subcontractors/SubcontractorModule'
 import { ExpensesModule } from './pages/expenses/ExpensesModule'
 import { FinancePL } from './pages/finance/FinancePL'
@@ -32,6 +35,7 @@ import { CustomersPage } from './pages/customers/CustomersPage'
 import { PartnersPage } from './pages/customers/PartnersPage'
 import { SettingsUsers } from './pages/settings/SettingsUsers'
 import { SettingsCompany } from './pages/settings/SettingsCompany'
+import { SettingsRoutes } from './pages/settings/SettingsRoutes'
 
 const crumbMap: Record<string, string> = {
   dashboard: 'Dashboard',
@@ -53,6 +57,7 @@ const crumbMap: Record<string, string> = {
   'fuel.report': 'ระบบน้ำมัน • รายงาน',
   'fuel.summary': 'ระบบน้ำมัน • สรุปคลังน้ำมันรวม',
   'fuel.reconcile': 'ระบบน้ำมัน • ตรวจสอบข้อมูล',
+  'fuel.prices':    'ระบบน้ำมัน • ราคาน้ำมันรายวัน',
   dispatch: 'งานขนส่ง',
   'dispatch.open': 'งานขนส่ง • เปิดงาน',
   'dispatch.round': 'งานขนส่ง • รายละเอียดรอบ',
@@ -60,6 +65,7 @@ const crumbMap: Record<string, string> = {
   'dispatch.fuel': 'งานขนส่ง • รายงานประจำวัน',
   'dispatch.monthly': 'งานขนส่ง • รายงานประจำเดือน',
   'dispatch.report': 'งานขนส่ง • รายงานสรุป',
+  'dispatch.routes': 'งานขนส่ง • รายงานเส้นทาง',
   'dispatch.history': 'งานขนส่ง • ประวัติงาน',
   subcontractors: 'รถรับจ้างร่วม',
   'subcontractors.close': 'รถรับจ้างร่วม • ปิดงาน',
@@ -77,15 +83,18 @@ const crumbMap: Record<string, string> = {
   finance: 'การเงิน • P&L รายคัน',
   'settings.users': 'ตั้งค่า • ผู้ใช้งาน',
   'settings.company': 'ตั้งค่า • บริษัท',
+  'settings.routes': 'ตั้งค่า • เส้นทาง',
   'admin.users': 'จัดการผู้ใช้งาน',
   'admin.reset': 'รีเซตข้อมูล',
+  'admin.reset.history': 'ประวัติการรีเซต',
 }
 
 export default function App() {
-  const { legacyUser, logout, isAdmin, loading } = useAuth()
+  const { legacyUser, logout, isAdmin, loading, recoveryMode } = useAuth()
   const [active, setActive] = useState('dashboard')
   const [subject, setSubject] = useState<unknown>(null)
   const [collapsed, setCollapsed] = useState(false)
+  const [routePrefill, setRoutePrefill] = useState<{ origin: string; destination: string } | null>(null)
 
   useEffect(() => {
     if (legacyUser?.role === 'driver') setActive('dispatch')
@@ -99,18 +108,22 @@ export default function App() {
     )
   }
 
+  if (recoveryMode) return <ResetPasswordScreen />
   if (!legacyUser) return <LoginScreen />
 
   const handleLogout = () => logout()
 
-  const handleReset = () => {
-    if (confirm('รีเซ็ตข้อมูลทั้งหมดและกลับไปค่าเริ่มต้น?')) {
-      db.reset()
-      window.location.reload()
-    }
-  }
-
   const renderPage = () => {
+    if (!canAccessRoute(active, legacyUser.role)) {
+      return (
+        <div className="page-head">
+          <div>
+            <h1 className="page-title">ไม่มีสิทธิ์เข้าถึง</h1>
+            <div className="page-sub">บัญชีของคุณไม่มีสิทธิ์ดูหน้านี้ — กรุณาติดต่อผู้ดูแลระบบ</div>
+          </div>
+        </div>
+      )
+    }
     switch (active) {
       case 'dashboard':
         return <Dashboard user={legacyUser} setActive={setActive} />
@@ -155,6 +168,8 @@ export default function App() {
         return <FuelModule tab="summary" setActive={setActive} />
       case 'fuel.reconcile':
         return <FuelModule tab="reconcile" setActive={setActive} />
+      case 'fuel.prices':
+        return <FuelModule tab="prices" setActive={setActive} />
 
       case 'dispatch':
       case 'dispatch.open':
@@ -169,6 +184,8 @@ export default function App() {
         return <DispatchModule tab="monthly" setActive={setActive} user={legacyUser} />
       case 'dispatch.report':
         return <DispatchSummaryReport setActive={setActive} setSubject={setSubject} />
+      case 'dispatch.routes':
+        return <DispatchRouteReport setActive={setActive} setSubject={setSubject} setRoutePrefill={setRoutePrefill} />
       case 'dispatch.history':
         return <DispatchHistory setActive={setActive} setSubject={setSubject} />
 
@@ -211,12 +228,16 @@ export default function App() {
       case 'settings.users':
         return <SettingsUsers />
       case 'settings.company':
-        return <SettingsCompany />
+        return <SettingsCompany setActive={setActive} />
+      case 'settings.routes':
+        return <SettingsRoutes setActive={setActive} prefill={routePrefill} clearPrefill={() => setRoutePrefill(null)} />
 
       case 'admin.users':
         return isAdmin ? <UserManagementPage /> : <Dashboard user={legacyUser} setActive={setActive} />
       case 'admin.reset':
-        return isAdmin ? <ResetDataPage /> : <Dashboard user={legacyUser} setActive={setActive} />
+        return isAdmin ? <ResetDataPage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
+      case 'admin.reset.history':
+        return isAdmin ? <ResetHistoryPage setActive={setActive} /> : <Dashboard user={legacyUser} setActive={setActive} />
 
       default:
         return <Dashboard user={legacyUser} setActive={setActive} />
@@ -238,7 +259,6 @@ export default function App() {
           user={legacyUser}
           crumb={crumbMap[active] ?? 'Dashboard'}
           onLogout={handleLogout}
-          onReset={handleReset}
           onOpenAlerts={() => setActive('alerts')}
         />
         <div className="content">{renderPage()}</div>

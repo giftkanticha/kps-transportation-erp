@@ -15,8 +15,12 @@ function daysInMonth(year: number, month1to12: number): number {
 function isoDate(year: number, month1to12: number, day: number): string {
   return `${year}-${String(month1to12).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
-const isFactoryStation = (station: string) =>
-  !['PTT', 'Shell', 'Bangchak', 'Esso'].some(s => station?.includes(s))
+// Factory-tank fills are tagged with the literal Thai string by both
+// ExpressFuelLog (source=FACTORY_TANK → 'ถังโรงงาน') and DispatchRoundClose.
+// The previous exclusion-list ('PTT' / 'Shell' / …) accidentally classified
+// the new Thai supplier names ('บริษัท ปตท.' etc.) as factory, leaking
+// external pumps into the factory daily ledger.
+const isFactoryStation = (station: string) => station === 'ถังโรงงาน'
 
 export function FuelInventorySummary() {
   const today = new Date()

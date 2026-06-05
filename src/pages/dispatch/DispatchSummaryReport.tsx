@@ -1,9 +1,11 @@
 import { useState, useMemo } from 'react'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
-import { useList } from '../../hooks/useTable'
+import { useList, useUpdate, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { Vehicle, Employee, Dispatch, FuelRound } from '../../types'
-import { Icon, Field } from '../../components/ui'
+import { useAuth } from '../../context/AuthContext'
+import { usePrint } from '../../hooks/usePrint'
+import type { Vehicle, Employee, Dispatch, FuelRound, EditApprovalRequest, KPSRole, Route } from '../../types'
+import { Icon, Field, SegmentedFilter } from '../../components/ui'
 
 interface Props {
   setActive: (id: string) => void
@@ -34,17 +36,28 @@ function isoMonth(s: string): string {
 
 export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   const today = new Date()
+  const { profile, isAdmin } = useAuth()
   const [from, setFrom] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`)
   const [to, setTo] = useState(today.toISOString().slice(0, 10))
   const [vehicleId, setVehicleId] = useState('')
   const [driverId, setDriverId] = useState('')
+  const [routeId, setRouteId] = useState('')
+  const [destination, setDestination] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
+  const [printScope, setPrintScope] = useState<'both' | 'summary' | 'form'>('both')
+  const [reopenTarget, setReopenTarget] = useState<Dispatch | null>(null)
+  const [requestTarget, setRequestTarget] = useState<Dispatch | null>(null)
+  const [toastMsg, setToastMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  const updateDispatch = useUpdate<Dispatch>('dispatch')
+  const insertApproval = useInsert<EditApprovalRequest>('edit_approvals')
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: dispatch = [] } = useDispatches()
   const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: routes = [] } = useList<Route>('routes')
   const drivers = employees.filter(e => e.position === 'คนขับ')
+  const { print } = usePrint()
 
   const rows = useMemo<Row[]>(() => {
     const rounds = dispatch
@@ -61,6 +74,15 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
         if (driverId && d.driverId !== driverId) return false
         if (status === 'draft' && d.roundStatus !== 'draft') return false
         if (status === 'closed' && d.roundStatus !== 'closed') return false
+        // Route/destination filters apply to ANY leg in the round.
+        if (routeId) {
+          const matches = (d.legs ?? []).some(l => db.resolveRouteId(l, routes) === routeId)
+          if (!matches) return false
+        }
+        if (destination) {
+          const matches = (d.legs ?? []).some(l => l.destination === destination)
+          if (!matches) return false
+        }
         return true
       })
 
@@ -95,7 +117,19 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
         status: statusLabel,
       }
     }).sort((a, b) => (b.round.depart || b.round.date || '').localeCompare(a.round.depart || a.round.date || ''))
-  }, [from, to, vehicleId, driverId, status, vehicles, employees, dispatch, fuelRounds])
+  }, [from, to, vehicleId, driverId, routeId, destination, status, vehicles, employees, dispatch, fuelRounds, routes])
+
+  // Unique destinations across visible rounds — used to populate the filter
+  // dropdown so the user only sees options that actually exist in data.
+  const destinationOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const d of dispatch) {
+      for (const l of (d.legs ?? [])) {
+        if (l.destination) set.add(l.destination)
+      }
+    }
+    return [...set].sort()
+  }, [dispatch])
 
   // Aggregates
   const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0)
@@ -111,6 +145,66 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
     return ms.size
   }, [rows])
 
+  // Per-leg "legacy form" rows — only when a single vehicle is selected.
+  const legRows = useMemo(() => {
+    if (!vehicleId) return []
+    const sorted = [...rows].sort((a, b) =>
+      (a.round.depart || a.round.date || '').localeCompare(b.round.depart || b.round.date || ''))
+    const out: {
+      key: string; date: string; plate: string; cargo: string
+      weight: number | null; deliveredWeight: number | null; price: number | null
+      amount: number; perDiem: number | null
+      liters: number | null; endOdometer: number | null; kmPerL: number | null
+    }[] = []
+    sorted.forEach(r => {
+      const date = (r.round.depart || r.round.date || '').slice(0, 10)
+      const plate = r.vehicle?.plate ?? '—'
+      const legs = r.round.legs ?? []
+      if (legs.length === 0) {
+        out.push({
+          key: r.round.id, date, plate, cargo: '—',
+          weight: null, deliveredWeight: null, price: null,
+          amount: r.revenue, perDiem: r.perDiemTotal,
+          liters: r.round.liters, endOdometer: r.round.endOdometer, kmPerL: r.kmPerL,
+        })
+        return
+      }
+      legs.forEach((l, i) => {
+        out.push({
+          key: `${r.round.id}-${i}`, date, plate,
+          cargo: l.cargo || [l.origin, l.destination].filter(Boolean).join('-') || '—',
+          weight: l.weight ?? null,
+          deliveredWeight: l.deliveredWeight ?? null,
+          price: l.price ?? null,
+          amount: l.amount || 0,
+          perDiem: l.perDiem ?? null,
+          liters: i === 0 ? r.round.liters : null,
+          endOdometer: i === 0 ? r.round.endOdometer : null,
+          kmPerL: i === 0 ? r.kmPerL : null,
+        })
+      })
+    })
+    return out
+  }, [rows, vehicleId])
+
+  const formTotals = legRows.reduce(
+    (a, r) => ({
+      amount: a.amount + (r.amount || 0),
+      perDiem: a.perDiem + (r.perDiem || 0),
+      liters: a.liters + (r.liters || 0),
+    }),
+    { amount: 0, perDiem: 0, liters: 0 },
+  )
+
+  const selVehicle = vehicles.find(v => v.id === vehicleId)
+  // Print scope (only meaningful when a vehicle is selected, i.e. the form exists)
+  const summaryPrintCls = vehicleId && printScope === 'form' ? ' no-print' : ''
+  const formPrintCls = printScope === 'summary' ? ' no-print' : ''
+  const formBreakCls = vehicleId && printScope === 'both' ? ' print-break' : ''
+  const numFmt = (v: number | null | undefined) => (v != null && v !== 0 ? db.fmt(v) : '–')
+  const priceFmt = (v: number | null | undefined) =>
+    v != null && v !== 0 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '–'
+
   return (
     <div>
       <div className="page-head">
@@ -118,8 +212,19 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
           <h1 className="page-title">รายงานสรุปงานขนส่ง</h1>
           <div className="page-sub">รายงาน P&amp;L ต่อรอบ พร้อม highlight KM/L &lt; {DSP_KMPL_THRESHOLD}</div>
         </div>
-        <div className="actions no-print">
-          <button className="btn" onClick={() => window.print()}>
+        <div className="actions no-print" style={{ alignItems: 'center' }}>
+          {vehicleId && (
+            <SegmentedFilter
+              value={printScope}
+              onChange={setPrintScope}
+              options={[
+                { value: 'both', label: 'พิมพ์ทั้งหมด' },
+                { value: 'summary', label: 'เฉพาะตารางสรุป' },
+                { value: 'form', label: 'เฉพาะแบบฟอร์ม' },
+              ]}
+            />
+          )}
+          <button className="btn" onClick={() => print('landscape')}>
             <Icon name="download" size={15} /> พิมพ์ / PDF
           </button>
         </div>
@@ -147,6 +252,24 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
             </select>
           </Field>
         </div>
+        <div className="grid-4" style={{ gap: 12, marginTop: 12 }}>
+          <Field label="เส้นทาง">
+            <select value={routeId} onChange={e => setRouteId(e.target.value)}>
+              <option value="">ทุกเส้นทาง</option>
+              {routes.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.code} · {r.name || `${r.origin} → ${r.destination}`}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="ปลายทาง">
+            <select value={destination} onChange={e => setDestination(e.target.value)}>
+              <option value="">ทุกปลายทาง</option>
+              {destinationOptions.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </Field>
+        </div>
         <div className="row" style={{ marginTop: 12, gap: 14 }}>
           <span className="muted" style={{ fontSize: 13, fontWeight: 600 }}>สถานะ:</span>
           {(['all', 'draft', 'closed'] as StatusFilter[]).map(s => (
@@ -159,7 +282,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
       </div>
 
       {/* KPI strip */}
-      <div className="grid-4" style={{ marginBottom: 16, gap: 12 }}>
+      <div className={`grid-4${summaryPrintCls}`} style={{ marginBottom: 16, gap: 12 }}>
         <div className="card kpi">
           <div className="label">รายได้รวม</div>
           <div className="row"><div className="icn-box green"><Icon name="money" size={18} /></div>
@@ -188,6 +311,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
 
       {abnormal.length > 0 && (
         <div
+          className={summaryPrintCls.trim()}
           style={{
             padding: 12, marginBottom: 14, borderRadius: 8,
             background: '#FEE2E2', border: '1px solid #EF4444', fontSize: 13,
@@ -198,7 +322,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
       )}
 
       {/* Table */}
-      <div className="card">
+      <div className={`card${summaryPrintCls}`}>
         <div className="head">
           <h3>รายการรอบงาน ({rows.length} รอบ · {months} เดือน)</h3>
         </div>
@@ -217,6 +341,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
                 <th className="num">กำไร</th>
                 <th className="num">KM/L</th>
                 <th>สถานะ</th>
+                <th className="no-print" style={{ width: 110 }}>การกระทำ</th>
               </tr>
             </thead>
             <tbody>
@@ -268,12 +393,37 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
                           ? <span className="badge amber" style={{ fontSize: 11 }}>DRAFT</span>
                           : <span className="badge" style={{ fontSize: 11 }}>LEGACY</span>}
                     </td>
+                    <td
+                      className="no-print"
+                      onClick={e => e.stopPropagation()}
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      {r.status === 'closed' && (
+                        isAdmin ? (
+                          <button
+                            className="btn sm"
+                            title="เปิดรอบนี้กลับมาแก้ไข"
+                            onClick={() => setReopenTarget(r.round)}
+                          >
+                            <Icon name="edit" size={12} /> แก้ไข
+                          </button>
+                        ) : (
+                          <button
+                            className="btn sm"
+                            title="ส่งคำขอแก้ไขให้แอดมิน"
+                            onClick={() => setRequestTarget(r.round)}
+                          >
+                            <Icon name="bell" size={12} /> ขอแก้ไข
+                          </button>
+                        )
+                      )}
+                    </td>
                   </tr>
                 )
               })}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={11} style={{ textAlign: 'center', padding: 36, color: 'var(--text-2)' }}>
+                  <td colSpan={12} style={{ textAlign: 'center', padding: 36, color: 'var(--text-2)' }}>
                     ไม่พบรายการในช่วงเวลาที่เลือก
                   </td>
                 </tr>
@@ -293,6 +443,213 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Legacy per-trip form — only when a single vehicle is selected */}
+      {vehicleId && (
+        <>
+          <div className={`print-only${formBreakCls}${formPrintCls}`} style={{ marginBottom: 12 }}>
+            <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>รายงานรายเที่ยว</div>
+            <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
+              KPS Transportation ERP · ทะเบียน {selVehicle?.plate ?? '—'} · {from} – {to} · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())}
+            </div>
+          </div>
+
+          <div className={`card print-area${formPrintCls}`}>
+            <div className="head no-print">
+              <h3>แบบฟอร์มรายเที่ยว — {selVehicle?.plate ?? '—'} ({legRows.length} เที่ยว)</h3>
+            </div>
+            <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+              <table className="tbl print-compact">
+                <thead>
+                  <tr>
+                    <th>วันที่</th>
+                    <th>ทะเบียน</th>
+                    <th>รายการ</th>
+                    <th className="num">น.น.ต้นทาง</th>
+                    <th className="num">น.น.ปลายทาง</th>
+                    <th className="num">ค่าบรรทุก</th>
+                    <th className="num">จำนวนเงิน</th>
+                    <th className="num">เบี้ยเลี้ยง</th>
+                    <th className="num">น้ำมันที่เติม</th>
+                    <th className="num">เข็มไมล์</th>
+                    <th className="num">อัตราการวิ่ง</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {legRows.map(r => (
+                    <tr key={r.key}>
+                      <td className="num muted">{r.date}</td>
+                      <td className="mono">{r.plate}</td>
+                      <td>{r.cargo}</td>
+                      <td className="num">{numFmt(r.weight)}</td>
+                      <td className="num">{numFmt(r.deliveredWeight)}</td>
+                      <td className="num">{priceFmt(r.price)}</td>
+                      <td className="num">{db.fmt(r.amount)}</td>
+                      <td className="num">{numFmt(r.perDiem)}</td>
+                      <td className="num">{numFmt(r.liters)}</td>
+                      <td className="num">{numFmt(r.endOdometer)}</td>
+                      <td className="num">{r.kmPerL != null ? r.kmPerL.toFixed(2) : '–'}</td>
+                    </tr>
+                  ))}
+                  {legRows.length === 0 && (
+                    <tr>
+                      <td colSpan={11} style={{ textAlign: 'center', padding: 24, color: 'var(--text-2)' }}>
+                        ไม่พบเที่ยวในช่วงเวลาที่เลือก
+                      </td>
+                    </tr>
+                  )}
+                  {legRows.length > 0 && (
+                    <tr style={{ fontWeight: 600, background: 'var(--bg)' }}>
+                      <td colSpan={6} className="right">รวม {legRows.length} เที่ยว</td>
+                      <td className="num">{db.fmt(formTotals.amount)}</td>
+                      <td className="num">{db.fmt(formTotals.perDiem)}</td>
+                      <td className="num">{db.fmt(formTotals.liters)}</td>
+                      <td></td>
+                      <td></td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {reopenTarget && (
+        <ReopenConfirm
+          round={reopenTarget}
+          onClose={() => setReopenTarget(null)}
+          onConfirm={async () => {
+            try {
+              await updateDispatch.mutateAsync({
+                id: reopenTarget.id,
+                patch: { roundStatus: 'draft', status: 'in-progress' },
+              })
+              setReopenTarget(null)
+              setSubject({ type: 'round', id: reopenTarget.id })
+              setActive('dispatch.close')
+            } catch (e) {
+              setToastMsg({ kind: 'err', text: e instanceof Error ? e.message : 'เปิดรอบไม่สำเร็จ' })
+            }
+          }}
+        />
+      )}
+
+      {requestTarget && profile && (
+        <RequestEditModal
+          round={requestTarget}
+          onClose={() => setRequestTarget(null)}
+          onSubmit={async (reason) => {
+            try {
+              await insertApproval.mutateAsync({
+                requesterId:   profile.id,
+                requesterName: profile.display_name ?? profile.username ?? profile.email ?? 'ผู้ใช้',
+                requesterRole: (String(profile.role).toLowerCase() === 'manager' ? 'manager' : 'driver') as KPSRole,
+                vehicleId:     requestTarget.vehicleId ?? '',
+                vehiclePlate:  vehicles.find(v => v.id === requestTarget.vehicleId)?.plate ?? requestTarget.code,
+                reason,
+                changes: {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  _kind: 'dispatch_reopen',
+                  roundId: requestTarget.id,
+                  roundCode: requestTarget.code,
+                } as Partial<Vehicle>,
+                changeFields: [],
+                requestedAt:  new Date().toISOString(),
+                status:       'pending',
+                reviewerId:   null,
+                reviewerName: null,
+                reviewedAt:   null,
+                reviewNote:   '',
+              })
+              setRequestTarget(null)
+              setToastMsg({ kind: 'ok', text: 'ส่งคำขอแก้ไขให้แอดมินแล้ว' })
+            } catch (e) {
+              setToastMsg({ kind: 'err', text: e instanceof Error ? e.message : 'ส่งคำขอไม่สำเร็จ' })
+            }
+          }}
+        />
+      )}
+
+      {toastMsg && (
+        <div
+          onClick={() => setToastMsg(null)}
+          style={{
+            position: 'fixed', bottom: 24, right: 24, zIndex: 2000,
+            padding: '12px 18px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+            background: toastMsg.kind === 'ok' ? '#dcfce7' : '#fee2e2',
+            color:      toastMsg.kind === 'ok' ? '#166534' : '#991b1b',
+            border: `1px solid ${toastMsg.kind === 'ok' ? '#86efac' : '#fca5a5'}`,
+            cursor: 'pointer', maxWidth: 360, boxShadow: '0 6px 24px rgba(0,0,0,.15)',
+          }}
+        >
+          {toastMsg.text}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Reopen confirmation (admin) ──────────────────────────────────────────────
+function ReopenConfirm({ round, onClose, onConfirm }: { round: Dispatch; onClose: () => void; onConfirm: () => void }) {
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+        <div className="head"><h3>เปิดรอบเพื่อแก้ไข</h3></div>
+        <div className="body">
+          <p style={{ marginBottom: 12 }}>
+            รอบ <strong className="mono" style={{ color: 'var(--primary)' }}>{round.code}</strong> ปิดอยู่
+          </p>
+          <p className="muted" style={{ fontSize: 13 }}>
+            กดยืนยันจะตั้งสถานะรอบเป็น <strong>DRAFT</strong> และพาไปหน้าปิดรอบเพื่อแก้ไขข้อมูล — ปิดรอบใหม่อีกครั้งเมื่อเสร็จ
+          </p>
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose}>ยกเลิก</button>
+          <button className="btn primary" onClick={onConfirm}>
+            <Icon name="edit" size={14} /> เปิดเพื่อแก้ไข
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Request edit (non-admin) ─────────────────────────────────────────────────
+function RequestEditModal({ round, onClose, onSubmit }: { round: Dispatch; onClose: () => void; onSubmit: (reason: string) => Promise<void> }) {
+  const [reason, setReason] = useState('')
+  const [busy, setBusy]     = useState(false)
+  const submit = async () => {
+    if (!reason.trim()) return
+    setBusy(true)
+    try { await onSubmit(reason.trim()) } finally { setBusy(false) }
+  }
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div className="head"><h3>ขอแก้ไขรอบที่ปิดแล้ว</h3></div>
+        <div className="body">
+          <p style={{ marginBottom: 14, fontSize: 13 }}>
+            รอบ <strong className="mono" style={{ color: 'var(--primary)' }}>{round.code}</strong> — แอดมินจะตรวจสอบคำขอและเปิดรอบให้แก้ไข
+          </p>
+          <Field label="เหตุผลที่ขอแก้ไข *">
+            <textarea
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              rows={3}
+              placeholder="เช่น เลขไมล์ปิดงานคลาดเคลื่อน / ลืมใส่ค่าน้ำมัน"
+              style={{ width: '100%', resize: 'vertical' }}
+              autoFocus
+            />
+          </Field>
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" onClick={submit} disabled={busy || !reason.trim()}>
+            {busy ? 'กำลังส่ง…' : 'ส่งคำขอ'}
+          </button>
         </div>
       </div>
     </div>

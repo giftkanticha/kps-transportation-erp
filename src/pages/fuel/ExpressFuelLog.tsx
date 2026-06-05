@@ -1,11 +1,12 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { uid } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { Icon } from '../../components/ui/Icon'
 import { QuickOpenTripModal } from './QuickOpenTripModal'
 import type { CSSProperties } from 'react'
-import type { Vehicle, Dispatch as DispatchJob, FuelRecord, FuelStock, FuelTransaction } from '../../types'
+import type { Vehicle, Dispatch as DispatchJob, FuelRecord, FuelStock, FuelTransaction, FuelDailyPrice } from '../../types'
+import { priceForDate } from './FuelDailyPricesPage'
 
 type InsertFuelTx = ReturnType<typeof useInsert<FuelTransaction>>
 type InsertFuelRec = ReturnType<typeof useInsert<FuelRecord>>
@@ -58,9 +59,13 @@ function makeRow(): GridRow {
 }
 
 function getFactoryBalance(stocks: FuelStock[], fuelRecords: FuelRecord[]): number {
+  // Only fuel_records tagged as factory tank consume from the on-site stock.
+  // External-pump fills are an AP cost, not an inventory draw. The previous
+  // 'NOT in PTT/Shell/…' filter mis-classified the Thai 'ปั๊มภายนอก' string
+  // as factory and was bleeding external pumps out of the tank balance.
   const stockIn = stocks.reduce((s, r) => s + (r.liters || 0), 0)
   const stockOut = fuelRecords
-    .filter(f => !['PTT', 'Shell', 'Bangchak', 'Esso'].some(b => f.station?.includes(b)))
+    .filter(f => f.station === 'ถังโรงงาน')
     .reduce((s, r) => s + (r.liters || 0), 0)
   return Math.max(0, stockIn - stockOut)
 }
@@ -115,11 +120,12 @@ async function persistRow(
   vehicles: Vehicle[],
   insertFuelTx: InsertFuelTx,
   insertFuelRec: InsertFuelRec,
+  totalOverride?: number,
 ): Promise<{ txId: string; fuelRecId: string }> {
   const vehicle = vehicles.find(v => v.id === row.vehicleId)
   const liters = parseFloat(row.liters)
   const pricePerL = parseFloat(row.pricePerL) || 35
-  const total = liters * pricePerL
+  const total = totalOverride != null ? totalOverride : liters * pricePerL
   const txId = uid('ftx')
   const fuelRecId = uid('f')
 
@@ -259,6 +265,21 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
   const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const { data: fuelStock = [] } = useList<FuelStock>('fuel_stock')
   const { data: fuelRecords = [] } = useList<FuelRecord>('fuel_records')
+  const { data: dailyPrices = [] } = useList<FuelDailyPrice>('fuel_daily_prices', 'date', false)
+
+  // Auto-fill only for FACTORY_TANK — external pump prices vary per station
+  // / province so the driver always types from the receipt.
+  useEffect(() => {
+    if (dailyPrices.length === 0) return
+    setRows(prev => prev.map(r => {
+      if (r.committed || r.reversed) return r
+      if (r.source !== 'FACTORY_TANK') return r
+      const p = priceForDate(dailyPrices, 'FACTORY_TANK', r.date)
+      if (p == null) return r
+      return r.pricePerL === String(p) ? r : { ...r, pricePerL: String(p) }
+    }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dailyPrices])
   const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
   const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
   const insertFuelRec = useInsert<FuelRecord>('fuel_records')
@@ -289,8 +310,22 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     const result = autoRoute(row.vehicleId, row.date, row.source, parseFloat(row.liters), vehicles, dispatches, fuelStock, fuelRecords)
     const updated: GridRow = { ...row, ...result, committed: result.status !== 'ERROR' }
 
+    // External-pump receipts are usually paid as a whole baht — the
+    // liters×price often lands on a .xx fraction (e.g. 1,999.55). Offer to
+    // round up to the next baht so the AP figure matches the receipt.
+    let totalOverride: number | undefined
+    if (updated.committed && row.source === 'EXTERNAL_PUMP') {
+      const raw = parseFloat(row.liters) * (parseFloat(row.pricePerL) || 35)
+      const ceil = Math.ceil(raw)
+      if (raw > 0 && Math.abs(ceil - raw) > 0.001) {
+        if (confirm(`ยอดปั๊มภายนอก = ${raw.toFixed(2)} บาท\n\nตกลง = ปัดขึ้นเป็น ${ceil.toLocaleString()} บาท\nยกเลิก = ใช้ยอดตามจริง ${raw.toFixed(2)} บาท`)) {
+          totalOverride = ceil
+        }
+      }
+    }
+
     if (updated.committed) {
-      const { txId, fuelRecId } = await persistRow(updated, vehicles, insertFuelTx, insertFuelRec)
+      const { txId, fuelRecId } = await persistRow(updated, vehicles, insertFuelTx, insertFuelRec, totalOverride)
       updated.txId = txId
       updated.fuelRecId = fuelRecId
       if (result.status === 'FLOATING') {
@@ -352,83 +387,91 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
   const cancelEdit = () => setEditingKey(null)
 
   const saveEdit = async (row: GridRow, i: number) => {
-    const foundVehicle = vehicles.find(v => v.plate.toLowerCase() === editDraft.plateTerm.trim().toLowerCase())
-    const vehicleId = foundVehicle?.id ?? row.vehicleId
-    const liters = parseFloat(editDraft.liters)
-    const pricePerL = parseFloat(editDraft.pricePerL) || 35
-    const total = liters * pricePerL
+    try {
+      const foundVehicle = vehicles.find(v => v.plate.toLowerCase() === editDraft.plateTerm.trim().toLowerCase())
+      const vehicleId = foundVehicle?.id ?? row.vehicleId
+      const liters = parseFloat(editDraft.liters)
+      const pricePerL = parseFloat(editDraft.pricePerL) || 35
+      const total = liters * pricePerL
 
-    const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
+      const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
 
-    // Update FuelTransaction
-    if (row.txId) {
-      await updateFuelTx.mutateAsync({
-        id: row.txId,
-        patch: {
-          date: editDraft.date,
-          vehicleId,
-          liters,
-          pricePerL,
-          total,
-          source: editDraft.source,
-          tripId: result.tripId,
-          status: result.status as FuelTransaction['status'],
-        },
+      // Update FuelTransaction
+      if (row.txId) {
+        await updateFuelTx.mutateAsync({
+          id: row.txId,
+          patch: {
+            date: editDraft.date,
+            vehicleId,
+            liters,
+            pricePerL,
+            total,
+            source: editDraft.source,
+            tripId: result.tripId,
+            status: result.status as FuelTransaction['status'],
+          },
+        })
+      }
+
+      // Update FuelRecord (backward compat)
+      if (row.fuelRecId) {
+        await updateFuelRec.mutateAsync({
+          id: row.fuelRecId,
+          patch: {
+            date: editDraft.date,
+            vehicleId,
+            liters,
+            pricePerL,
+            total,
+            station: editDraft.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
+          },
+        })
+      }
+
+      patchRow(i, {
+        date: editDraft.date,
+        plateTerm: editDraft.plateTerm,
+        vehicleId,
+        liters: editDraft.liters,
+        pricePerL: editDraft.pricePerL,
+        source: editDraft.source,
+        status: result.status,
+        statusLabel: result.statusLabel,
+        tripId: result.tripId,
       })
+
+      setEditingKey(null)
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-
-    // Update FuelRecord (backward compat)
-    if (row.fuelRecId) {
-      await updateFuelRec.mutateAsync({
-        id: row.fuelRecId,
-        patch: {
-          date: editDraft.date,
-          vehicleId,
-          liters,
-          pricePerL,
-          total,
-          station: editDraft.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
-        },
-      })
-    }
-
-    patchRow(i, {
-      date: editDraft.date,
-      plateTerm: editDraft.plateTerm,
-      vehicleId,
-      liters: editDraft.liters,
-      pricePerL: editDraft.pricePerL,
-      source: editDraft.source,
-      status: result.status,
-      statusLabel: result.statusLabel,
-      tripId: result.tripId,
-    })
-
-    setEditingKey(null)
   }
 
   // ── Reverse ──────────────────────────────────────────────────────────────────
 
   const confirmReverse = async (row: GridRow) => {
-    // Mark FuelTransaction as REVERSED
-    if (row.txId) {
-      await updateFuelTx.mutateAsync({
-        id: row.txId,
-        patch: { status: 'REVERSED', reversedAt: new Date().toISOString() },
-      })
-    }
+    try {
+      // Mark FuelTransaction as REVERSED
+      if (row.txId) {
+        await updateFuelTx.mutateAsync({
+          id: row.txId,
+          patch: { status: 'REVERSED', reversedAt: new Date().toISOString() },
+        })
+      }
 
-    // Remove FuelRecord so factory balance is restored
-    if (row.fuelRecId) {
-      try { await deleteFuelRec.mutateAsync(row.fuelRecId) } catch { /* already deleted */ }
-    }
+      // Remove FuelRecord so factory balance is restored
+      if (row.fuelRecId) {
+        try { await deleteFuelRec.mutateAsync(row.fuelRecId) } catch { /* already deleted */ }
+      }
 
-    setRows(prev => prev.map(r =>
-      r.key === row.key
-        ? { ...r, reversed: true, status: 'REVERSED', statusLabel: '🚫 ยกเลิกแล้ว' }
-        : r,
-    ))
-    setReverseTarget(null)
+      setRows(prev => prev.map(r =>
+        r.key === row.key
+          ? { ...r, reversed: true, status: 'REVERSED', statusLabel: '🚫 ยกเลิกแล้ว' }
+          : r,
+      ))
+      setReverseTarget(null)
+    } catch (e) {
+      alert('ยกเลิกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -582,10 +625,11 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#F8FAFC', borderBottom: '2px solid #E2E8F0' }}>
-                {['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ'].map((h, hi) => (
+                {(['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ']
+                ).map((h, hi) => (
                   <th key={hi} style={{
                     padding: '9px 12px',
-                    textAlign: hi === 0 ? 'center' : hi >= 3 && hi <= 4 ? 'right' : hi === 7 ? 'center' : 'left',
+                    textAlign: hi === 0 ? 'center' : hi === 3 || hi === 4 ? 'right' : hi === 7 ? 'center' : 'left',
                     color: '#64748B', fontSize: 11, fontWeight: 700,
                     width: [40, 130, 155, 95, 110, 165, undefined, 120][hi],
                     whiteSpace: 'nowrap',
@@ -632,7 +676,16 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                           type="date"
                           value={row.date}
                           disabled={locked || row.reversed}
-                          onChange={e => patchRow(i, { date: e.target.value })}
+                          onChange={e => {
+                            const d = e.target.value
+                            // Auto-fill price only for factory tank — drivers type external-pump prices.
+                            if (row.source === 'FACTORY_TANK') {
+                              const auto = priceForDate(dailyPrices, 'FACTORY_TANK', d)
+                              patchRow(i, auto != null ? { date: d, pricePerL: String(auto) } : { date: d })
+                            } else {
+                              patchRow(i, { date: d })
+                            }
+                          }}
                           onKeyDown={onKeyDown(i, false)}
                           style={{ ...cellInput, border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
                         />
@@ -644,6 +697,8 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                       {isEditing ? (
                         <input
                           list="fuel-plates-dl"
+                          autoComplete="off"
+                          name={`plate-edit-${i}`}
                           value={editDraft.plateTerm}
                           onChange={e => {
                             const found = vehicles.find(v => v.plate.toLowerCase() === e.target.value.trim().toLowerCase())
@@ -656,6 +711,8 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                         <input
                           id={`cell-${i}-1`}
                           list="fuel-plates-dl"
+                          autoComplete="off"
+                          name={`plate-${i}`}
                           value={row.plateTerm}
                           disabled={locked || row.reversed}
                           onChange={e => handlePlateChange(i, e.target.value)}
@@ -698,7 +755,8 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                       )}
                     </td>
 
-                    {/* ราคา/ลิตร */}
+                    {/* ราคา/ลิตร — visible for everyone; auto-filled for FACTORY_TANK,
+                        typed by the driver for EXTERNAL_PUMP (varies per station) */}
                     <td style={{ padding: '5px 7px' }}>
                       {isEditing ? (
                         <input
@@ -740,7 +798,17 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                           id={`cell-${i}-4`}
                           value={row.source}
                           disabled={locked || row.reversed}
-                          onChange={e => patchRow(i, { source: e.target.value as FuelSource })}
+                          onChange={e => {
+                            const s = e.target.value as FuelSource
+                            // Swapping to factory tank → pull the daily price.
+                            // Swapping back to external pump → clear, driver re-enters.
+                            if (s === 'FACTORY_TANK') {
+                              const auto = priceForDate(dailyPrices, 'FACTORY_TANK', row.date)
+                              patchRow(i, auto != null ? { source: s, pricePerL: String(auto) } : { source: s })
+                            } else {
+                              patchRow(i, { source: s, pricePerL: '' })
+                            }
+                          }}
                           onKeyDown={onKeyDown(i, true)}
                           style={{ ...cellInput, cursor: (locked || row.reversed) ? 'default' : 'pointer', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
                         >

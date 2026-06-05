@@ -4,7 +4,7 @@ import { useList, useUpdate, useDelete, useInsert } from '../../hooks/useTable'
 import { useRealtimeTable } from '../../hooks/useRealtime'
 import { can } from '../../lib/permissions'
 import type { Vehicle, Employee, User, EditApprovalRequest, VehicleChangeField } from '../../types'
-import { Icon, StatusBadge, Field } from '../../components/ui'
+import { Icon, StatusBadge, Field, SearchInput } from '../../components/ui'
 
 const FIELD_LABELS: Record<string, string> = {
   plate: 'ทะเบียน', brand: 'ยี่ห้อ', year: 'ปี', type: 'ประเภท', groupKind: 'กลุ่ม',
@@ -96,7 +96,7 @@ function docWarn(v: Vehicle): { text: string; color: string } | null {
 
 const VEHICLE_TYPES = ['4ล้อ', '6ล้อ', '10ล้อ', '18ล้อ', '22ล้อ', 'ตู้คอนเทนเนอร์', 'พ่วงข้าง']
 
-type VehicleGroup = 'INTERNAL' | 'TRANSPORT'
+type VehicleGroup = 'INTERNAL' | 'TRANSPORT' | 'EQUIPMENT'
 
 interface VehicleEditForm {
   plate: string
@@ -193,8 +193,8 @@ function VehicleEditModal({
       updateVehicle.mutate(
         { id: vehicle.id, patch },
         {
-          onSuccess: () => onSuccess('✅ บันทึกข้อมูลเรียบร้อย'),
-          onError: (err) => { onError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'); setSaving(false) },
+          onSuccess: () => { onSuccess('✅ บันทึกข้อมูลเรียบร้อย'); setSaving(false) },
+          onError:   (err) => { onError(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'); setSaving(false) },
         },
       )
       return
@@ -318,8 +318,12 @@ function VehicleEditModal({
               <span style={{ fontWeight: 600, fontSize: 14 }}>กลุ่มรถ (ควบคุมการจ่ายน้ำมัน)</span>
             </div>
             <div style={{ display: 'flex', gap: 10 }}>
-              {(['INTERNAL', 'TRANSPORT'] as VehicleGroup[]).map(g => {
+              {(['TRANSPORT', 'INTERNAL', 'EQUIPMENT'] as VehicleGroup[]).map(g => {
                 const active = form.groupKind === g
+                const label =
+                  g === 'TRANSPORT' ? '🚛 ขนส่ง' :
+                  g === 'INTERNAL'  ? '🏭 โรงงาน' :
+                  '⚙️ เครื่องจักร'
                 return (
                   <button
                     key={g}
@@ -334,7 +338,7 @@ function VehicleEditModal({
                       color: active ? '#1D4ED8' : 'var(--text-2)',
                     }}
                   >
-                    {g === 'INTERNAL' ? '🏭 โรงงาน (INTERNAL)' : '🚛 ขนส่ง (TRANSPORT)'}
+                    {label}
                   </button>
                 )
               })}
@@ -342,7 +346,9 @@ function VehicleEditModal({
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
               {form.groupKind === 'INTERNAL'
                 ? 'น้ำมันถูกตัดสต็อคทันที — ไม่ต้องผูกรอบงาน'
-                : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
+                : form.groupKind === 'EQUIPMENT'
+                  ? 'อุปกรณ์/เครื่องจักร — ไม่อยู่ในระบบยาง · บันทึกค่าใช้จ่ายได้ปกติ'
+                  : 'น้ำมันต้องผูกกับรอบงาน — ถ้าไม่พบรอบจะบันทึกเป็น "น้ำมันลอย"'}
             </div>
           </div>
 
@@ -611,15 +617,7 @@ export function VehiclesPage({ setActive, setSubject, user }: VehiclesPageProps)
             display: 'flex', gap: 24, alignItems: 'center', flexWrap: 'wrap',
           }}
         >
-          <div style={{ position: 'relative', flex: 1, minWidth: 240 }}>
-            <Icon name="search" size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-faint)' }} />
-            <input
-              value={q}
-              onChange={e => setQ(e.target.value)}
-              placeholder="ค้นหาทะเบียน / ยี่ห้อ / ประเภท"
-              style={{ width: '100%', height: 38, padding: '0 12px 0 36px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13 }}
-            />
-          </div>
+          <SearchInput value={q} onChange={setQ} placeholder="ค้นหาทะเบียน / ยี่ห้อ / ประเภท" />
           <FilterCheckGroup
             label="สถานะ"
             options={[
