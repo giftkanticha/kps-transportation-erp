@@ -176,6 +176,9 @@ export function DispatchVehicleMonthlyReport() {
   const numFmt = (v: number | null | undefined) => (v != null && v !== 0 ? db.fmt(v) : '')
   const priceFmt = (v: number | null | undefined) =>
     v != null && v !== 0 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''
+  // Weight: show the actual value (no rounding) — the unit is implied by the number.
+  const weightFmt = (v: number | null | undefined) =>
+    v != null && v !== 0 ? v.toLocaleString('en-US', { maximumFractionDigits: 3 }) : ''
 
   return (
     <div>
@@ -337,8 +340,8 @@ export function DispatchVehicleMonthlyReport() {
                         )}
                       </td>
                       <td>{r.cargo}</td>
-                      <td className="num">{numFmt(r.weight)}</td>
-                      <td className="num">{numFmt(r.deliveredWeight)}</td>
+                      <td className="num">{weightFmt(r.weight)}</td>
+                      <td className="num">{weightFmt(r.deliveredWeight)}</td>
                       <td className="num">{priceFmt(r.price)}</td>
                       <td className="num">{db.fmt(r.amount)}</td>
                       <td className="num">{numFmt(r.perDiem)}</td>
