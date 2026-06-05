@@ -401,7 +401,7 @@ function PLTable({
   const isProfit = totals.profit >= 0
   return (
     <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-      <table className="tbl">
+      <table className="tbl" style={{ fontSize: 14 }}>
         <thead>
           <tr>
             <th>ทะเบียนรถ</th>
@@ -411,6 +411,7 @@ function PLTable({
             <th className="num right" style={{ whiteSpace: 'nowrap' }}>เบี้ยเลี้ยง</th>
             <th className="num right" style={{ whiteSpace: 'nowrap' }}>เงินเดือนคนขับ</th>
             <th className="num right" style={{ whiteSpace: 'nowrap' }}>ค่าใช้จ่าย</th>
+            <th className="num right" style={{ whiteSpace: 'nowrap', color: '#6D28D9' }}>สุทธิก่อนหักดอกเบี้ย</th>
             <th className="num right" style={{ whiteSpace: 'nowrap', color: '#B45309' }}>ดอกเบี้ย</th>
             <th className="num right" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>กำไรสุทธิ</th>
           </tr>
@@ -418,14 +419,15 @@ function PLTable({
         <tbody>
           {rows.map(r => {
             const profitColor = r.profit >= 0 ? '#10B981' : '#EF4444'
+            const beforeInterest = r.profit + r.interest
             const hasActivity = r.rev > 0 || r.totalCost > 0
             return (
               <tr key={r.v.id} style={{ opacity: hasActivity ? 1 : 0.5 }}>
                 <td>
-                  <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 13 }}>
+                  <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 14 }}>
                     {r.v.plate}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                     {r.v.type} · {r.v.brand}
                   </div>
                 </td>
@@ -435,6 +437,9 @@ function PLTable({
                 <td className="num right mono">{fmt2(r.allowance)}</td>
                 <td className="num right mono">{fmt2(r.salary)}</td>
                 <td className="num right mono">{fmt2(r.expense)}</td>
+                <td className="num right mono" style={{ fontWeight: 600, color: beforeInterest >= 0 ? '#6D28D9' : '#EF4444' }}>
+                  {fmt2(beforeInterest)}
+                </td>
                 <td className="num right mono" style={{ color: '#B45309' }}>
                   {viewMode === 'monthly' ? (
                     <InterestCell
@@ -462,6 +467,9 @@ function PLTable({
             <td className="num right mono">{fmt2(totals.allowance)}</td>
             <td className="num right mono">{fmt2(totals.salary)}</td>
             <td className="num right mono">{fmt2(totals.expense)}</td>
+            <td className="num right mono" style={{ color: (totals.profit + totals.interest) >= 0 ? '#6D28D9' : '#EF4444' }}>
+              {fmt2(totals.profit + totals.interest)}
+            </td>
             <td className="num right mono" style={{ color: '#B45309' }}>{fmt2(totals.interest)}</td>
             <td className="num right mono" style={{ color: isProfit ? '#10B981' : '#EF4444' }}>
               {fmt2(totals.profit)}
