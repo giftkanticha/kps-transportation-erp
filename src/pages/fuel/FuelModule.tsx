@@ -4,6 +4,7 @@ import { useList, useInsert } from '../../hooks/useTable'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import { VehiclePickerSidebar } from '../../components/ui/VehiclePickerSidebar'
+import { FontScaleControl } from '../../components/ui/FontScaleControl'
 import { usePrint } from '../../hooks/usePrint'
 import { useAuth } from '../../context/AuthContext'
 import type { CSSProperties } from 'react'
@@ -451,6 +452,7 @@ function FuelReportV2() {
               <button style={tabBtn(viewMode === 'yearly')} onClick={() => setViewMode('yearly')}>ภาพรวมรายปี</button>
             </>,
           )}
+          <FontScaleControl />
           <button className="btn primary" onClick={() => print('landscape')} style={{ height: 36 }}>
             <Icon name="download" size={15} /> พิมพ์
           </button>

@@ -4,7 +4,7 @@ import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
 import type { FuelStock, FuelTransaction, Vehicle, Partner, ExpenseHeader, ExpenseLine } from '../../types'
-import { Icon, Field, PrintButton } from '../../components/ui'
+import { Icon, Field, PrintButton, FontScaleControl } from '../../components/ui'
 
 const FUEL_PARTNER_TYPE = 'ซัพพลายเออร์น้ำมัน'
 const PAGE_SIZE = 20
@@ -512,6 +512,7 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{filtered.length} รายการ</div>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <FontScaleControl />
             <PrintButton orientation="landscape" label="พิมพ์" className="btn sm no-print" />
             <button className="btn ghost icon no-print" onClick={onClose}><Icon name="close" size={16} /></button>
           </div>

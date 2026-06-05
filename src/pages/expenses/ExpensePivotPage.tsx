@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
-import { Icon, Field, VehiclePickerSidebar } from '../../components/ui'
+import { Icon, Field, VehiclePickerSidebar, FontScaleControl } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
 import type { ExpenseHeader, Partner, Vehicle } from '../../types'
 
@@ -100,7 +100,8 @@ export function ExpensePivotPage() {
             ตาราง Pivot รวมยอดค่าใช้จ่ายแยกตามทะเบียนรถและคู่ค้า — รวม {filteredHeaders.length} รายการ
           </div>
         </div>
-        <div className="actions">
+        <div className="actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <FontScaleControl />
           <button className="btn primary" onClick={handlePrint}>
             <Icon name="download" size={15} /> พิมพ์รายงาน (PDF)
           </button>

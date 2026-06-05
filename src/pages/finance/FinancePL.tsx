@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import { Icon, SearchInput } from '../../components/ui'
+import { Icon, SearchInput, FontScaleControl } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
 import type { Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance, Expense, ExpenseHeader, Employee } from '../../types'
 
@@ -401,7 +401,7 @@ function PLTable({
   const isProfit = totals.profit >= 0
   return (
     <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-      <table className="tbl" style={{ fontSize: 15.5 }}>
+      <table className="tbl">
         <thead>
           <tr>
             <th>ทะเบียนรถ</th>
@@ -424,7 +424,7 @@ function PLTable({
             return (
               <tr key={r.v.id} style={{ opacity: hasActivity ? 1 : 0.5 }}>
                 <td>
-                  <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 15.5 }}>
+                  <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>
                     {r.v.plate}
                   </div>
                 </td>
@@ -710,6 +710,7 @@ export function FinancePL() {
           )}
 
           <div className="row" style={{ gap: 8, marginLeft: 'auto' }}>
+            <FontScaleControl />
             <button className="btn" onClick={() => print('landscape')}>
               <Icon name="download" size={14} />
               {viewMode === 'yearly'

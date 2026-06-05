@@ -1,6 +1,10 @@
 /* KPS Transportation ERP — Global styles (matches repo design system: #0066CC primary) */
 
 :root {
+  /* Report font scale (A−/A+ control) — multiplies report table font sizes
+     on screen and in print. 1 = default. See .print-area .tbl rules. */
+  --report-font-scale: 1;
+
   /* Brand palette from repo */
   --primary: #0066CC;
   --primary-50: #E6F0FF;
@@ -459,6 +463,18 @@ input:focus, select:focus, textarea:focus {
 .tbl .right { text-align: right; }
 .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: #fff; }
 
+/* Report tables (printable pages) scale with the A−/A+ control on screen.
+   Base bumped to 14px for readability; multiplied by --report-font-scale.
+   Covers print-area tables plus the compact report variants so the on-screen
+   size matches the printout (WYSIWYG). */
+.print-area .tbl,
+.print-area .tbl thead th,
+.print-area .tbl tbody td,
+.tbl.print-compact, .tbl.print-compact thead th, .tbl.print-compact tbody td,
+.tbl.fuel-report-compact, .tbl.fuel-report-compact thead th, .tbl.fuel-report-compact tbody td {
+  font-size: calc(14px * var(--report-font-scale));
+}
+
 /* ---------- Tabs ---------- */
 .tabs {
   display: flex; gap: 2px;
@@ -847,7 +863,7 @@ input:focus, select:focus, textarea:focus {
   .print-area { box-shadow: none !important; border: none !important; }
   .print-area .card { box-shadow: none !important; border: 1px solid #ccc !important; page-break-inside: avoid; }
   .print-area .tbl thead th { background: #f3f4f6 !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .print-area .tbl td, .print-area .tbl th { font-size: 10.5px !important; padding: 4px 6px !important; }
+  .print-area .tbl td, .print-area .tbl th { font-size: calc(10.5px * var(--report-font-scale)) !important; padding: 4px 6px !important; }
   .print-only { display: block !important; }
   .print-row-hide { display: none !important; }
   .pl-sidebar { display: none !important; }

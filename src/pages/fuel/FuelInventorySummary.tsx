@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
 import type { FuelRecord, FuelStock } from '../../types'
-import { Field, PrintButton } from '../../components/ui'
+import { Field, PrintButton, FontScaleControl } from '../../components/ui'
 
 const THAI_MONTHS_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -68,7 +68,8 @@ export function FuelInventorySummary() {
           <h1 className="page-title">สรุปคลังน้ำมันรวม</h1>
           <div className="page-sub">รายงานรายวันต่อเดือน • พิมพ์ได้</div>
         </div>
-        <div className="actions">
+        <div className="actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <FontScaleControl />
           <PrintButton orientation="portrait" label="พิมพ์รายงาน" />
         </div>
       </div>

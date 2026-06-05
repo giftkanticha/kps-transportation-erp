@@ -59,11 +59,11 @@ body.print-landscape { page: kps-land; }
 
   /* ── Compact print table (.print-compact) ───────────────────── */
   .print-compact th,
-  .print-compact td { font-size: 7.5pt !important; padding: 2px 4px !important; }
+  .print-compact td { font-size: calc(7.5pt * var(--report-font-scale)) !important; padding: 2px 4px !important; }
 
   /* ── Standard print table ───────────────────────────────────── */
   .print-area .tbl th,
-  .print-area .tbl td { font-size: 8pt !important; padding: 2px 5px !important; }
+  .print-area .tbl td { font-size: calc(8pt * var(--report-font-scale)) !important; padding: 2px 5px !important; }
   .print-area .card { border: 1px solid #ccc !important; }
   .print-area .card .head h3 { font-size: 10pt !important; margin: 0 0 4px !important; }
   .print-area .card .head { padding: 8px 12px !important; }
@@ -73,7 +73,7 @@ body.print-landscape { page: kps-land; }
   .print-area .pivot-tbl { table-layout: fixed; width: 100% !important; }
   .print-area .pivot-tbl th,
   .print-area .pivot-tbl td {
-    font-size: 8.5pt !important;
+    font-size: calc(8.5pt * var(--report-font-scale)) !important;
     padding: 2px 4px !important;
     min-width: 0 !important;
     white-space: normal !important;
@@ -212,7 +212,7 @@ body.print-landscape { page: kps-land; }
   .tire-print-tbl {
     width: 100%;
     border-collapse: collapse;
-    font-size: 8.5pt;
+    font-size: calc(8.5pt * var(--report-font-scale));
   }
   .tire-print-tbl th,
   .tire-print-tbl td {
@@ -231,10 +231,10 @@ body.print-landscape { page: kps-land; }
      บีบ ​font/padding ให้พอดีหน้า แต่ขนาดใหญ่พอที่จะอ่านง่าย
      (เดิม 6.5pt ตั้งใจให้พอดี 31 แถว/หน้า แต่บางเกินไปสำหรับการอ่าน
      → bump เป็น 8.5pt; ตารางจะ paginate หลายหน้าตามจำเป็น) */
-  .fuel-report-compact { font-size: 8.5pt !important; }
+  .fuel-report-compact { font-size: calc(8.5pt * var(--report-font-scale)) !important; }
   .fuel-report-compact th,
   .fuel-report-compact td {
-    font-size: 8.5pt !important;
+    font-size: calc(8.5pt * var(--report-font-scale)) !important;
     padding: 2px 5px !important;
     line-height: 1.25 !important;
     color: #000 !important;

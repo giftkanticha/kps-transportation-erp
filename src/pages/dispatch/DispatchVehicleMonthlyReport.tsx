@@ -5,7 +5,7 @@ import { useDispatches } from '../../hooks/useDispatches'
 import { useAccountingPeriods, findPeriod } from '../../hooks/useAccountingPeriods'
 import { usePrint } from '../../hooks/usePrint'
 import type { Vehicle, Employee, Dispatch, FuelRound, AccountingPeriodSnapshot } from '../../types'
-import { Icon, Field } from '../../components/ui'
+import { Icon, Field, FontScaleControl } from '../../components/ui'
 
 const THAI_MONTHS = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -186,7 +186,8 @@ export function DispatchVehicleMonthlyReport() {
             เลือกทะเบียน + เดือน — นับเฉพาะรอบที่ <strong>วันเปิดงาน</strong> อยู่ในเดือนนั้น (เที่ยวคร่อมเดือนยังคงอยู่ในเดือนที่เปิด)
           </div>
         </div>
-        <div className="actions">
+        <div className="actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <FontScaleControl />
           <button className="btn primary" onClick={() => print('landscape')} disabled={!vehicleId}>
             <Icon name="download" size={15} /> พิมพ์ / PDF
           </button>

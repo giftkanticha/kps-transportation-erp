@@ -5,7 +5,7 @@ import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
 import { usePrint } from '../../hooks/usePrint'
 import type { Vehicle, Employee, Dispatch, FuelRound, EditApprovalRequest, KPSRole } from '../../types'
-import { Icon, Field, SegmentedFilter } from '../../components/ui'
+import { Icon, Field, SegmentedFilter, FontScaleControl } from '../../components/ui'
 
 interface Props {
   setActive: (id: string) => void
@@ -200,6 +200,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
               ]}
             />
           )}
+          <FontScaleControl />
           <button className="btn" onClick={() => print('landscape')}>
             <Icon name="download" size={15} /> พิมพ์ / PDF
           </button>

@@ -5,6 +5,7 @@ import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import { SearchInput } from '../../components/ui/SearchInput'
 import { Info } from '../../components/ui/Info'
+import { FontScaleControl } from '../../components/ui/FontScaleControl'
 import { usePrint } from '../../hooks/usePrint'
 import type { Tire, TireEvent, TireScrapSale, Vehicle } from '../../types'
 
@@ -1178,7 +1179,8 @@ function TiresLayout() {
               </span>
             </div>
           )}
-          <div style={{ marginLeft: 'auto' }}>
+          <div className="row" style={{ marginLeft: 'auto', gap: 8, alignItems: 'center' }}>
+            <FontScaleControl />
             <button className="btn primary" onClick={() => print('landscape')} disabled={!v}>
               <Icon name="download" size={14} /> พิมพ์ผังยาง (A4 แนวนอน)
             </button>

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
-import { Icon, Field, Info, SearchInput } from '../../components/ui'
+import { Icon, Field, Info, SearchInput, FontScaleControl } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
@@ -1838,13 +1838,12 @@ function PivotTab() {
           </span>
         </div>
 
-        <button
-          className="btn"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => print('landscape')}
-        >
-          <Icon name="download" size={14} /> พิมพ์รายงาน
-        </button>
+        <div className="row" style={{ gap: 8, marginLeft: 'auto', alignItems: 'center' }}>
+          <FontScaleControl />
+          <button className="btn" onClick={() => print('landscape')}>
+            <Icon name="download" size={14} /> พิมพ์รายงาน
+          </button>
+        </div>
       </div>
 
       {/* ── Print header (matches P&L รายคัน) ── */}
