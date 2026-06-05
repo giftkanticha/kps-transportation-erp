@@ -401,7 +401,7 @@ function PLTable({
   const isProfit = totals.profit >= 0
   return (
     <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-      <table className="tbl" style={{ fontSize: 14 }}>
+      <table className="tbl" style={{ fontSize: 15.5 }}>
         <thead>
           <tr>
             <th>ทะเบียนรถ</th>
@@ -424,11 +424,8 @@ function PLTable({
             return (
               <tr key={r.v.id} style={{ opacity: hasActivity ? 1 : 0.5 }}>
                 <td>
-                  <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 14 }}>
+                  <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 15.5 }}>
                     {r.v.plate}
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    {r.v.type} · {r.v.brand}
                   </div>
                 </td>
                 <td className="num right mono" style={{ fontWeight: 600 }}>{fmt2(r.rev)}</td>
