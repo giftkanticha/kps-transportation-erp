@@ -4,12 +4,13 @@ import type {
   Dispatch,
   DispatchLeg,
   FuelRound,
+  Route,
 } from '../types'
 import { SEED } from '../data/seed'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const KEY = 'kps_erp_v5'
+const KEY = 'kps_erp_v6'
 const SESSION_KEY = KEY + '_session'
 
 export const DSP_KMPL_THRESHOLD = 2.5
@@ -170,6 +171,24 @@ export const db = {
     if (leg.priceMode === 'per_kg') return w * 1000 * p
     if (leg.priceMode === 'per_ton') return w * p
     return p // lump
+  },
+
+  // Find a route master row whose origin+destination match the given pair
+  // (case-insensitive, trimmed). Used to auto-group historical legs that
+  // pre-date the routeId FK so reports can still aggregate them under a route.
+  findRouteByOriginDestination(origin: string, destination: string, routes: Route[]): Route | null {
+    const o = (origin ?? '').trim().toLowerCase()
+    const d = (destination ?? '').trim().toLowerCase()
+    if (!o || !d) return null
+    return routes.find(r =>
+      r.origin.trim().toLowerCase() === o &&
+      r.destination.trim().toLowerCase() === d,
+    ) ?? null
+  },
+
+  resolveRouteId(leg: DispatchLeg, routes: Route[]): string | null {
+    if (leg.routeId) return leg.routeId
+    return db.findRouteByOriginDestination(leg.origin, leg.destination, routes)?.id ?? null
   },
 
   // ── Round helpers ─────────────────────────────────────────────────────────

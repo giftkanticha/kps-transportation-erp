@@ -102,6 +102,23 @@ export interface DispatchLeg {
   closed?: boolean
   dispatchId?: string
   sortOrder?: number
+  routeId?: string | null
+}
+
+export interface Route {
+  id: string
+  code: string
+  name: string
+  origin: string
+  destination: string
+  distanceKm?: number | null
+  defaultPriceMode: 'per_ton' | 'per_kg' | 'lump'
+  defaultPrice: number
+  defaultPerDiem: number
+  customerId?: string | null
+  cargoType?: string
+  active: boolean
+  notes?: string
 }
 
 export interface OtherExpense {
@@ -463,6 +480,7 @@ export interface AppState {
   vehicles: Vehicle[]
   customers: Customer[]
   subcontractors: Subcontractor[]
+  routes: Route[]
   dispatch: Dispatch[]
   maintenance: Maintenance[]
   tires: Tire[]

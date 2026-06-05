@@ -9,7 +9,7 @@ const toSnake = (s: string) => s.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())
 // string "050003000". Coerce these known numeric fields back to numbers on read.
 const NUMERIC_FIELDS = new Set([
   'accumulatedKm', 'amount', 'balance', 'closingFuelLiters', 'closingFuelPrice',
-  'cost', 'deliveredWeight', 'distance',
+  'cost', 'defaultPerDiem', 'defaultPrice', 'deliveredWeight', 'distance', 'distanceKm',
   'endOdometer', 'finalWeight', 'fuel', 'installedOdometer', 'kmPerL', 'liters',
   'monthly', 'nextMileage', 'nextServiceKm', 'odometer', 'openInvoice', 'perDiem',
   'price', 'pricePerL', 'qty', 'qtyIn', 'qtyOut', 'rating', 'reorderAt', 'revenue',

@@ -3,7 +3,7 @@ import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole } from '../../types'
+import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole, Route } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -45,11 +45,14 @@ interface LegFormState {
   price: string
   legType: 'outbound' | 'backhaul' | 'return'
   notes: string
+  routeId: string
+  perDiem: string
 }
 
 const EMPTY_LEG: LegFormState = {
   origin: '', destination: '', customerId: '', cargo: '', cargoType: '',
   priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '',
+  routeId: '', perDiem: '',
 }
 
 function legTypeLabel(t?: string): string {
@@ -93,10 +96,12 @@ function priceUnitLabel(mode: LegFormState['priceMode']): string {
 
 function LegModal({
   initial,
+  routes,
   onSave,
   onCancel,
 }: {
   initial: LegFormState
+  routes: Route[]
   onSave: (f: LegFormState) => void
   onCancel: () => void
 }) {
@@ -104,6 +109,29 @@ function LegModal({
   const set = <K extends keyof LegFormState>(k: K, v: LegFormState[K]) => setF(s => ({ ...s, [k]: v }))
   const isReturn = f.legType === 'return'
   const isLump = f.priceMode === 'lump'
+
+  // Picking a route autofills origin/destination/price/perDiem from the master.
+  // Always overwrites — the user can still hand-edit any field afterwards, and
+  // the leg keeps a snapshot of whatever ends up in the form when saved.
+  const onPickRoute = (routeId: string) => {
+    if (!routeId) {
+      setF(s => ({ ...s, routeId: '' }))
+      return
+    }
+    const r = routes.find(x => x.id === routeId)
+    if (!r) return
+    setF(s => ({
+      ...s,
+      routeId,
+      origin: r.origin,
+      destination: r.destination,
+      priceMode: r.defaultPriceMode,
+      price: r.defaultPrice ? String(r.defaultPrice) : s.price,
+      perDiem: r.defaultPerDiem ? String(r.defaultPerDiem) : s.perDiem,
+      cargoType: s.cargoType || (r.cargoType ?? ''),
+      customerId: s.customerId || (r.customerId ?? ''),
+    }))
+  }
 
   // Switching priceMode auto-converts the weight value so the displayed number
   // represents the same load in the new unit.
@@ -174,6 +202,23 @@ function LegModal({
               <option value="return">Return (เที่ยวกลับ เปล่า)</option>
             </select>
           </Field>
+          {routes.length > 0 && (
+            <Field label="เลือกเส้นทาง (ไม่บังคับ — เติมต้นทาง/ปลายทาง/ราคา/เบี้ยเลี้ยงให้อัตโนมัติ)">
+              <select value={f.routeId} onChange={e => onPickRoute(e.target.value)}>
+                <option value="">— ไม่เลือก (กรอกเอง) —</option>
+                {routes.filter(r => r.active).map(r => (
+                  <option key={r.id} value={r.id}>
+                    {r.code} · {r.name || `${r.origin} → ${r.destination}`}
+                  </option>
+                ))}
+              </select>
+              {f.routeId && (
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  ✓ เติม default จากเส้นทางแล้ว — แก้ทับได้ตามจริง (ค่าจะถูกบันทึกเป็น snapshot)
+                </div>
+              )}
+            </Field>
+          )}
           <div className="grid-2" style={{ gap: 12 }}>
             <Field label="ต้นทาง *">
               <input value={f.origin} onChange={e => set('origin', e.target.value)} placeholder="เช่น โรงงาน KPS" />
@@ -245,6 +290,14 @@ function LegModal({
                   />
                 </Field>
               </div>
+
+              <Field label="เบี้ยเลี้ยงคนขับ — บาท (ไม่บังคับ; ปรับได้อีกตอนปิดงาน)">
+                <input
+                  type="number" step="0.01" value={f.perDiem}
+                  onChange={e => set('perDiem', e.target.value)}
+                  placeholder="0"
+                />
+              </Field>
 
               {/* Live calc preview */}
               <div
@@ -525,6 +578,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
+  const { data: routes = [] } = useList<Route>('routes')
   const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
   const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const { data: allFuelRecs = [] } = useList<FuelRecord>('fuel_records')
@@ -587,6 +641,9 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       amount,
       legType: form.legType,
       notes: form.notes.trim() || null,
+      routeId: form.routeId || null,
+      // perDiem entered on the open form; can still be overridden on the close screen
+      ...(form.perDiem !== '' ? { perDiem: Number(form.perDiem) || 0 } : {}),
     } as Partial<DispatchLeg>
     try {
       let nextLegs: DispatchLeg[]
@@ -596,7 +653,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
           dispatchId: round.id,
           sortOrder: legs.length,
           deliveredWeight: null,
-          perDiem: 0,
+          perDiem: fields.perDiem ?? 0,
           closed: false,
         })
         nextLegs = [...legs, created]
@@ -810,6 +867,8 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                                   price: String(l.price || ''),
                                   legType: l.legType ?? 'outbound',
                                   notes: l.notes || '',
+                                  routeId: l.routeId ?? '',
+                                  perDiem: l.perDiem != null ? String(l.perDiem) : '',
                                 },
                               })
                             }}
@@ -846,6 +905,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       {editingLeg && (
         <LegModal
           initial={editingLeg.data}
+          routes={routes}
           onSave={saveLeg}
           onCancel={() => setEditingLeg(null)}
         />

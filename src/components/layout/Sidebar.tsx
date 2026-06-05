@@ -61,6 +61,7 @@ const MENU: MenuItem[] = [
       { id: 'dispatch.open', label: 'เปิดงานขนส่ง', icon: 'edit' },
       { id: 'dispatch.close', label: 'ปิดงานขนส่ง', icon: 'check' },
       { id: 'dispatch.report', label: 'รายงานสรุป', icon: 'chart' },
+      { id: 'dispatch.routes', label: 'รายงานเส้นทาง', icon: 'pin' },
       { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน', icon: 'history' },
     ],
   },
@@ -94,6 +95,7 @@ const MENU: MenuItem[] = [
     sub: [
       { id: 'settings.users', label: 'จัดการผู้ใช้งาน', icon: 'users' },
       { id: 'settings.company', label: 'ข้อมูลบริษัท', icon: 'building' },
+      { id: 'settings.routes', label: 'ตั้งค่าเส้นทาง', icon: 'pin' },
     ],
   },
   {

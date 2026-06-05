@@ -4,7 +4,7 @@ import { useList, useUpdate, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
 import { usePrint } from '../../hooks/usePrint'
-import type { Vehicle, Employee, Dispatch, FuelRound, EditApprovalRequest, KPSRole } from '../../types'
+import type { Vehicle, Employee, Dispatch, FuelRound, EditApprovalRequest, KPSRole, Route } from '../../types'
 import { Icon, Field, SegmentedFilter } from '../../components/ui'
 
 interface Props {
@@ -41,6 +41,8 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   const [to, setTo] = useState(today.toISOString().slice(0, 10))
   const [vehicleId, setVehicleId] = useState('')
   const [driverId, setDriverId] = useState('')
+  const [routeId, setRouteId] = useState('')
+  const [destination, setDestination] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
   const [printScope, setPrintScope] = useState<'both' | 'summary' | 'form'>('both')
   const [reopenTarget, setReopenTarget] = useState<Dispatch | null>(null)
@@ -53,6 +55,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: dispatch = [] } = useDispatches()
   const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: routes = [] } = useList<Route>('routes')
   const drivers = employees.filter(e => e.position === 'คนขับ')
   const { print } = usePrint()
 
@@ -71,6 +74,15 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
         if (driverId && d.driverId !== driverId) return false
         if (status === 'draft' && d.roundStatus !== 'draft') return false
         if (status === 'closed' && d.roundStatus !== 'closed') return false
+        // Route/destination filters apply to ANY leg in the round.
+        if (routeId) {
+          const matches = (d.legs ?? []).some(l => db.resolveRouteId(l, routes) === routeId)
+          if (!matches) return false
+        }
+        if (destination) {
+          const matches = (d.legs ?? []).some(l => l.destination === destination)
+          if (!matches) return false
+        }
         return true
       })
 
@@ -105,7 +117,19 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
         status: statusLabel,
       }
     }).sort((a, b) => (b.round.depart || b.round.date || '').localeCompare(a.round.depart || a.round.date || ''))
-  }, [from, to, vehicleId, driverId, status, vehicles, employees, dispatch, fuelRounds])
+  }, [from, to, vehicleId, driverId, routeId, destination, status, vehicles, employees, dispatch, fuelRounds, routes])
+
+  // Unique destinations across visible rounds — used to populate the filter
+  // dropdown so the user only sees options that actually exist in data.
+  const destinationOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const d of dispatch) {
+      for (const l of (d.legs ?? [])) {
+        if (l.destination) set.add(l.destination)
+      }
+    }
+    return [...set].sort()
+  }, [dispatch])
 
   // Aggregates
   const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0)
@@ -225,6 +249,24 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
             <select value={driverId} onChange={e => setDriverId(e.target.value)}>
               <option value="">ทั้งหมด</option>
               {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div className="grid-4" style={{ gap: 12, marginTop: 12 }}>
+          <Field label="เส้นทาง">
+            <select value={routeId} onChange={e => setRouteId(e.target.value)}>
+              <option value="">ทุกเส้นทาง</option>
+              {routes.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.code} · {r.name || `${r.origin} → ${r.destination}`}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="ปลายทาง">
+            <select value={destination} onChange={e => setDestination(e.target.value)}>
+              <option value="">ทุกปลายทาง</option>
+              {destinationOptions.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           </Field>
         </div>

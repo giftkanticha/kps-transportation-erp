@@ -3,7 +3,7 @@ import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
-import type { Vehicle, Employee, Dispatch } from '../../types'
+import type { Vehicle, Employee, Dispatch, Route } from '../../types'
 import { Icon, SearchInput, SegmentedFilter } from '../../components/ui'
 
 interface Props {
@@ -26,10 +26,12 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
   const { isManager } = useAuth()
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
+  const [routeId, setRouteId] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
+  const { data: routes = [] } = useList<Route>('routes')
   const { data: dispatch = [] } = useDispatches()
   const rounds = useMemo(() => {
     const all = dispatch
@@ -46,6 +48,10 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
     return rounds.filter(d => {
       if (status === 'draft' && d.roundStatus !== 'draft') return false
       if (status === 'closed' && d.roundStatus !== 'closed' && d.status !== 'completed') return false
+      if (routeId) {
+        const matches = (d.legs ?? []).some(l => db.resolveRouteId(l, routes) === routeId)
+        if (!matches) return false
+      }
       if (!q) return true
       const vehicle = vehicles.find(v => v.id === d.vehicleId)
       const driver = employees.find(e => e.id === d.driverId)
@@ -56,7 +62,7 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
       ].filter(Boolean).join(' ').toLowerCase()
       return txt.includes(q)
     })
-  }, [rounds, query, status, vehicles, employees])
+  }, [rounds, query, status, routeId, vehicles, employees, routes])
 
   const toggle = (id: string) => setExpanded(s => {
     const n = new Set(s)
@@ -75,12 +81,23 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
 
       {/* Filters */}
       <div className="card pad" style={{ marginBottom: 14 }}>
-        <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+        <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <SearchInput
             value={query}
             onChange={setQuery}
             placeholder="ค้นหา Job No, ทะเบียนรถ, คนขับ, สินค้า, เส้นทาง..."
           />
+          <label className="row" style={{ gap: 8, fontSize: 13 }}>
+            <span className="muted">เส้นทาง:</span>
+            <select value={routeId} onChange={e => setRouteId(e.target.value)} style={{ minWidth: 220 }}>
+              <option value="">ทุกเส้นทาง</option>
+              {routes.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.code} · {r.name || `${r.origin} → ${r.destination}`}
+                </option>
+              ))}
+            </select>
+          </label>
           <SegmentedFilter
             value={status}
             onChange={setStatus}

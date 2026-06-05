@@ -23,6 +23,7 @@ import { DispatchRoundDetail } from './pages/dispatch/DispatchRoundDetail'
 import { DispatchRoundClose } from './pages/dispatch/DispatchRoundClose'
 import { DispatchSummaryReport } from './pages/dispatch/DispatchSummaryReport'
 import { DispatchHistory } from './pages/dispatch/DispatchHistory'
+import { DispatchRouteReport } from './pages/dispatch/DispatchRouteReport'
 import { SubcontractorModule } from './pages/subcontractors/SubcontractorModule'
 import { ExpensesModule } from './pages/expenses/ExpensesModule'
 import { FinancePL } from './pages/finance/FinancePL'
@@ -34,6 +35,7 @@ import { CustomersPage } from './pages/customers/CustomersPage'
 import { PartnersPage } from './pages/customers/PartnersPage'
 import { SettingsUsers } from './pages/settings/SettingsUsers'
 import { SettingsCompany } from './pages/settings/SettingsCompany'
+import { SettingsRoutes } from './pages/settings/SettingsRoutes'
 
 const crumbMap: Record<string, string> = {
   dashboard: 'Dashboard',
@@ -63,6 +65,7 @@ const crumbMap: Record<string, string> = {
   'dispatch.fuel': 'งานขนส่ง • รายงานประจำวัน',
   'dispatch.monthly': 'งานขนส่ง • รายงานประจำเดือน',
   'dispatch.report': 'งานขนส่ง • รายงานสรุป',
+  'dispatch.routes': 'งานขนส่ง • รายงานเส้นทาง',
   'dispatch.history': 'งานขนส่ง • ประวัติงาน',
   subcontractors: 'รถรับจ้างร่วม',
   'subcontractors.close': 'รถรับจ้างร่วม • ปิดงาน',
@@ -80,6 +83,7 @@ const crumbMap: Record<string, string> = {
   finance: 'การเงิน • P&L รายคัน',
   'settings.users': 'ตั้งค่า • ผู้ใช้งาน',
   'settings.company': 'ตั้งค่า • บริษัท',
+  'settings.routes': 'ตั้งค่า • เส้นทาง',
   'admin.users': 'จัดการผู้ใช้งาน',
   'admin.reset': 'รีเซตข้อมูล',
   'admin.reset.history': 'ประวัติการรีเซต',
@@ -90,6 +94,7 @@ export default function App() {
   const [active, setActive] = useState('dashboard')
   const [subject, setSubject] = useState<unknown>(null)
   const [collapsed, setCollapsed] = useState(false)
+  const [routePrefill, setRoutePrefill] = useState<{ origin: string; destination: string } | null>(null)
 
   useEffect(() => {
     if (legacyUser?.role === 'driver') setActive('dispatch')
@@ -179,6 +184,8 @@ export default function App() {
         return <DispatchModule tab="monthly" setActive={setActive} user={legacyUser} />
       case 'dispatch.report':
         return <DispatchSummaryReport setActive={setActive} setSubject={setSubject} />
+      case 'dispatch.routes':
+        return <DispatchRouteReport setActive={setActive} setSubject={setSubject} setRoutePrefill={setRoutePrefill} />
       case 'dispatch.history':
         return <DispatchHistory setActive={setActive} setSubject={setSubject} />
 
@@ -222,6 +229,8 @@ export default function App() {
         return <SettingsUsers />
       case 'settings.company':
         return <SettingsCompany setActive={setActive} />
+      case 'settings.routes':
+        return <SettingsRoutes setActive={setActive} prefill={routePrefill} clearPrefill={() => setRoutePrefill(null)} />
 
       case 'admin.users':
         return isAdmin ? <UserManagementPage /> : <Dashboard user={legacyUser} setActive={setActive} />
