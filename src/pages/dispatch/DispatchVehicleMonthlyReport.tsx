@@ -25,6 +25,7 @@ interface LegRow {
   weight: number | null
   deliveredWeight: number | null
   price: number | null
+  priceMode?: 'per_ton' | 'per_kg' | 'lump'
   amount: number
   perDiem: number | null
   liters: number | null
@@ -127,6 +128,7 @@ export function DispatchVehicleMonthlyReport() {
           weight: l.weight ?? null,
           deliveredWeight: l.deliveredWeight ?? null,
           price: l.price ?? null,
+          priceMode: l.priceMode,
           amount: l.amount || 0,
           perDiem: l.perDiem ?? null,
           liters: i === 0 ? (consumed || null) : null,
@@ -176,9 +178,14 @@ export function DispatchVehicleMonthlyReport() {
   const numFmt = (v: number | null | undefined) => (v != null && v !== 0 ? db.fmt(v) : '')
   const priceFmt = (v: number | null | undefined) =>
     v != null && v !== 0 ? v.toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''
-  // Weight: show the actual value (no rounding) — the unit is implied by the number.
-  const weightFmt = (v: number | null | undefined) =>
-    v != null && v !== 0 ? v.toLocaleString('en-US', { maximumFractionDigits: 3 }) : ''
+  // Weight is stored canonically in ตัน. Display it in the unit actually used to
+  // price the leg (per_kg → กก. = ตัน×1000, otherwise ตัน) so weight × ค่าบรรทุก
+  // matches จำนวนเงิน. No unit label — the magnitude implies tons vs kg.
+  const weightFmt = (v: number | null | undefined, mode?: LegRow['priceMode']) => {
+    if (v == null || v === 0) return ''
+    const val = mode === 'per_kg' ? v * 1000 : v
+    return val.toLocaleString('en-US', { maximumFractionDigits: 3 })
+  }
 
   return (
     <div>
@@ -340,8 +347,8 @@ export function DispatchVehicleMonthlyReport() {
                         )}
                       </td>
                       <td>{r.cargo}</td>
-                      <td className="num">{weightFmt(r.weight)}</td>
-                      <td className="num">{weightFmt(r.deliveredWeight)}</td>
+                      <td className="num">{weightFmt(r.weight, r.priceMode)}</td>
+                      <td className="num">{weightFmt(r.deliveredWeight, r.priceMode)}</td>
                       <td className="num">{priceFmt(r.price)}</td>
                       <td className="num">{db.fmt(r.amount)}</td>
                       <td className="num">{numFmt(r.perDiem)}</td>
