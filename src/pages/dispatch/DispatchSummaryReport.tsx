@@ -38,6 +38,8 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   const [to, setTo] = useState(today.toISOString().slice(0, 10))
   const [vehicleId, setVehicleId] = useState('')
   const [driverId, setDriverId] = useState('')
+  const [origin, setOrigin] = useState('')         // lowercase normalized key
+  const [destination, setDestination] = useState('') // lowercase normalized key
   const [status, setStatus] = useState<StatusFilter>('all')
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -61,6 +63,16 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
         if (driverId && d.driverId !== driverId) return false
         if (status === 'draft' && d.roundStatus !== 'draft') return false
         if (status === 'closed' && d.roundStatus !== 'closed') return false
+        // Origin / destination filters use lowercase-normalized comparison so
+        // stray whitespace or casing doesn't cause matches to silently miss.
+        if (origin) {
+          const hit = (d.legs ?? []).some(l => (l.origin || '').trim().toLowerCase() === origin)
+          if (!hit) return false
+        }
+        if (destination) {
+          const hit = (d.legs ?? []).some(l => (l.destination || '').trim().toLowerCase() === destination)
+          if (!hit) return false
+        }
         return true
       })
 
@@ -95,7 +107,32 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
         status: statusLabel,
       }
     }).sort((a, b) => (b.round.depart || b.round.date || '').localeCompare(a.round.depart || a.round.date || ''))
-  }, [from, to, vehicleId, driverId, status, vehicles, employees, dispatch, fuelRounds])
+  }, [from, to, vehicleId, driverId, origin, destination, status, vehicles, employees, dispatch, fuelRounds])
+
+  // Origin / destination dropdown options derived from all visible dispatches.
+  // Keyed by lowercase to dedupe casing variants; display the most-common
+  // spelling for each key.
+  const placeOptions = useMemo(() => {
+    const build = (pick: 'origin' | 'destination') => {
+      const variants = new Map<string, Map<string, number>>()
+      for (const d of dispatch) {
+        for (const l of (d.legs ?? [])) {
+          const raw = ((pick === 'origin' ? l.origin : l.destination) || '').trim()
+          if (!raw) continue
+          const key = raw.toLowerCase()
+          const inner = variants.get(key) ?? new Map<string, number>()
+          inner.set(raw, (inner.get(raw) ?? 0) + 1)
+          variants.set(key, inner)
+        }
+      }
+      return [...variants.entries()].map(([key, inner]) => {
+        let best = ''; let bestN = -1
+        for (const [name, n] of inner) if (n > bestN) { best = name; bestN = n }
+        return { key, display: best }
+      }).sort((a, b) => a.display.localeCompare(b.display, 'th'))
+    }
+    return { origins: build('origin'), destinations: build('destination') }
+  }, [dispatch])
 
   // Aggregates
   const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0)
@@ -144,6 +181,20 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
             <select value={driverId} onChange={e => setDriverId(e.target.value)}>
               <option value="">ทั้งหมด</option>
               {drivers.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div className="grid-2" style={{ gap: 12, marginTop: 12 }}>
+          <Field label="ต้นทาง">
+            <select value={origin} onChange={e => setOrigin(e.target.value)}>
+              <option value="">ทุกต้นทาง</option>
+              {placeOptions.origins.map(o => <option key={o.key} value={o.key}>{o.display}</option>)}
+            </select>
+          </Field>
+          <Field label="ปลายทาง">
+            <select value={destination} onChange={e => setDestination(e.target.value)}>
+              <option value="">ทุกปลายทาง</option>
+              {placeOptions.destinations.map(o => <option key={o.key} value={o.key}>{o.display}</option>)}
             </select>
           </Field>
         </div>
