@@ -24,6 +24,8 @@ function legSummary(round: Dispatch): { origin: string; destination: string } {
 export function DispatchHistory({ setActive, setSubject }: Props) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<StatusFilter>('all')
+  const [origin, setOrigin] = useState('')
+  const [destination, setDestination] = useState('')
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -36,11 +38,44 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
     return all
   }, [dispatch])
 
+  // Origin / destination dropdown options derived from all rounds; deduped
+  // by lowercase key, displayed using the most-common spelling so
+  // "เชียงใหม่" and "เชียงใหม่ " don't appear as two separate options.
+  const placeOptions = useMemo(() => {
+    const build = (pick: 'origin' | 'destination') => {
+      const variants = new Map<string, Map<string, number>>()
+      for (const d of rounds) {
+        for (const l of (d.legs ?? [])) {
+          const raw = ((pick === 'origin' ? l.origin : l.destination) || '').trim()
+          if (!raw) continue
+          const key = raw.toLowerCase()
+          const inner = variants.get(key) ?? new Map<string, number>()
+          inner.set(raw, (inner.get(raw) ?? 0) + 1)
+          variants.set(key, inner)
+        }
+      }
+      return [...variants.entries()].map(([key, inner]) => {
+        let best = ''; let bestN = -1
+        for (const [name, n] of inner) if (n > bestN) { best = name; bestN = n }
+        return { key, display: best }
+      }).sort((a, b) => a.display.localeCompare(b.display, 'th'))
+    }
+    return { origins: build('origin'), destinations: build('destination') }
+  }, [rounds])
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return rounds.filter(d => {
       if (status === 'draft' && d.roundStatus !== 'draft') return false
       if (status === 'closed' && d.roundStatus !== 'closed' && d.status !== 'completed') return false
+      if (origin) {
+        const hit = (d.legs ?? []).some(l => (l.origin || '').trim().toLowerCase() === origin)
+        if (!hit) return false
+      }
+      if (destination) {
+        const hit = (d.legs ?? []).some(l => (l.destination || '').trim().toLowerCase() === destination)
+        if (!hit) return false
+      }
       if (!q) return true
       const vehicle = vehicles.find(v => v.id === d.vehicleId)
       const driver = employees.find(e => e.id === d.driverId)
@@ -51,7 +86,7 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
       ].filter(Boolean).join(' ').toLowerCase()
       return txt.includes(q)
     })
-  }, [rounds, query, status, vehicles, employees])
+  }, [rounds, query, status, origin, destination, vehicles, employees])
 
   const toggle = (id: string) => setExpanded(s => {
     const n = new Set(s)
@@ -70,8 +105,8 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
 
       {/* Filters */}
       <div className="card pad" style={{ marginBottom: 14 }}>
-        <div className="row" style={{ gap: 12, alignItems: 'center' }}>
-          <div style={{ flex: 1, position: 'relative' }}>
+        <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 220, position: 'relative' }}>
             <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-2)' }}>
               <Icon name="search" size={14} />
             </span>
@@ -82,6 +117,20 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
               style={{ paddingLeft: 32, width: '100%' }}
             />
           </div>
+          <label className="row" style={{ gap: 6, fontSize: 13 }}>
+            <span className="muted">ต้นทาง:</span>
+            <select value={origin} onChange={e => setOrigin(e.target.value)} style={{ minWidth: 160 }}>
+              <option value="">ทั้งหมด</option>
+              {placeOptions.origins.map(o => <option key={o.key} value={o.key}>{o.display}</option>)}
+            </select>
+          </label>
+          <label className="row" style={{ gap: 6, fontSize: 13 }}>
+            <span className="muted">ปลายทาง:</span>
+            <select value={destination} onChange={e => setDestination(e.target.value)} style={{ minWidth: 160 }}>
+              <option value="">ทั้งหมด</option>
+              {placeOptions.destinations.map(o => <option key={o.key} value={o.key}>{o.display}</option>)}
+            </select>
+          </label>
           <select value={status} onChange={e => setStatus(e.target.value as StatusFilter)} style={{ minWidth: 160 }}>
             <option value="all">ทุกสถานะ</option>
             <option value="draft">กำลังดำเนินการ</option>

@@ -58,6 +58,7 @@ const MENU: MenuItem[] = [
       { id: 'dispatch.open', label: 'เปิดงานขนส่ง' },
       { id: 'dispatch.close', label: 'ปิดงานขนส่ง' },
       { id: 'dispatch.report', label: 'รายงานสรุป' },
+      { id: 'dispatch.destinations', label: 'รายงานปลายทาง' },
       { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน' },
     ],
   },
