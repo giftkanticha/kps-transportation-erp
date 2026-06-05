@@ -804,24 +804,53 @@ function ExpenseEditModal({
   )
 }
 
-// ─── Payment Confirmation ────────────────────────────────────────
+// ─── Store Payment (select bills → pay) ──────────────────────────
 
-function PayConfirmModal({
-  header,
+function StorePaymentModal({
   partner,
+  headers,
+  vehicles,
+  today,
   onClose,
-  onPaid,
+  onEdit,
 }: {
-  header: ExpenseHeader
   partner: Partner | undefined
+  headers: ExpenseHeader[]
+  vehicles: Vehicle[]
+  today: Date
   onClose: () => void
-  onPaid: () => void
+  onEdit: (h: ExpenseHeader) => void
 }) {
   const updateHeader = useUpdate<ExpenseHeader>('expense_headers')
+  // Default: every outstanding bill of this store is pre-selected.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(headers.map((h) => h.id)))
+  const [done, setDone] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const allSelected = headers.length > 0 && headers.every((h) => selected.has(h.id))
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(headers.map((h) => h.id)))
+
+  const selectedHeaders = headers.filter((h) => selected.has(h.id))
+  const selectedTotal = selectedHeaders.reduce((s, h) => s + h.total, 0)
+  const paidCount = selectedHeaders.length
+
   const confirm = async () => {
-    await updateHeader.mutateAsync({ id: header.id, patch: { paid: true } })
-    onPaid()
-    onClose()
+    if (selectedHeaders.length === 0) return
+    setSaving(true)
+    for (const h of selectedHeaders) {
+      await updateHeader.mutateAsync({ id: h.id, patch: { paid: true } })
+    }
+    setSaving(false)
+    setDone(true)
   }
 
   return (
@@ -836,46 +865,182 @@ function PayConfirmModal({
         zIndex: 2000,
       }}
     >
-      <div className="card" style={{ width: 600, maxWidth: '96vw', background: '#ffffff' }}>
+      <div
+        className="card"
+        style={{ width: 760, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto', background: '#ffffff' }}
+      >
         <div className="row" style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
-          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>ยืนยันการชำระเงิน</h3>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>
+              {done ? 'ชำระเงินเรียบร้อย' : 'รายการค้างชำระของร้านค้า'}
+            </h3>
+            <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+              {partner?.name ?? '—'}
+            </div>
+          </div>
+          <div className="spacer" />
           <button className="btn ghost icon sm" onClick={onClose}>
             <Icon name="close" size={16} />
           </button>
         </div>
-        <div style={{ padding: 24 }}>
-          <p style={{ margin: '0 0 14px', fontSize: 13.5, color: 'var(--text-2)' }}>
-            ตรวจสอบยอดก่อนยืนยัน เมื่อบันทึกแล้วสถานะจะเปลี่ยนเป็น{' '}
-            <strong style={{ color: 'var(--green)' }}>ชำระแล้ว</strong>
-          </p>
-          <div style={{ padding: '18px 20px', background: 'var(--bg, #F8FAFC)', borderRadius: 10 }}>
-            <div className="grid-2" style={{ gap: 10 }}>
-              <Info label="รหัส AP" value={<span className="mono">{header.code}</span>} />
-              <Info label="วันที่" value={db.thaiDate(header.date)} />
-              <Info label="ช่าง / ร้านค้า" value={partner?.name ?? '—'} />
-              <Info label="ธนาคาร" value={partner?.bank ?? '—'} />
-              <Info
-                label="เลขที่บัญชี"
-                value={<span className="mono" style={{ fontWeight: 700 }}>{partner?.account ?? '—'}</span>}
-              />
-              <Info label="ชื่อบัญชี" value={partner?.accountName ?? '—'} />
+
+        {done ? (
+          // ── Success state ──────────────────────────────────────
+          <div style={{ padding: 28, textAlign: 'center' }}>
+            <div
+              style={{
+                width: 64, height: 64, borderRadius: '50%', background: 'var(--green-50, #DCFCE7)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px',
+                color: 'var(--green)',
+              }}
+            >
+              <Icon name="check" size={32} />
             </div>
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>ยอดที่จะชำระ</div>
-              <span className="mono" style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)' }}>
-                {db.thb(header.total)}
-              </span>
+            <h3 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: 'var(--green)' }}>
+              ชำระเงินเรียบร้อย
+            </h3>
+            <p style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-2)' }}>
+              ชำระให้ <strong>{partner?.name ?? '—'}</strong> จำนวน {paidCount} รายการ
+            </p>
+            <div className="mono" style={{ fontSize: 26, fontWeight: 800, color: 'var(--primary)', marginTop: 8 }}>
+              {db.thb(selectedTotal)}
+            </div>
+            <div className="row" style={{ justifyContent: 'center', marginTop: 22 }}>
+              <button className="btn primary" onClick={onClose}>
+                เสร็จสิ้น
+              </button>
             </div>
           </div>
-        </div>
-        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn" onClick={onClose}>
-            ยกเลิก
-          </button>
-          <button className="btn primary" onClick={confirm}>
-            <Icon name="check" size={14} /> ยืนยันชำระเงิน
-          </button>
-        </div>
+        ) : (
+          <>
+            <div style={{ padding: '18px 20px 8px' }}>
+              <p style={{ margin: '0 0 14px', fontSize: 13.5, color: 'var(--text-2)' }}>
+                เลือกรายการที่ต้องการชำระ ระบบจะสรุปยอดรวมให้ก่อนกดยืนยัน
+              </p>
+
+              {/* Store bank details */}
+              <div style={{ padding: '14px 18px', background: 'var(--bg, #F8FAFC)', borderRadius: 10, marginBottom: 14 }}>
+                <div className="grid-2" style={{ gap: 10 }}>
+                  <Info label="ธนาคาร" value={partner?.bank ?? '—'} />
+                  <Info
+                    label="เลขที่บัญชี"
+                    value={<span className="mono" style={{ fontWeight: 700 }}>{partner?.account ?? '—'}</span>}
+                  />
+                  <Info label="ชื่อบัญชี" value={partner?.accountName ?? '—'} />
+                  <Info label="เบอร์ติดต่อ" value={partner?.phone ?? '—'} />
+                </div>
+              </div>
+
+              {/* Bills list */}
+              <div className="tbl-wrap" style={{ borderRadius: 8 }}>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 38 }}>
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={toggleAll}
+                          style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                        />
+                      </th>
+                      <th>เลขที่เอกสาร</th>
+                      <th>ทะเบียนรถ</th>
+                      <th>วันที่</th>
+                      <th>ครบกำหนด</th>
+                      <th className="right">จำนวนเงิน</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {headers.map((h) => {
+                      const isOverdue = h.dueDate && new Date(h.dueDate) < today
+                      const checked = selected.has(h.id)
+                      return (
+                        <tr
+                          key={h.id}
+                          onClick={() => toggle(h.id)}
+                          style={{ cursor: 'pointer', background: checked ? 'var(--primary-50)' : undefined }}
+                        >
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggle(h.id)}
+                              style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                            />
+                          </td>
+                          <td className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                            {toBeCode(h.code)}
+                          </td>
+                          <td className="mono">
+                            {vehicles.find((v) => v.id === h.vehicleId)?.plate ?? '—'}
+                          </td>
+                          <td className="num muted">{db.thaiDate(h.date)}</td>
+                          <td className="num muted">
+                            {db.thaiDate(h.dueDate)}
+                            {isOverdue && (
+                              <span className="badge red" style={{ marginLeft: 6 }}>เกินกำหนด</span>
+                            )}
+                          </td>
+                          <td className="num right" style={{ fontWeight: 700 }}>
+                            {db.fmt(h.total)} ฿
+                          </td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="btn ghost icon sm"
+                              onClick={() => onEdit(h)}
+                              title="แก้ไขรายการ/ราคา"
+                            >
+                              <Icon name="edit" size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Selected summary */}
+            <div
+              style={{
+                margin: '8px 20px 0',
+                padding: '16px 20px',
+                background: 'var(--primary-50)',
+                borderRadius: 10,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>ยอดที่เลือกชำระ</div>
+                <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 2 }}>
+                  เลือกไว้ {paidCount} จาก {headers.length} รายการ
+                </div>
+              </div>
+              <div className="spacer" />
+              <span className="mono" style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)' }}>
+                {db.thb(selectedTotal)}
+              </span>
+            </div>
+
+            <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn" onClick={onClose}>
+                ยกเลิก
+              </button>
+              <button
+                className="btn primary"
+                disabled={paidCount === 0 || saving}
+                style={paidCount === 0 || saving ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
+                onClick={confirm}
+              >
+                <Icon name="check" size={14} /> {saving ? 'กำลังบันทึก...' : 'ชำระเงินเรียบร้อย'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -896,7 +1061,7 @@ function ExpFinance() {
   const totalUnpaid = unpaidHeaders.reduce((s, h) => s + h.total, 0)
   const totalPaid = headers.filter((h) => h.paid).reduce((s, h) => s + h.total, 0)
   const [filter, setFilter] = useState('all')
-  const [payTarget, setPayTarget] = useState<ExpenseHeader | null>(null)
+  const [storeTarget, setStoreTarget] = useState<string | null>(null)
 
   const list =
     filter === 'overdue'
@@ -904,6 +1069,29 @@ function ExpFinance() {
       : filter === 'due'
         ? unpaidHeaders.filter((h) => !overdue.includes(h))
         : unpaidHeaders
+
+  // Group outstanding bills by store/vendor so the AP list shows one row per
+  // store with its total outstanding amount. Clicking a row drills into the
+  // store's individual bills where the user picks which to pay.
+  const storeGroups = useMemo(() => {
+    const map = new Map<string, ExpenseHeader[]>()
+    for (const h of list) {
+      const arr = map.get(h.partnerId) ?? []
+      arr.push(h)
+      map.set(h.partnerId, arr)
+    }
+    return Array.from(map.entries())
+      .map(([partnerId, hs]) => ({
+        partnerId,
+        partner: partners.find((p) => p.id === partnerId),
+        headers: hs,
+        total: hs.reduce((s, h) => s + h.total, 0),
+        overdueCount: hs.filter((h) => h.dueDate && new Date(h.dueDate) < today).length,
+      }))
+      .sort((a, b) => b.total - a.total)
+  }, [list, partners])
+
+  const targetGroup = storeGroups.find((g) => g.partnerId === storeTarget)
 
   return (
     <div>
@@ -961,73 +1149,63 @@ function ExpFinance() {
           <table className="tbl">
             <thead>
               <tr>
-                <th>รหัส AP</th>
                 <th>ช่าง / ร้านค้า</th>
                 <th>เลขที่บัญชี</th>
-                <th>วันที่สร้าง</th>
-                <th>ครบกำหนด</th>
-                <th className="right">จำนวนเงิน</th>
+                <th className="right">จำนวนรายการ</th>
                 <th>สถานะ</th>
+                <th className="right">ยอดค้างทั้งหมด</th>
                 <th>จัดการ</th>
               </tr>
             </thead>
             <tbody>
-              {list.map((h, i) => {
-                const isOverdue = h.dueDate && new Date(h.dueDate) < today
-                const p = partners.find((x) => x.id === h.partnerId)
-                return (
-                  <tr key={h.id}>
-                    <td className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>
-                      AP-{String(i + 1).padStart(3, '0')}
-                    </td>
-                    <td>{p?.name ?? '—'}</td>
-                    <td className="mono" style={{ fontSize: 12.5 }}>
-                      {p?.account && p.account !== '—' ? (
-                        <>
-                          <div>{p.account}</div>
-                          <div className="muted" style={{ fontSize: 11 }}>{p.bank}</div>
-                        </>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td className="num muted">{db.thaiDate(h.date)}</td>
-                    <td className="num muted">
-                      {db.thaiDate(h.dueDate)}
-                      {isOverdue && (
-                        <span className="badge red" style={{ marginLeft: 6 }}>
-                          เกินกำหนด
-                        </span>
-                      )}
-                    </td>
-                    <td className="num right" style={{ fontWeight: 700 }}>
-                      {db.fmt(h.total)} ฿
-                    </td>
-                    <td>
+              {storeGroups.map((g) => (
+                <tr
+                  key={g.partnerId}
+                  onClick={() => setStoreTarget(g.partnerId)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <td style={{ fontWeight: 600 }}>{g.partner?.name ?? '—'}</td>
+                  <td className="mono" style={{ fontSize: 12.5 }}>
+                    {g.partner?.account && g.partner.account !== '—' ? (
+                      <>
+                        <div>{g.partner.account}</div>
+                        <div className="muted" style={{ fontSize: 11 }}>{g.partner.bank}</div>
+                      </>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td className="num right">
+                    {g.headers.length} <span className="muted" style={{ fontSize: 12 }}>รายการ</span>
+                  </td>
+                  <td>
+                    {g.overdueCount > 0 ? (
+                      <span className="badge red">
+                        <Icon name="alert" size={11} /> เกินกำหนด {g.overdueCount}
+                      </span>
+                    ) : (
                       <span className="badge amber">
                         <Icon name="alert" size={11} /> ค้างชำระ
                       </span>
-                    </td>
-                    <td>
-                      <div className="row" style={{ gap: 6 }}>
-                        <button className="btn sm" onClick={() => setEditing(h)} title="แก้ไขรายการ/ราคา">
-                          <Icon name="edit" size={12} /> แก้ไข
-                        </button>
-                        <button
-                          className="btn sm"
-                          style={{ background: 'var(--green)', color: '#fff', borderColor: 'var(--green)' }}
-                          onClick={() => setPayTarget(h)}
-                        >
-                          <Icon name="money" size={12} /> บันทึกชำระ
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-              {list.length === 0 && (
+                    )}
+                  </td>
+                  <td className="num right" style={{ fontWeight: 700, color: 'var(--red)' }}>
+                    {db.fmt(g.total)} ฿
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="btn sm"
+                      style={{ background: 'var(--green)', color: '#fff', borderColor: 'var(--green)' }}
+                      onClick={() => setStoreTarget(g.partnerId)}
+                    >
+                      <Icon name="money" size={12} /> ดูรายการ / ชำระเงิน
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {storeGroups.length === 0 && (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={6}>
                     <div className="empty">ไม่มีรายการ</div>
                   </td>
                 </tr>
@@ -1037,12 +1215,17 @@ function ExpFinance() {
         </div>
       </div>
 
-      {payTarget && (
-        <PayConfirmModal
-          header={payTarget}
-          partner={partners.find((p) => p.id === payTarget.partnerId)}
-          onClose={() => setPayTarget(null)}
-          onPaid={() => {}}
+      {targetGroup && (
+        <StorePaymentModal
+          partner={targetGroup.partner}
+          headers={targetGroup.headers}
+          vehicles={vehicles}
+          today={today}
+          onClose={() => setStoreTarget(null)}
+          onEdit={(h) => {
+            setStoreTarget(null)
+            setEditing(h)
+          }}
         />
       )}
 
