@@ -96,6 +96,7 @@ export default function App() {
   const [active, setActive] = useState('dashboard')
   const [subject, setSubject] = useState<unknown>(null)
   const [collapsed, setCollapsed] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
     if (legacyUser?.role === 'driver') setActive('dispatch')
@@ -248,7 +249,7 @@ export default function App() {
   }
 
   return (
-    <div className={`app ${collapsed ? 'collapsed' : ''}`}>
+    <div className={`app ${collapsed ? 'collapsed' : ''} ${mobileOpen ? 'mobile-open' : ''}`}>
       <Sidebar
         collapsed={collapsed}
         setCollapsed={setCollapsed}
@@ -256,13 +257,18 @@ export default function App() {
         setActive={setActive}
         user={legacyUser}
         onLogout={handleLogout}
+        closeMobile={() => setMobileOpen(false)}
       />
+      {mobileOpen && (
+        <div className="sidebar-backdrop" onClick={() => setMobileOpen(false)} />
+      )}
       <div className="main">
         <Topbar
           user={legacyUser}
           crumb={crumbMap[active] ?? 'Dashboard'}
           onLogout={handleLogout}
           onOpenAlerts={() => setActive('alerts')}
+          onToggleMobileMenu={() => setMobileOpen(o => !o)}
         />
         <div className="content">{renderPage()}</div>
       </div>

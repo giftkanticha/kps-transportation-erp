@@ -114,9 +114,17 @@ interface SidebarProps {
   setActive: (id: string) => void
   user: User
   onLogout?: () => void
+  /** Close the off-canvas drawer on mobile after navigating. No-op on desktop. */
+  closeMobile?: () => void
 }
 
-export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLogout }: SidebarProps) {
+export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLogout, closeMobile }: SidebarProps) {
+  // Navigate + close the mobile drawer in one call.
+  const go = (id: string) => {
+    setActive(id)
+    closeMobile?.()
+  }
+
   const [open, setOpen] = useState<Record<string, boolean>>(() => {
     const o: Record<string, boolean> = {}
     MENU.forEach(m => {
@@ -153,6 +161,13 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
         >
           <Icon name="chevron-right" size={15} style={{ transform: 'rotate(180deg)' }} />
         </button>
+        <button
+          className="drawer-close"
+          onClick={() => closeMobile?.()}
+          title="ปิดเมนู"
+        >
+          <Icon name="close" size={18} />
+        </button>
       </div>
 
       <nav className="nav">
@@ -182,7 +197,7 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
                       setOpen(p => ({ ...p, [m.id]: !p[m.id] }))
                     }
                   } else {
-                    setActive(m.id)
+                    go(m.id)
                   }
                 }}
                 title={collapsed ? m.label : undefined}
@@ -204,7 +219,7 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
                     <div
                       key={s.id}
                       className={`subnav-item ${active === s.id ? 'active' : ''}`}
-                      onClick={() => setActive(s.id)}
+                      onClick={() => go(s.id)}
                     >
                       {s.icon && <span className="ico"><Icon name={s.icon} size={15} /></span>}
                       <span>{s.label}</span>

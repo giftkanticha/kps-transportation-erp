@@ -373,6 +373,12 @@ export function Icon({ name, size = 18, color = 'currentColor', style, className
           <circle cx="17" cy="14" r="1.3" fill={color} />
         </svg>
       )
+    case 'menu':
+      return (
+        <svg {...props}>
+          <path d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      )
     default:
       return (
         <svg {...props}>

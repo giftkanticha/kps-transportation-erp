@@ -8,9 +8,10 @@ interface TopbarProps {
   crumb: string
   onLogout: () => void
   onOpenAlerts: () => void
+  onToggleMobileMenu?: () => void
 }
 
-export function Topbar({ user, crumb, onLogout, onOpenAlerts }: TopbarProps) {
+export function Topbar({ user, crumb, onLogout, onOpenAlerts, onToggleMobileMenu }: TopbarProps) {
   const [open, setOpen] = useState(false)
   const [showChangePw, setShowChangePw] = useState(false)
 
@@ -26,6 +27,14 @@ export function Topbar({ user, crumb, onLogout, onOpenAlerts }: TopbarProps) {
 
   return (
     <div className="topbar">
+      <button
+        className="icon-btn hamburger"
+        title="เมนู"
+        onClick={onToggleMobileMenu}
+      >
+        <Icon name="menu" size={20} />
+      </button>
+
       <div className="crumb">
         <span>KPS Transportation ERP</span>
         <Icon name="chevron-right" size={14} />

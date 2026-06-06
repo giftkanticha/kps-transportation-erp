@@ -693,6 +693,7 @@ export function FuelStockDashboard() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingStock, setEditingStock] = useState<FuelStock | null>(null)
   const [historyType, setHistoryType] = useState<'in' | 'out' | null>(null)
+  const [showAllPump, setShowAllPump] = useState(false)
 
   // Auth source moved to Supabase — db.currentUser() reads the legacy
   // localStorage session which is now empty, so the admin-only buttons
@@ -745,6 +746,18 @@ export function FuelStockDashboard() {
     () => [...factoryTxs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10),
     [factoryTxs],
   )
+
+  // External-pump fills are an AP cost (not an on-site stock draw). Show the
+  // 5 latest with a "view all" toggle so the full history is reachable.
+  const pumpTxs = useMemo(
+    () => allFuelTxs
+      .filter(t => t.source === 'EXTERNAL_PUMP' && t.status !== 'REVERSED')
+      .sort((a, b) => b.date.localeCompare(a.date)),
+    [allFuelTxs],
+  )
+  const pumpShown = showAllPump ? pumpTxs : pumpTxs.slice(0, 5)
+  const pumpTotalValue = pumpTxs.reduce((s, t) => s + (t.total ?? 0), 0)
+  const pumpTotalLiters = pumpTxs.reduce((s, t) => s + (t.liters ?? 0), 0)
 
   const deleteStockIn = async (id: string) => {
     if (!confirm('ลบรายการน้ำมันเข้านี้?')) return
@@ -919,6 +932,57 @@ export function FuelStockDashboard() {
                       <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
                         {balanceMap[t.id] != null ? db.fmt(balanceMap[t.id]) : '—'}
                       </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* External-pump history */}
+      <div className="card" style={{ marginBottom: 8 }}>
+        <div className="head">
+          <div style={{ flex: 1 }}>
+            <h3>⛽ ประวัติเติมปั๊มภายนอก (External Pump){!showAllPump && pumpTxs.length > 5 ? ' — 5 รายการล่าสุด' : ''}</h3>
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+              รวม {pumpTxs.length} รายการ · {db.fmt(pumpTotalLiters)} ลิตร{isManager && ` · ${db.thb(pumpTotalValue)}`}
+            </div>
+          </div>
+          {pumpTxs.length > 5 && (
+            <button className="btn sm outline" onClick={() => setShowAllPump(v => !v)}>
+              {showAllPump ? '▲ ย่อ (5 ล่าสุด)' : `📂 ดูทั้งหมด (${pumpTxs.length})`}
+            </button>
+          )}
+        </div>
+        {pumpShown.length === 0 ? (
+          <div className="empty" style={{ padding: 32 }}>ยังไม่มีรายการเติมปั๊มภายนอก</div>
+        ) : (
+          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>วันที่</th>
+                  <th>ทะเบียนรถ</th>
+                  <th>รอบงาน</th>
+                  <th className="right">ลิตร</th>
+                  {isManager && <th className="right">ราคา/ลิตร</th>}
+                  {isManager && <th className="right">มูลค่า</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {pumpShown.map(t => {
+                  const plate = vehicles.find(v => v.id === t.vehicleId)?.plate ?? '—'
+                  const trip = dispatches.find(d => d.id === t.tripId)
+                  return (
+                    <tr key={t.id}>
+                      <td className="mono muted">{db.thaiDate(t.date)}</td>
+                      <td className="mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{plate}</td>
+                      <td className="mono muted" style={{ fontSize: 12 }}>{trip?.code ?? (t.tripId ? '…' : '—')}</td>
+                      <td className="num right mono" style={{ color: '#C2410C', fontWeight: 600 }}>{db.fmt(t.liters)}</td>
+                      {isManager && <td className="num right muted" style={{ fontSize: 12 }}>{t.pricePerL ? t.pricePerL.toFixed(2) : '—'}</td>}
+                      {isManager && <td className="num right mono">{t.total ? db.thb(t.total) : '—'}</td>}
                     </tr>
                   )
                 })}
