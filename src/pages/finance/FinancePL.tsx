@@ -73,7 +73,8 @@ function computeRows(
       return s + (fromLegs > 0 ? fromLegs : (d.perDiem ?? 0))
     }, 0)
 
-    const myFuelLogs = fuel.filter(f => f.vehicleId === v.id && ymKey(f.date) === ym)
+    // ใช้ accountingDate (เดือนค่าใช้จ่าย) ถ้ามี — น้ำมันปิดรอบที่เติมข้ามเดือนจะตกเดือนของรอบ
+    const myFuelLogs = fuel.filter(f => f.vehicleId === v.id && ymKey(f.accountingDate || f.date) === ym)
     const logIn  = myFuelLogs.filter(f =>  isFactoryStation(f.station)).reduce((s, f) => s + (f.total ?? 0), 0)
     const logOut = myFuelLogs.filter(f => !isFactoryStation(f.station)).reduce((s, f) => s + (f.total ?? 0), 0)
 

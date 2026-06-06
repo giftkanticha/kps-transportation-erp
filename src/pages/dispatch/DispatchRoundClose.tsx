@@ -529,6 +529,9 @@ function CloseForm({
               total: closingL * closingPrice,
               odometer: em ?? 0,
               date: txDate,
+              // ค่าใช้จ่ายน้ำมันปิดรอบให้ตกเดือนของรอบ (วันเปิดรอบ) ไม่ใช่วันเติมจริง
+              // ที่อาจข้ามเดือน — รายการน้ำมันยังโชว์ date จริงไว้
+              accountingDate: round.date || txDate,
               type: 'diesel',
             }
             if (existingRec) {

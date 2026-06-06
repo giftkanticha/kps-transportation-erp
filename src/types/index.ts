@@ -265,6 +265,8 @@ export interface FuelRecord {
   odometer: number
   date: string
   type: string
+  /** เดือนค่าใช้จ่ายสำหรับรายงาน (เช่น น้ำมันปิดรอบที่ข้ามเดือน). ว่าง = ใช้ date */
+  accountingDate?: string | null
 }
 
 export interface FuelRefill {
