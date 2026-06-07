@@ -748,7 +748,7 @@ input:focus, select:focus, textarea:focus {
   box-shadow: var(--shadow-md);
   min-width: 180px;
   padding: 6px;
-  z-index: 30;
+  z-index: 1200;
 }
 .menu .item {
   padding: 8px 12px;
@@ -806,6 +806,20 @@ input:focus, select:focus, textarea:focus {
   .subnav { display: block; }
   .logout-btn { justify-content: flex-start; }
   .logout-btn span { display: inline; }
+
+  /* Even if the desktop "collapsed" (icons-only) class is set, the mobile
+     drawer must always show the full menu so sub-menus stay tappable. These
+     win over the desktop .app.collapsed rules by coming later in the cascade
+     at equal specificity. */
+  .app.collapsed .sidebar .name { display: inline; }
+  .app.collapsed .sidebar .collapse-btn { display: none; }
+  .app.collapsed .nav-item { justify-content: flex-start; padding: 9px 11px; border-left: 3px solid transparent; }
+  .app.collapsed .nav-item.active { padding-left: 8px; }
+  .app.collapsed .nav-item .lbl { display: block; }
+  .app.collapsed .nav-item .chev { display: inline-flex; }
+  .app.collapsed .subnav { display: block; }
+  .app.collapsed .logout-btn { justify-content: flex-start; }
+  .app.collapsed .logout-btn span { display: inline; }
 
   .topbar .hamburger { display: grid; }
   .topbar { padding: 0 16px; gap: 10px; }

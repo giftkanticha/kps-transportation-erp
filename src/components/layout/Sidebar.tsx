@@ -135,14 +135,28 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
     return o
   })
 
+  // On mobile the sidebar is an off-canvas drawer that always shows the full
+  // menu — the desktop "collapsed" (icons-only) state must NOT apply there, or
+  // the sub-menus become unreachable by tap. Decouple the two.
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 1024px)').matches,
+  )
   useEffect(() => {
-    if (collapsed) return
+    const mq = window.matchMedia('(max-width: 1024px)')
+    const onChange = () => setIsMobile(mq.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
+  const effectiveCollapsed = collapsed && !isMobile
+
+  useEffect(() => {
+    if (effectiveCollapsed) return
     MENU.forEach(m => {
       if (m.sub && m.sub.some(s => s.id === active)) {
         setOpen(prev => prev[m.id] ? prev : { ...prev, [m.id]: true })
       }
     })
-  }, [active, collapsed])
+  }, [active, effectiveCollapsed])
 
   const sectionActive = (m: MenuItem) =>
     active === m.id ||
@@ -190,7 +204,7 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
                 ].filter(Boolean).join(' ')}
                 onClick={() => {
                   if (hasSub) {
-                    if (collapsed) {
+                    if (effectiveCollapsed) {
                       setCollapsed(false)
                       setOpen({ [m.id]: true })
                     } else {
@@ -200,7 +214,7 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
                     go(m.id)
                   }
                 }}
-                title={collapsed ? m.label : undefined}
+                title={effectiveCollapsed ? m.label : undefined}
               >
                 <span className="icn">
                   <Icon name={m.icon} size={18} />
@@ -213,7 +227,7 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
                 )}
               </div>
 
-              {hasSub && open[m.id] && !collapsed && (
+              {hasSub && open[m.id] && !effectiveCollapsed && (
                 <div className="subnav">
                   {visibleSub.map(s => (
                     <div

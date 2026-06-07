@@ -443,7 +443,7 @@ function EditStockModal({ stock, onClose, onSaved }: { stock: FuelStock; onClose
 
 // ─── Full History Modal ───────────────────────────────────────────────────────
 interface HistoryModalProps {
-  type: 'in' | 'out'
+  type: 'in' | 'out' | 'pump'
   balanceMap: Record<string, number>
   onClose: () => void
   canEdit?: boolean
@@ -465,10 +465,13 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
   const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const { data: allFuelStock = [] } = useList<FuelStock>('fuel_stock')
   const factoryTxs = allFuelTxs.filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED')
+  const pumpTxs = allFuelTxs.filter(t => t.source === 'EXTERNAL_PUMP' && t.status !== 'REVERSED')
 
   const rows = type === 'in'
     ? [...allFuelStock].sort((a, b) => b.date.localeCompare(a.date))
-    : [...factoryTxs].sort((a, b) => b.date.localeCompare(a.date))
+    : type === 'out'
+    ? [...factoryTxs].sort((a, b) => b.date.localeCompare(a.date))
+    : [...pumpTxs].sort((a, b) => b.date.localeCompare(a.date))
 
   const filtered = rows.filter(r => {
     const row = r as FuelStock & FuelTransaction
@@ -478,7 +481,7 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
       const s = row as FuelStock
       if (!s.supplier?.toLowerCase().includes(filterSupplier.toLowerCase())) return false
     }
-    if (type === 'out' && filterVehicle) {
+    if ((type === 'out' || type === 'pump') && filterVehicle) {
       const t = row as FuelTransaction
       const plate = vehicles.find(v => v.id === t.vehicleId)?.plate ?? ''
       if (!plate.toLowerCase().includes(filterVehicle.toLowerCase())) return false
@@ -499,7 +502,7 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
         {/* Print-only KPS header */}
         <div className="kps-print-header print-only">
           <p className="co">KPS Transportations</p>
-          <p className="ttl">{type === 'in' ? 'รายงานน้ำมันเข้าคลัง (Stock In)' : 'รายงานน้ำมันออกคลัง (Stock Out)'}</p>
+          <p className="ttl">{type === 'in' ? 'รายงานน้ำมันเข้าคลัง (Stock In)' : type === 'out' ? 'รายงานน้ำมันออกคลัง (Stock Out)' : 'รายงานเติมปั๊มภายนอก (External Pump)'}</p>
           <p className="sub">{filtered.length} รายการ</p>
           <p className="ts">พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</p>
         </div>
@@ -507,7 +510,7 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
         <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid var(--line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
           <div>
             <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>
-              {type === 'in' ? '📥 ประวัติน้ำมันเข้า (Stock In)' : '📤 ประวัติน้ำมันออก (Stock Out)'}
+              {type === 'in' ? '📥 ประวัติน้ำมันเข้า (Stock In)' : type === 'out' ? '📤 ประวัติน้ำมันออก (Stock Out)' : '⛽ ประวัติเติมปั๊มภายนอก (External Pump)'}
             </h2>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{filtered.length} รายการ</div>
           </div>
@@ -536,7 +539,7 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
               <tr>
                 <th>วันที่เกิดเหตุ</th>
                 <th className="num right">ลิตร</th>
-                {type === 'in' ? (
+                {type === 'in' && (
                   <>
                     <th>ผู้จำหน่าย</th>
                     {canSeeMoney && <th className="num right">ราคา/ลิตร</th>}
@@ -544,7 +547,8 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
                     <th>เลขใบส่งของ</th>
                     <th>บันทึกเมื่อ</th>
                   </>
-                ) : (
+                )}
+                {type === 'out' && (
                   <>
                     <th>ทะเบียนรถ</th>
                     <th>รอบงาน</th>
@@ -552,7 +556,16 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
                     <th>บันทึกเมื่อ</th>
                   </>
                 )}
-                <th className="num right">ยอดสะสม</th>
+                {type === 'pump' && (
+                  <>
+                    <th>ทะเบียนรถ</th>
+                    <th>รอบงาน</th>
+                    {canSeeMoney && <th className="num right">ราคา/ลิตร</th>}
+                    {canSeeMoney && <th className="num right">มูลค่า</th>}
+                    <th>บันทึกเมื่อ</th>
+                  </>
+                )}
+                {type !== 'pump' && <th className="num right">ยอดสะสม</th>}
                 {type === 'in' && (canEdit || canDelete) && <th className="no-print" style={{ width: 80 }}></th>}
               </tr>
             </thead>
@@ -560,7 +573,8 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
               {paginated.length === 0 ? (
                 <tr><td colSpan={type === 'in'
                   ? 5 + (canSeeMoney ? 2 : 0) + (canEdit || canDelete ? 1 : 0)
-                  : 7} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
+                  : type === 'out' ? 7
+                  : 5 + (canSeeMoney ? 2 : 0)} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
               ) : paginated.map(r => {
                 const balance = balanceMap[(r as { id: string }).id]
                 if (type === 'in') {
@@ -599,7 +613,7 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
                       )}
                     </tr>
                   )
-                } else {
+                } else if (type === 'out') {
                   const t = r as FuelTransaction
                   const plate = vehicles.find(v => v.id === t.vehicleId)?.plate ?? '—'
                   const tripCode = dispatches.find(d => d.id === t.tripId)?.code ?? (t.tripId ? '…' : '—')
@@ -627,6 +641,27 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
                       <td className="num right mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{balance != null ? db.fmt(balance) : '—'}</td>
                     </tr>
                   )
+                } else {
+                  const t = r as FuelTransaction
+                  const plate = vehicles.find(v => v.id === t.vehicleId)?.plate ?? '—'
+                  const tripCode = dispatches.find(d => d.id === t.tripId)?.code ?? (t.tripId ? '…' : '—')
+                  const backdated = t.createdAt && t.createdAt.slice(0, 10) > t.date
+                  return (
+                    <tr key={t.id}>
+                      <td>
+                        <div className="mono" style={{ fontSize: 12.5 }}>{db.thaiDate(t.date)}</div>
+                        {backdated && <div style={{ fontSize: 10, color: '#7C3AED', fontWeight: 600, marginTop: 1 }}>⬅️ ย้อนหลัง</div>}
+                      </td>
+                      <td className="num right mono" style={{ color: '#C2410C', fontWeight: 600 }}>{db.fmt(t.liters)}</td>
+                      <td className="mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{plate}</td>
+                      <td className="mono muted" style={{ fontSize: 12 }}>{tripCode}</td>
+                      {canSeeMoney && <td className="num right mono muted">{t.pricePerL ? t.pricePerL.toFixed(2) : '—'}</td>}
+                      {canSeeMoney && <td className="num right mono">{t.total ? db.thb(t.total) : '—'}</td>}
+                      <td className="muted" style={{ fontSize: 11 }}>
+                        {t.createdAt ? new Date(t.createdAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                      </td>
+                    </tr>
+                  )
                 }
               })}
             </tbody>
@@ -647,7 +682,7 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
                       <td className="num right mono" style={{ fontWeight: 600 }}>{balance != null ? db.fmt(balance) : '—'}</td>
                     </tr>
                   )
-                } else {
+                } else if (type === 'out') {
                   const t = r as FuelTransaction
                   const plate = vehicles.find(v => v.id === t.vehicleId)?.plate ?? '—'
                   const tripCode = dispatches.find(d => d.id === t.tripId)?.code ?? (t.tripId ? '…' : '—')
@@ -660,6 +695,21 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
                       <td>{t.tripFuelRole === 'TRIP_OPENING' ? 'ต้นรอบ' : t.tripFuelRole === 'TRIP_CLOSING' ? 'ปลายรอบ' : t.tripFuelRole === 'INTERMEDIATE' ? 'กลางทาง' : 'ทั่วไป'}</td>
                       <td>{t.createdAt ? new Date(t.createdAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
                       <td className="num right mono" style={{ fontWeight: 600 }}>{balance != null ? db.fmt(balance) : '—'}</td>
+                    </tr>
+                  )
+                } else {
+                  const t = r as FuelTransaction
+                  const plate = vehicles.find(v => v.id === t.vehicleId)?.plate ?? '—'
+                  const tripCode = dispatches.find(d => d.id === t.tripId)?.code ?? (t.tripId ? '…' : '—')
+                  return (
+                    <tr key={t.id}>
+                      <td className="mono">{db.thaiDate(t.date)}</td>
+                      <td className="num right mono" style={{ color: '#C2410C', fontWeight: 600 }}>{db.fmt(t.liters)}</td>
+                      <td className="mono">{plate}</td>
+                      <td className="mono">{tripCode}</td>
+                      {canSeeMoney && <td className="num right mono">{t.pricePerL ? t.pricePerL.toFixed(2) : '—'}</td>}
+                      {canSeeMoney && <td className="num right mono">{t.total ? db.thb(t.total) : '—'}</td>}
+                      <td>{t.createdAt ? new Date(t.createdAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
                     </tr>
                   )
                 }
@@ -692,8 +742,7 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
 export function FuelStockDashboard() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingStock, setEditingStock] = useState<FuelStock | null>(null)
-  const [historyType, setHistoryType] = useState<'in' | 'out' | null>(null)
-  const [showAllPump, setShowAllPump] = useState(false)
+  const [historyType, setHistoryType] = useState<'in' | 'out' | 'pump' | null>(null)
 
   // Auth source moved to Supabase — db.currentUser() reads the legacy
   // localStorage session which is now empty, so the admin-only buttons
@@ -748,14 +797,15 @@ export function FuelStockDashboard() {
   )
 
   // External-pump fills are an AP cost (not an on-site stock draw). Show the
-  // 5 latest with a "view all" toggle so the full history is reachable.
+  // 5 latest with a "view all" button that opens the full-history modal
+  // (same pattern as the Stock Out history).
   const pumpTxs = useMemo(
     () => allFuelTxs
       .filter(t => t.source === 'EXTERNAL_PUMP' && t.status !== 'REVERSED')
       .sort((a, b) => b.date.localeCompare(a.date)),
     [allFuelTxs],
   )
-  const pumpShown = showAllPump ? pumpTxs : pumpTxs.slice(0, 5)
+  const recentPump = pumpTxs.slice(0, 5)
   const pumpTotalValue = pumpTxs.reduce((s, t) => s + (t.total ?? 0), 0)
   const pumpTotalLiters = pumpTxs.reduce((s, t) => s + (t.liters ?? 0), 0)
 
@@ -945,18 +995,14 @@ export function FuelStockDashboard() {
       <div className="card" style={{ marginBottom: 8 }}>
         <div className="head">
           <div style={{ flex: 1 }}>
-            <h3>⛽ ประวัติเติมปั๊มภายนอก (External Pump){!showAllPump && pumpTxs.length > 5 ? ' — 5 รายการล่าสุด' : ''}</h3>
+            <h3>⛽ ประวัติเติมปั๊มภายนอก (External Pump) — 5 รายการล่าสุด</h3>
             <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
               รวม {pumpTxs.length} รายการ · {db.fmt(pumpTotalLiters)} ลิตร{isManager && ` · ${db.thb(pumpTotalValue)}`}
             </div>
           </div>
-          {pumpTxs.length > 5 && (
-            <button className="btn sm outline" onClick={() => setShowAllPump(v => !v)}>
-              {showAllPump ? '▲ ย่อ (5 ล่าสุด)' : `📂 ดูทั้งหมด (${pumpTxs.length})`}
-            </button>
-          )}
+          <button className="btn sm outline" onClick={() => setHistoryType('pump')}>📂 ดูประวัติทั้งหมด</button>
         </div>
-        {pumpShown.length === 0 ? (
+        {recentPump.length === 0 ? (
           <div className="empty" style={{ padding: 32 }}>ยังไม่มีรายการเติมปั๊มภายนอก</div>
         ) : (
           <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
@@ -972,7 +1018,7 @@ export function FuelStockDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {pumpShown.map(t => {
+                {recentPump.map(t => {
                   const plate = vehicles.find(v => v.id === t.vehicleId)?.plate ?? '—'
                   const trip = dispatches.find(d => d.id === t.tripId)
                   return (
