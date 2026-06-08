@@ -34,6 +34,7 @@ export function CustomerBilling() {
   const { data: notes = [] } = useList<BillingNote>('billing_notes')
   const insertNote = useInsert<BillingNote>('billing_notes')
   const updateNote = useUpdate<BillingNote>('billing_notes')
+  const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
 
   // default bank account = ที่ตั้งเป็นค่าเริ่มต้น ไม่งั้นตัวแรกที่ active
   useEffect(() => {
@@ -80,6 +81,26 @@ export function CustomerBilling() {
   const net = gross - whtAmount
 
   const customer = customers.find(c => c.id === customerId)
+
+  // ขาที่ปิดงานแล้วในเดือนที่เลือก แต่ยังไม่ได้ระบุลูกค้า (งานเก่าก่อนมีช่องเลือกลูกค้า)
+  // — ให้ระบุลูกค้าได้ที่นี่เลย ไม่ต้องเปิดรอบใหม่
+  const unassignedLegs = useMemo<BillableLeg[]>(() => {
+    const out: BillableLeg[] = []
+    for (const d of dispatches) {
+      if (d.roundStatus !== 'closed' || roundMonth(d) !== month) continue
+      for (const leg of d.legs ?? []) {
+        if (leg.customerId || !leg.id || (leg.amount || 0) <= 0) continue
+        const wht = db.legWht(leg)
+        out.push({ leg, round: d, gross: leg.amount || 0, wht, net: (leg.amount || 0) - wht })
+      }
+    }
+    return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
+  }, [dispatches, month])
+
+  const assignCustomer = (legId: string, cid: string) => {
+    if (!cid) return
+    updateLeg.mutate({ id: legId, patch: { customerId: cid } })
+  }
 
   const toggle = (id: string) => setSelected(prev => {
     const next = new Set(prev)
@@ -206,6 +227,43 @@ export function CustomerBilling() {
           </div>
         )}
       </div>
+
+      {unassignedLegs.length > 0 && (
+        <div className="card no-print" style={{ marginBottom: 16, borderColor: '#FCD34D' }}>
+          <div className="head" style={{ background: '#FFFBEB' }}>
+            <h3>⚠️ ขาที่ปิดงานแล้วยังไม่ได้ระบุลูกค้า — เดือนนี้ ({unassignedLegs.length})</h3>
+          </div>
+          <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
+            งานเก่าที่ปิดก่อนมีช่องเลือกลูกค้า จะยังไม่มีลูกค้าผูกไว้ — ระบุลูกค้าให้แต่ละขาที่นี่ แล้วขานั้นจะไปอยู่ในรายการวางบิลของลูกค้านั้นทันที
+          </div>
+          <div className="tbl-wrap" style={{ border: 'none' }}>
+            <table className="tbl">
+              <thead>
+                <tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th><th className="num right">ยอด</th><th>ระบุลูกค้า</th></tr>
+              </thead>
+              <tbody>
+                {unassignedLegs.map(b => (
+                  <tr key={b.leg.id}>
+                    <td className="mono">{b.round.code}</td>
+                    <td>{db.thaiDate(b.round.date)}</td>
+                    <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
+                    <td style={{ fontSize: 12.5 }}>{b.leg.cargoType || '—'}</td>
+                    <td className="num right">{db.thb(b.gross)}</td>
+                    <td>
+                      <select defaultValue="" onChange={e => assignCustomer(b.leg.id!, e.target.value)} disabled={updateLeg.isPending} style={{ minWidth: 160 }}>
+                        <option value="">— เลือกลูกค้า —</option>
+                        {customers.slice().sort((a, c) => a.name.localeCompare(c.name, 'th')).map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {customerId && (
         <>
