@@ -44,6 +44,7 @@ const MANAGER_PLUS_ROUTES = new Set<string>([
   'dispatch.billing',    // money — billing notes & receivables
 
   'expenses.finance', 'expenses.report',
+  'customers', 'partners',  // master/billing data — managers & admins only
 ])
 const ADMIN_ONLY_TOP = new Set<string>(['settings', 'admin'])
 

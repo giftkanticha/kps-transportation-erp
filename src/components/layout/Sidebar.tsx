@@ -77,6 +77,13 @@ const MENU: MenuItem[] = [
     ],
   },
   {
+    id: 'customers', label: 'ลูกค้า / คู่ค้า', icon: 'client', roles: ['admin', 'manager'],
+    sub: [
+      { id: 'customers', label: 'ลูกค้า', icon: 'client' },
+      { id: 'partners', label: 'คู่ค้า / ช่าง', icon: 'wrench' },
+    ],
+  },
+  {
     id: 'expenses', label: 'ค่าใช้จ่าย', icon: 'wallet', roles: ['admin', 'manager'],
     sub: [
       { id: 'expenses', label: 'บันทึกค่าใช้จ่าย', icon: 'edit' },
