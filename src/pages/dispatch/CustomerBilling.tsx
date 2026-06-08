@@ -34,6 +34,8 @@ export function CustomerBilling() {
   const insertNote = useInsert<BillingNote>('billing_notes')
   const updateNote = useUpdate<BillingNote>('billing_notes')
   const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
+  const insertLocation = useInsert<Location>('locations')
+  const updateLocation = useUpdate<Location>('locations')
 
   const customerLocs = useMemo(
     () => locations.filter(l => l.isCustomer && l.active).sort((a, b) => a.name.localeCompare(b.name, 'th')),
@@ -109,9 +111,29 @@ export function CustomerBilling() {
 
   const customer = customerLocs.find(c => c.id === customerId)
 
-  const assignBillTo = (legId: string, locId: string) => {
-    if (!locId) return
-    updateLeg.mutate({ id: legId, patch: { billToLocationId: locId } })
+  // เลือกผู้รับบิลจากแผง "ยังไม่มีผู้รับบิล":
+  // value "id:<locId>" = ลูกค้าที่มีอยู่ | "name:<ชื่อ>" = ตั้งสถานที่นั้นเป็นลูกค้าให้เลย แล้วผูก
+  const pickBillTo = async (leg: DispatchLeg, value: string) => {
+    if (!value || !leg.id) return
+    try {
+      let locId = ''
+      if (value.startsWith('id:')) {
+        locId = value.slice(3)
+      } else if (value.startsWith('name:')) {
+        const name = value.slice(5).trim()
+        const existing = locations.find(l => l.name === name)
+        if (!existing) {
+          const created = await insertLocation.mutateAsync({ name, category: '', province: '', address: '', notes: '', active: true, isCustomer: true, credit: 30, taxId: '', phone: '', contact: '' })
+          locId = created.id
+        } else {
+          locId = existing.id
+          if (!existing.isCustomer) await updateLocation.mutateAsync({ id: existing.id, patch: { isCustomer: true, credit: existing.credit ?? 30 } })
+        }
+      }
+      if (locId) await updateLeg.mutateAsync({ id: leg.id, patch: { billToLocationId: locId } })
+    } catch (e) {
+      alert('ตั้งลูกค้าไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   const toggle = (id: string) => setSelected(prev => {
@@ -219,12 +241,12 @@ export function CustomerBilling() {
             <h3>⚠️ ขาที่ปิดงานแล้วยังไม่มีผู้รับบิล — เดือนนี้ ({unassignedLegs.length})</h3>
           </div>
           <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
-            ขาเหล่านี้ปลายทางยังไม่ได้ตั้งเป็นลูกค้า — เลือก “เก็บเงินจาก” ให้แต่ละขา (หรือไปติ๊กปลายทางเป็นลูกค้าที่จัดการสถานที่ แล้วจะเข้าอัตโนมัติ)
+            เลือก “เก็บเงินจาก” ให้แต่ละขา — เลือกปลายทาง/ต้นทางของขานั้นได้เลย ระบบจะตั้งเป็นลูกค้าให้อัตโนมัติ (ครั้งหน้าขาที่ไปที่เดียวกันจะเข้าเอง)
           </div>
           <div className="tbl-wrap" style={{ border: 'none' }}>
             <table className="tbl">
               <thead>
-                <tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th className="num right">ยอด</th><th>เก็บเงินจาก</th></tr>
+                <tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th className="num right">ยอด</th><th>เก็บเงินจาก (ตั้งเป็นลูกค้า)</th></tr>
               </thead>
               <tbody>
                 {unassignedLegs.map(b => (
@@ -234,9 +256,15 @@ export function CustomerBilling() {
                     <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
                     <td className="num right">{db.thb(b.gross)}</td>
                     <td>
-                      <select defaultValue="" onChange={e => assignBillTo(b.leg.id!, e.target.value)} disabled={updateLeg.isPending} style={{ minWidth: 160 }}>
-                        <option value="">— เลือกลูกค้า —</option>
-                        {customerLocs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      <select value="" onChange={e => { pickBillTo(b.leg, e.target.value); e.target.value = '' }} disabled={updateLeg.isPending || insertLocation.isPending} style={{ minWidth: 200 }}>
+                        <option value="">— เลือกผู้รับบิล —</option>
+                        {b.leg.destination && <option value={`name:${b.leg.destination}`}>ปลายทาง: {b.leg.destination}</option>}
+                        {b.leg.origin && b.leg.origin !== b.leg.destination && <option value={`name:${b.leg.origin}`}>ต้นทาง: {b.leg.origin}</option>}
+                        {customerLocs.length > 0 && (
+                          <optgroup label="ลูกค้าที่มีอยู่">
+                            {customerLocs.map(c => <option key={c.id} value={`id:${c.id}`}>{c.name}</option>)}
+                          </optgroup>
+                        )}
                       </select>
                     </td>
                   </tr>
@@ -251,6 +279,11 @@ export function CustomerBilling() {
         <>
           <div className="card no-print" style={{ marginBottom: 16 }}>
             <div className="head"><h3>ขาที่ปิดงานแล้ว ยังไม่วางบิล ({eligible.length})</h3></div>
+            {eligible.length > 0 && (
+              <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
+                ✅ ติ๊กเลือกขาที่จะวางบิล แล้วปุ่ม “ออกใบวางบิล / ใบเสร็จ” จะขึ้นด้านล่าง
+              </div>
+            )}
             {eligible.length === 0 ? (
               <div className="empty" style={{ padding: 32 }}>
                 ไม่มีขาของลูกค้ารายนี้ที่ปิดงานแล้วและยังไม่วางบิลในเดือนนี้
