@@ -3,10 +3,20 @@ import { db } from '../../lib/db'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { Icon, Field } from '../../components/ui'
-import type { Customer, CompanyBankAccount, BillingNote, Dispatch } from '../../types'
+import type { Customer, CompanyBankAccount, BillingNote, Dispatch, DispatchLeg } from '../../types'
 
-const monthKey = (d: Dispatch) => (d.returnAt || d.depart || d.date || '').slice(0, 7)
 const docTypeLabel = (t: BillingNote['docType']) => (t === 'receipt' ? 'ใบเสร็จรับเงิน' : 'ใบวางบิล')
+
+// ขาที่วางบิลได้ = ขา + รอบแม่ (ผูกวันที่/รหัสไว้ด้วย)
+interface BillableLeg {
+  leg: DispatchLeg
+  round: Dispatch
+  gross: number
+  wht: number
+  net: number
+}
+
+const roundMonth = (d: Dispatch) => (d.returnAt || d.depart || d.date || '').slice(0, 7)
 
 export function CustomerBilling() {
   const thisMonth = new Date().toISOString().slice(0, 7)
@@ -22,35 +32,49 @@ export function CustomerBilling() {
   const { data: notes = [] } = useList<BillingNote>('billing_notes')
   const insertNote = useInsert<BillingNote>('billing_notes')
   const updateNote = useUpdate<BillingNote>('billing_notes')
-  const updateDispatch = useUpdate<Dispatch>('dispatch')
 
-  // default bank account = the flagged default, else first active
+  // default bank account = ที่ตั้งเป็นค่าเริ่มต้น ไม่งั้นตัวแรกที่ active
   useEffect(() => {
     if (bankAccountId) return
     const def = bankAccounts.find(b => b.isDefault && b.active) || bankAccounts.find(b => b.active)
     if (def) setBankAccountId(def.id)
   }, [bankAccounts, bankAccountId])
 
-  // dispatch ids already on a non-void billing note → not selectable again
-  const billedIds = useMemo(() => {
+  // leg id ที่อยู่ในใบวางบิล (status≠void) แล้ว → เลือกซ้ำไม่ได้
+  const billedLegIds = useMemo(() => {
     const s = new Set<string>()
     for (const n of notes) {
       if (n.status === 'void') continue
-      for (const id of n.dispatchIds ?? []) s.add(id)
+      for (const id of n.legIds ?? []) s.add(id)
     }
     return s
   }, [notes])
 
+  // ขาทั้งหมด (พร้อมรอบแม่) ที่ปิดแล้ว มีลูกค้า + ยังไม่วางบิล
+  const allBillableLegs = useMemo<BillableLeg[]>(() => {
+    const out: BillableLeg[] = []
+    for (const d of dispatches) {
+      if (d.roundStatus !== 'closed') continue
+      for (const leg of d.legs ?? []) {
+        if (!leg.customerId || !leg.id) continue
+        if ((leg.amount || 0) <= 0) continue
+        const wht = db.legWht(leg)
+        out.push({ leg, round: d, gross: leg.amount || 0, wht, net: (leg.amount || 0) - wht })
+      }
+    }
+    return out
+  }, [dispatches])
+
   const eligible = useMemo(
-    () => dispatches
-      .filter(d => d.customerId === customerId && d.roundStatus === 'closed' && monthKey(d) === month && !billedIds.has(d.id))
-      .sort((a, b) => (a.date || '').localeCompare(b.date || '')),
-    [dispatches, customerId, month, billedIds],
+    () => allBillableLegs
+      .filter(b => b.leg.customerId === customerId && roundMonth(b.round) === month && !billedLegIds.has(b.leg.id!))
+      .sort((a, b) => (a.round.date || '').localeCompare(b.round.date || '')),
+    [allBillableLegs, customerId, month, billedLegIds],
   )
 
-  const selectedRounds = useMemo(() => eligible.filter(d => selected.has(d.id)), [eligible, selected])
-  const gross = selectedRounds.reduce((s, d) => s + db.roundRevenue(d), 0)
-  const whtAmount = selectedRounds.reduce((s, d) => s + db.roundWht(d), 0)
+  const selectedLegs = useMemo(() => eligible.filter(b => selected.has(b.leg.id!)), [eligible, selected])
+  const gross = selectedLegs.reduce((s, b) => s + b.gross, 0)
+  const whtAmount = selectedLegs.reduce((s, b) => s + b.wht, 0)
   const net = gross - whtAmount
 
   const customer = customers.find(c => c.id === customerId)
@@ -61,7 +85,7 @@ export function CustomerBilling() {
     return next
   })
   const toggleAll = () => setSelected(prev =>
-    prev.size === eligible.length ? new Set() : new Set(eligible.map(d => d.id)),
+    prev.size === eligible.length ? new Set() : new Set(eligible.map(b => b.leg.id!)),
   )
 
   const customerNotes = useMemo(
@@ -72,7 +96,7 @@ export function CustomerBilling() {
   )
 
   const issue = async (docType: BillingNote['docType']) => {
-    if (!customerId || selectedRounds.length === 0) { alert('เลือกลูกค้าและงานอย่างน้อย 1 รอบ'); return }
+    if (!customerId || selectedLegs.length === 0) { alert('เลือกลูกค้าและขาอย่างน้อย 1 รายการ'); return }
     if (insertNote.isPending) return
     const [y, m] = month.split('-').map(Number)
     const seq = notes.filter(n => n.year === y && n.month === m).length + 1
@@ -90,12 +114,10 @@ export function CustomerBilling() {
         gross,
         whtAmount,
         net,
-        dispatchIds: selectedRounds.map(d => d.id),
+        legIds: selectedLegs.map(b => b.leg.id!),
         status: docType === 'receipt' ? 'paid' : 'issued',
         notes: '',
       })
-      // ออกใบเสร็จ = ได้รับเงินแล้ว → mark งานที่ผูกเป็นชำระแล้ว
-      if (docType === 'receipt') await markRoundsPaid(selectedRounds)
       setSelected(new Set())
       setPrintNote(created)
     } catch (e) {
@@ -103,25 +125,13 @@ export function CustomerBilling() {
     }
   }
 
-  const markRoundsPaid = async (rounds: Dispatch[]) => {
-    for (const d of rounds) {
-      await updateDispatch.mutateAsync({
-        id: d.id,
-        patch: { paymentStatus: 'paid', amountPaid: db.roundNetRevenue(d), paidAt: new Date().toISOString() },
-      })
-    }
-  }
-
-  // มาร์คใบวางบิลเป็นชำระแล้ว + อัปเดตงานที่ผูกในบิลให้เป็น paid
   const markNotePaid = async (n: BillingNote) => {
     if (!confirm(`บันทึกว่าได้รับเงินตาม ${docTypeLabel(n.docType)} ${n.code} แล้ว?`)) return
     await updateNote.mutateAsync({ id: n.id, patch: { status: 'paid', paidAt: new Date().toISOString() } })
-    const rounds = dispatches.filter(d => (n.dispatchIds ?? []).includes(d.id))
-    await markRoundsPaid(rounds)
   }
 
   const voidNote = async (n: BillingNote) => {
-    if (!confirm(`ยกเลิก ${docTypeLabel(n.docType)} ${n.code}? งานในบิลจะกลับมาเลือกวางบิลใหม่ได้`)) return
+    if (!confirm(`ยกเลิก ${docTypeLabel(n.docType)} ${n.code}? ขาในบิลจะกลับมาเลือกวางบิลใหม่ได้`)) return
     await updateNote.mutateAsync({ id: n.id, patch: { status: 'void' } })
   }
 
@@ -133,14 +143,27 @@ export function CustomerBilling() {
   }, [printNote])
 
   const noteBank = (n: BillingNote) => bankAccounts.find(b => b.id === n.bankAccountId)
-  const noteRounds = (n: BillingNote) => dispatches.filter(d => (n.dispatchIds ?? []).includes(d.id))
+  // หา BillableLeg จาก leg id (รวมที่วางบิลไปแล้ว) เพื่อพิมพ์รายการ
+  const legsForNote = (n: BillingNote): BillableLeg[] => {
+    const ids = new Set(n.legIds ?? [])
+    const out: BillableLeg[] = []
+    for (const d of dispatches) {
+      for (const leg of d.legs ?? []) {
+        if (leg.id && ids.has(leg.id)) {
+          const wht = db.legWht(leg)
+          out.push({ leg, round: d, gross: leg.amount || 0, wht, net: (leg.amount || 0) - wht })
+        }
+      }
+    }
+    return out
+  }
 
   return (
     <div>
       <div className="page-head no-print">
         <div>
           <h1 className="page-title">สรุป / วางบิลรายลูกค้า</h1>
-          <div className="page-sub">เลือกงานที่ปิดแล้วของลูกค้ามาออกใบวางบิล (หัก ณ ที่จ่าย 1% + เลขบัญชีบริษัท)</div>
+          <div className="page-sub">เลือกขาที่ปิดงานแล้วของลูกค้ามาออกใบวางบิล (หัก ณ ที่จ่าย 1% + เลขบัญชีบริษัท)</div>
         </div>
       </div>
 
@@ -158,16 +181,26 @@ export function CustomerBilling() {
             <input type="month" value={month} onChange={e => { setMonth(e.target.value); setSelected(new Set()) }} />
           </Field>
         </div>
+        {customers.length === 0 && (
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 10, color: 'var(--amber)' }}>
+            ⚠️ ยังไม่มีลูกค้าในระบบ — เพิ่มลูกค้าที่เมนู “ลูกค้า” ก่อน แล้วผูกลูกค้าให้แต่ละขาตอนเปิดงาน
+          </div>
+        )}
       </div>
 
       {customerId && (
         <>
           <div className="card no-print" style={{ marginBottom: 16 }}>
             <div className="head">
-              <h3>งานที่ปิดแล้ว ยังไม่วางบิล ({eligible.length})</h3>
+              <h3>ขาที่ปิดงานแล้ว ยังไม่วางบิล ({eligible.length})</h3>
             </div>
             {eligible.length === 0 ? (
-              <div className="empty" style={{ padding: 32 }}>ไม่มีงานปิดแล้วที่ยังไม่วางบิลในเดือนนี้</div>
+              <div className="empty" style={{ padding: 32 }}>
+                ไม่มีขาของลูกค้ารายนี้ที่ปิดงานแล้วและยังไม่วางบิลในเดือนนี้
+                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                  (ขาจะมาที่นี่เมื่อ: ผูกลูกค้ารายนี้ที่ขา + ปิดงานรอบนั้นแล้ว + มีค่าขนส่ง &gt; 0)
+                </div>
+              </div>
             ) : (
               <div className="tbl-wrap" style={{ border: 'none' }}>
                 <table className="tbl">
@@ -179,38 +212,36 @@ export function CustomerBilling() {
                       <th>รหัสรอบ</th>
                       <th>วันที่</th>
                       <th>เส้นทาง</th>
+                      <th>สินค้า</th>
                       <th className="num right">ยอดเต็ม</th>
                       <th className="num right">หัก 1%</th>
                       <th className="num right">สุทธิ</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {eligible.map(d => {
-                      const g = db.roundRevenue(d), w = db.roundWht(d)
-                      const route = (d.legs ?? []).map(l => `${l.origin}→${l.destination}`).join(', ')
-                      return (
-                        <tr key={d.id} onClick={() => toggle(d.id)} style={{ cursor: 'pointer', background: selected.has(d.id) ? 'var(--primary-50)' : undefined }}>
-                          <td><input type="checkbox" checked={selected.has(d.id)} onChange={() => toggle(d.id)} onClick={e => e.stopPropagation()} style={{ accentColor: 'var(--primary)' }} /></td>
-                          <td className="mono">{d.code}</td>
-                          <td>{db.thaiDate(d.date)}</td>
-                          <td style={{ fontSize: 12.5, maxWidth: 280 }}>{route || '—'}</td>
-                          <td className="num right">{db.thb(g)}</td>
-                          <td className="num right" style={{ color: w > 0 ? 'var(--amber)' : undefined }}>{w > 0 ? `− ${db.thb(w)}` : '—'}</td>
-                          <td className="num right">{db.thb(g - w)}</td>
-                        </tr>
-                      )
-                    })}
+                    {eligible.map(b => (
+                      <tr key={b.leg.id} onClick={() => toggle(b.leg.id!)} style={{ cursor: 'pointer', background: selected.has(b.leg.id!) ? 'var(--primary-50)' : undefined }}>
+                        <td><input type="checkbox" checked={selected.has(b.leg.id!)} onChange={() => toggle(b.leg.id!)} onClick={e => e.stopPropagation()} style={{ accentColor: 'var(--primary)' }} /></td>
+                        <td className="mono">{b.round.code}</td>
+                        <td>{db.thaiDate(b.round.date)}</td>
+                        <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
+                        <td style={{ fontSize: 12.5 }}>{b.leg.cargoType || '—'}</td>
+                        <td className="num right">{db.thb(b.gross)}</td>
+                        <td className="num right" style={{ color: b.wht > 0 ? 'var(--amber)' : undefined }}>{b.wht > 0 ? `− ${db.thb(b.wht)}` : '—'}</td>
+                        <td className="num right">{db.thb(b.net)}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             )}
           </div>
 
-          {selectedRounds.length > 0 && (
+          {selectedLegs.length > 0 && (
             <div className="card pad no-print" style={{ marginBottom: 16 }}>
               <div className="grid-2" style={{ gap: 18, alignItems: 'end' }}>
                 <div>
-                  <div className="row" style={{ fontSize: 14 }}><span>ยอดรวม ({selectedRounds.length} รอบ)</span><div className="spacer" /><span className="mono">{db.thb(gross)}</span></div>
+                  <div className="row" style={{ fontSize: 14 }}><span>ยอดรวม ({selectedLegs.length} ขา)</span><div className="spacer" /><span className="mono">{db.thb(gross)}</span></div>
                   {whtAmount > 0 && <div className="row" style={{ fontSize: 14, color: 'var(--amber)' }}><span>หัก ณ ที่จ่าย 1%</span><div className="spacer" /><span className="mono">− {db.thb(whtAmount)}</span></div>}
                   <div className="row" style={{ fontSize: 16, fontWeight: 700, borderTop: '1px solid var(--line)', paddingTop: 6, marginTop: 6 }}><span>ยอดสุทธิ</span><div className="spacer" /><span className="mono" style={{ color: 'var(--primary)' }}>{db.thb(net)}</span></div>
                 </div>
@@ -286,26 +317,23 @@ export function CustomerBilling() {
           </div>
           <table className="tbl" style={{ width: '100%' }}>
             <thead>
-              <tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th className="num right">ยอดเต็ม</th><th className="num right">หัก 1%</th><th className="num right">สุทธิ</th></tr>
+              <tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th><th className="num right">ยอดเต็ม</th><th className="num right">หัก 1%</th><th className="num right">สุทธิ</th></tr>
             </thead>
             <tbody>
-              {noteRounds(printNote).map(d => {
-                const g = db.roundRevenue(d), w = db.roundWht(d)
-                const route = (d.legs ?? []).map(l => `${l.origin}→${l.destination}`).join(', ')
-                return (
-                  <tr key={d.id}>
-                    <td className="mono">{d.code}</td>
-                    <td>{db.thaiDate(d.date)}</td>
-                    <td>{route}</td>
-                    <td className="num right">{db.thb(g)}</td>
-                    <td className="num right">{w > 0 ? `− ${db.thb(w)}` : '—'}</td>
-                    <td className="num right">{db.thb(g - w)}</td>
-                  </tr>
-                )
-              })}
+              {legsForNote(printNote).map(b => (
+                <tr key={b.leg.id}>
+                  <td className="mono">{b.round.code}</td>
+                  <td>{db.thaiDate(b.round.date)}</td>
+                  <td>{b.leg.origin} → {b.leg.destination}</td>
+                  <td>{b.leg.cargoType || '—'}</td>
+                  <td className="num right">{db.thb(b.gross)}</td>
+                  <td className="num right">{b.wht > 0 ? `− ${db.thb(b.wht)}` : '—'}</td>
+                  <td className="num right">{db.thb(b.net)}</td>
+                </tr>
+              ))}
             </tbody>
             <tfoot>
-              <tr><td colSpan={3} className="right"><strong>รวม</strong></td><td className="num right">{db.thb(printNote.gross)}</td><td className="num right">− {db.thb(printNote.whtAmount)}</td><td className="num right"><strong>{db.thb(printNote.net)}</strong></td></tr>
+              <tr><td colSpan={4} className="right"><strong>รวม</strong></td><td className="num right">{db.thb(printNote.gross)}</td><td className="num right">− {db.thb(printNote.whtAmount)}</td><td className="num right"><strong>{db.thb(printNote.net)}</strong></td></tr>
             </tfoot>
           </table>
           {noteBank(printNote) && (

@@ -3,7 +3,7 @@ import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole } from '../../types'
+import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole, Customer } from '../../types'
 import { Icon, Field, LocationCombobox } from '../../components/ui'
 
 interface Props {
@@ -102,6 +102,7 @@ function LegModal({
   onCancel: () => void
 }) {
   const [f, setF] = useState(initial)
+  const { data: customers = [] } = useList<Customer>('customers')
   const set = <K extends keyof LegFormState>(k: K, v: LegFormState[K]) => setF(s => ({ ...s, [k]: v }))
   const isReturn = f.legType === 'return'
   const isLump = f.priceMode === 'lump'
@@ -168,13 +169,23 @@ function LegModal({
           <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>ข้อมูลขา</h2>
         </div>
         <div style={{ padding: '18px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Field label="ประเภทขา">
-            <select value={f.legType} onChange={e => set('legType', e.target.value as LegFormState['legType'])}>
-              <option value="outbound">Outbound (เที่ยวไป)</option>
-              <option value="backhaul">Backhaul (เที่ยวกลับ มีสินค้า)</option>
-              <option value="return">Return (เที่ยวกลับ เปล่า)</option>
-            </select>
-          </Field>
+          <div className="grid-2" style={{ gap: 12 }}>
+            <Field label="ประเภทขา">
+              <select value={f.legType} onChange={e => set('legType', e.target.value as LegFormState['legType'])}>
+                <option value="outbound">Outbound (เที่ยวไป)</option>
+                <option value="backhaul">Backhaul (เที่ยวกลับ มีสินค้า)</option>
+                <option value="return">Return (เที่ยวกลับ เปล่า)</option>
+              </select>
+            </Field>
+            <Field label="ลูกค้า (สำหรับวางบิล)">
+              <select value={f.customerId} onChange={e => set('customerId', e.target.value)}>
+                <option value="">— ไม่ระบุ —</option>
+                {customers.slice().sort((a, b) => a.name.localeCompare(b.name, 'th')).map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
           <div className="grid-2" style={{ gap: 12 }}>
             <Field label="ต้นทาง *">
               <LocationCombobox value={f.origin} onChange={v => set('origin', v)} placeholder="เช่น โรงงาน KPS" />
@@ -554,138 +565,6 @@ function ClosedSummary({ round, fuelRound, isManager }: { round: Dispatch; fuelR
   )
 }
 
-// ─── Payment status (decoupled from round close) ──────────────────────────────
-const PAYMENT_LABEL: Record<string, { text: string; cls: string }> = {
-  paid:    { text: 'ชำระแล้ว',     cls: 'green' },
-  partial: { text: 'ชำระบางส่วน',  cls: 'amber' },
-  unpaid:  { text: 'ยังไม่ชำระ',   cls: 'red' },
-}
-
-function PaymentPanel({ round, onPay }: { round: Dispatch; onPay: () => void }) {
-  const net = db.roundNetRevenue(round)
-  const paid = round.amountPaid || 0
-  const outstanding = Math.max(0, net - paid)
-  const status = round.paymentStatus || 'unpaid'
-  const lbl = PAYMENT_LABEL[status] ?? PAYMENT_LABEL.unpaid
-
-  return (
-    <div className="card pad" style={{ marginTop: 16 }}>
-      <div className="row" style={{ alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-        <div>
-          <div className="muted" style={{ fontSize: 11 }}>สถานะการชำระเงิน</div>
-          <span className={`badge ${lbl.cls}`} style={{ fontSize: 12, marginTop: 2 }}>{lbl.text}</span>
-        </div>
-        <div>
-          <div className="muted" style={{ fontSize: 11 }}>ยอดรับสุทธิ (หลังหัก ณ ที่จ่าย)</div>
-          <div className="mono" style={{ fontSize: 15, fontWeight: 600 }}>{db.thb(net)}</div>
-        </div>
-        {paid > 0 && (
-          <div>
-            <div className="muted" style={{ fontSize: 11 }}>รับชำระแล้ว</div>
-            <div className="mono" style={{ fontSize: 15, fontWeight: 600, color: 'var(--green)' }}>{db.thb(paid)}</div>
-          </div>
-        )}
-        {outstanding > 0 && (
-          <div>
-            <div className="muted" style={{ fontSize: 11 }}>คงค้าง</div>
-            <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: 'var(--red)' }}>{db.thb(outstanding)}</div>
-          </div>
-        )}
-        {round.paidAt && (
-          <div>
-            <div className="muted" style={{ fontSize: 11 }}>วันที่รับชำระ</div>
-            <div style={{ fontSize: 13 }}>{db.thaiDate(round.paidAt)}</div>
-          </div>
-        )}
-        <div className="spacer" style={{ flex: 1 }} />
-        <button className="btn primary" onClick={onPay}>
-          <Icon name="money" size={15} /> {status === 'paid' ? 'แก้ไขการชำระ' : 'บันทึกชำระเงิน'}
-        </button>
-      </div>
-      <div className="muted" style={{ fontSize: 11.5, marginTop: 10 }}>
-        💡 การชำระเงินแยกจากการปิดงาน — ปิดงานได้แม้ยังไม่ได้รับเงิน ยอดค้างจะถูกเตือนในแดชบอร์ด
-      </div>
-    </div>
-  )
-}
-
-function PaymentModal({
-  round, onClose, onSaved, updateDispatch,
-}: {
-  round: Dispatch
-  onClose: () => void
-  onSaved: () => void
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  updateDispatch: any
-}) {
-  const net = db.roundNetRevenue(round)
-  const alreadyPaid = round.amountPaid || 0
-  const outstanding = Math.max(0, net - alreadyPaid)
-  const [amount, setAmount] = useState(String(outstanding > 0 ? outstanding : net))
-  const [paidDate, setPaidDate] = useState((round.paidAt || new Date().toISOString()).slice(0, 10))
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-
-  const save = async () => {
-    setErr('')
-    const totalPaid = alreadyPaid + (Number(amount) || 0)
-    // ผู้ใช้บันทึกยอด "ที่รับเพิ่มครั้งนี้"; สะสมกับที่เคยรับมาก่อน
-    const paymentStatus: Dispatch['paymentStatus'] =
-      totalPaid <= 0 ? 'unpaid' : totalPaid + 0.01 >= net ? 'paid' : 'partial'
-    setBusy(true)
-    try {
-      await updateDispatch.mutateAsync({
-        id: round.id,
-        patch: {
-          amountPaid: totalPaid,
-          paymentStatus,
-          paidAt: paymentStatus === 'unpaid' ? null : new Date(paidDate).toISOString(),
-        },
-      })
-      onSaved()
-    } catch (e) {
-      setErr('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const markFullyPaid = () => setAmount(String(outstanding > 0 ? outstanding : net))
-
-  return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
-        <div className="head"><h3>💰 บันทึกการชำระเงิน — {round.code}</h3></div>
-        <div className="body">
-          {err && (
-            <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: '#DC2626' }}>{err}</div>
-          )}
-          <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 13 }}>
-            <div className="row"><span>ยอดรับสุทธิ (หลังหัก ณ ที่จ่าย)</span><div className="spacer" /><span className="mono">{db.thb(net)}</span></div>
-            {alreadyPaid > 0 && <div className="row" style={{ color: 'var(--green)' }}><span>รับชำระแล้วก่อนหน้า</span><div className="spacer" /><span className="mono">{db.thb(alreadyPaid)}</span></div>}
-            <div className="row" style={{ fontWeight: 600, borderTop: '1px dashed var(--line)', paddingTop: 4, marginTop: 4 }}><span>คงค้าง</span><div className="spacer" /><span className="mono" style={{ color: outstanding > 0 ? 'var(--red)' : 'var(--green)' }}>{db.thb(outstanding)}</span></div>
-          </div>
-          <div className="grid-2" style={{ gap: 12 }}>
-            <Field label="ยอดที่รับครั้งนี้ *">
-              <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)} />
-              <button className="btn ghost sm" onClick={markFullyPaid} style={{ marginTop: 6, fontSize: 12 }}>รับเต็มจำนวนคงค้าง</button>
-            </Field>
-            <Field label="วันที่รับชำระ">
-              <input type="date" value={paidDate} onChange={e => setPaidDate(e.target.value)} />
-            </Field>
-          </div>
-        </div>
-        <div className="foot">
-          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
-          <button className="btn primary" onClick={save} disabled={busy}>
-            <Icon name="check" size={14} /> {busy ? 'กำลังบันทึก…' : 'บันทึก'}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const { isManager, isAdmin, profile } = useAuth()
   const [showEditRound, setShowEditRound] = useState(false)
@@ -715,7 +594,6 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
 
   const [editingLeg, setEditingLeg] = useState<{ index: number; data: LegFormState } | null>(null)
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null)
-  const [showPay, setShowPay] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
 
   if (!round) {
@@ -1033,18 +911,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
         )}
       </div>
 
-      {isClosed && isManager && <PaymentPanel round={round} onPay={() => setShowPay(true)} />}
-
       {isClosed && <ClosedSummary round={round} fuelRound={fuelRound} isManager={isManager} />}
-
-      {showPay && isClosed && isManager && (
-        <PaymentModal
-          round={round}
-          onClose={() => setShowPay(false)}
-          onSaved={() => { setShowPay(false); setToast({ kind: 'success', msg: '✅ บันทึกการชำระเงินแล้ว' }) }}
-          updateDispatch={updateDispatch}
-        />
-      )}
 
       {editingLeg && (
         <LegModal

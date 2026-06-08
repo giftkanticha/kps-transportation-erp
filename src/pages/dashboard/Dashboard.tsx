@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner, EditApprovalRequest } from '../../types'
+import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner, EditApprovalRequest, BillingNote } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
 import { canAccessRoute } from '../../lib/permissions'
 
@@ -305,6 +305,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const { data: activity = [] } = useList<ActivityLog>('activity_logs')
   const { data: stock = [] } = useList<StockItem>('stock_items')
   const { data: subJobs = [] } = useList<SubJob>('sub_jobs')
+  const { data: billingNotes = [] } = useList<BillingNote>('billing_notes')
 
   const netOf = (j: SubJob) => (j.total || 0) - (j.wht ? (j.total || 0) * 0.01 : 0)
   const subUnpaid      = useMemo(() => subJobs.filter(j => j.status === 'unpaid'), [subJobs])
@@ -343,34 +344,47 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const customersWithDebt = useMemo(() => customers.filter(c => (c.openInvoice ?? 0) > 0), [customers])
   const totalOpenInvoice  = useMemo(() => customersWithDebt.reduce((s, c) => s + (c.openInvoice ?? 0), 0), [customersWithDebt])
 
-  // AR per closed-but-unpaid round (decoupled from job closing). Grouped by
-  // customer so the dashboard nags about uncollected haulage fees. Overdue =
-  // beyond the customer's credit terms (days) since the return/run date.
-  const unpaidRounds = useMemo(
-    () => dispatch.filter(d => d.roundStatus === 'closed' && (d.paymentStatus ?? 'unpaid') !== 'paid'),
-    [dispatch],
-  )
+  // AR is per LEG (customer is assigned per leg). A leg is "paid" once it's on a
+  // billing note with status 'paid'. Outstanding = closed legs with a customer,
+  // net > 0, not yet paid — split into "ยังไม่วางบิล" vs "วางบิลแล้วรอเก็บ".
+  // Overdue = beyond the customer's credit terms since the run date.
+  const paidLegIds = useMemo(() => {
+    const s = new Set<string>()
+    for (const n of billingNotes) if (n.status === 'paid') for (const id of n.legIds ?? []) s.add(id)
+    return s
+  }, [billingNotes])
+  const issuedLegIds = useMemo(() => {
+    const s = new Set<string>()
+    for (const n of billingNotes) if (n.status === 'issued') for (const id of n.legIds ?? []) s.add(id)
+    return s
+  }, [billingNotes])
   const unpaidByCustomer = useMemo(() => {
     const todayMs = Date.now()
-    const map = new Map<string, { name: string; outstanding: number; rounds: number; overdue: boolean }>()
-    for (const d of unpaidRounds) {
-      const net = db.roundNetRevenue(d) - (d.amountPaid || 0)
-      if (net <= 0) continue
-      const cust = customers.find(c => c.id === d.customerId)
-      const key = d.customerId || '__none__'
-      const cur = map.get(key) ?? { name: cust?.name ?? 'ไม่ระบุลูกค้า', outstanding: 0, rounds: 0, overdue: false }
-      cur.outstanding += net
-      cur.rounds += 1
+    const map = new Map<string, { name: string; outstanding: number; legs: number; billed: number; overdue: boolean }>()
+    for (const d of dispatch) {
+      if (d.roundStatus !== 'closed') continue
       const baseDate = (d.returnAt || d.depart || d.date || '').slice(0, 10)
-      if (baseDate) {
-        const dueMs = new Date(baseDate).getTime() + (cust?.credit ?? 30) * 86400000
-        if (todayMs > dueMs) cur.overdue = true
+      for (const leg of d.legs ?? []) {
+        if (!leg.customerId || !leg.id) continue
+        const net = (leg.amount || 0) - db.legWht(leg)
+        if (net <= 0) continue
+        if (paidLegIds.has(leg.id)) continue
+        const cust = customers.find(c => c.id === leg.customerId)
+        const cur = map.get(leg.customerId) ?? { name: cust?.name ?? 'ไม่ระบุลูกค้า', outstanding: 0, legs: 0, billed: 0, overdue: false }
+        cur.outstanding += net
+        cur.legs += 1
+        if (issuedLegIds.has(leg.id)) cur.billed += 1
+        if (baseDate) {
+          const dueMs = new Date(baseDate).getTime() + (cust?.credit ?? 30) * 86400000
+          if (todayMs > dueMs) cur.overdue = true
+        }
+        map.set(leg.customerId, cur)
       }
-      map.set(key, cur)
     }
     return [...map.values()].sort((a, b) => b.outstanding - a.outstanding)
-  }, [unpaidRounds, customers])
-  const totalUnpaidRounds = useMemo(() => unpaidByCustomer.reduce((s, c) => s + c.outstanding, 0), [unpaidByCustomer])
+  }, [dispatch, customers, paidLegIds, issuedLegIds])
+  const totalUnpaidLegs = useMemo(() => unpaidByCustomer.reduce((s, c) => s + c.legs, 0), [unpaidByCustomer])
+  const totalUnpaidAmount = useMemo(() => unpaidByCustomer.reduce((s, c) => s + c.outstanding, 0), [unpaidByCustomer])
 
   // AP — group unpaid expense_headers by creditor (partner) so the dashboard
   // surfaces 'who owes what' instead of a per-invoice list. Vehicle is
@@ -621,13 +635,13 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                       <div className={`ic ${unpaidByCustomer.some(c => c.overdue) ? 'red' : 'amber'}`}><Icon name="money" size={16} /></div>
                       <div className="body">
                         <div className="who">
-                          งานปิดแล้วยังไม่ได้รับเงิน {unpaidRounds.length} รอบ · รวม {db.thb(totalUnpaidRounds)}
+                          งานปิดแล้วยังไม่ได้รับเงิน {totalUnpaidLegs} ขา · รวม {db.thb(totalUnpaidAmount)}
                           {unpaidByCustomer.some(c => c.overdue) && <span className="badge red" style={{ marginLeft: 8, fontSize: 10.5 }}>เกินกำหนด</span>}
                         </div>
                         <div className="txt">
                           {unpaidByCustomer
                             .slice(0, 3)
-                            .map(c => `${c.name} ${db.thb(c.outstanding)}${c.overdue ? ' ⚠️' : ''}`)
+                            .map(c => `${c.name} ${db.thb(c.outstanding)}${c.billed < c.legs ? ` (ยังไม่วางบิล ${c.legs - c.billed})` : ''}${c.overdue ? ' ⚠️' : ''}`)
                             .join(' · ')}
                           {unpaidByCustomer.length > 3 && ` และอีก ${unpaidByCustomer.length - 3}`}
                         </div>

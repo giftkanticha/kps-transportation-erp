@@ -93,7 +93,10 @@ export interface BillingNote {
   gross: number
   whtAmount: number
   net: number
-  dispatchIds: string[]
+  /** id ของ "ขา" (dispatch_legs) ที่อยู่ในบิลนี้ — ลูกค้าผูกระดับขา */
+  legIds: string[]
+  /** เดิม: id ของรอบ — เลิกใช้ คงไว้เพื่อความเข้ากันได้ */
+  dispatchIds?: string[]
   status: 'issued' | 'paid' | 'void'
   issuedAt?: string
   paidAt?: string | null
