@@ -3,7 +3,7 @@ import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
-import type { Vehicle, Employee, Customer, Dispatch, DispatchLeg, OtherExpense, FuelTransaction, FuelStock, FuelRecord } from '../../types'
+import type { Vehicle, Employee, Location, Dispatch, DispatchLeg, OtherExpense, FuelTransaction, FuelStock, FuelRecord } from '../../types'
 import { Icon, Field } from '../../components/ui'
 
 interface Props {
@@ -177,7 +177,14 @@ function CloseForm({
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
-  const { data: customers = [] } = useList<Customer>('customers')
+  const { data: locations = [] } = useList<Location>('locations')
+  // ผู้รับบิลของขา: override ก่อน, ไม่งั้น = ปลายทางถ้าเป็นลูกค้า
+  const billToName = (l: DispatchLeg): string => {
+    const loc = l.billToLocationId
+      ? locations.find(x => x.id === l.billToLocationId)
+      : locations.find(x => x.isCustomer && x.active && x.name === l.destination)
+    return loc?.name ?? '—'
+  }
   const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const { data: allFuelStock = [] } = useList<FuelStock>('fuel_stock')
   const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
@@ -680,7 +687,7 @@ function CloseForm({
                     ขา {i + 1} — {l.origin} → {l.destination}
                   </div>
                   <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-                    {l.customerId ? (customers.find(c => c.id === l.customerId)?.name ?? '—') : '—'}
+                    {billToName(l)}
                     {' • '}{l.cargoType || '—'}
                     {' • '}<span className="badge" style={{ fontSize: 10.5 }}>{legTypeLabel(l.legType)}</span>
                     {isManager && (

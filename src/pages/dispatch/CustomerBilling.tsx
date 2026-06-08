@@ -3,13 +3,12 @@ import { db } from '../../lib/db'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { Icon, Field } from '../../components/ui'
-import type { Customer, CompanyBankAccount, BillingNote, Dispatch, DispatchLeg } from '../../types'
+import type { CompanyBankAccount, BillingNote, Dispatch, DispatchLeg, Location } from '../../types'
 
 const docTypeLabel = (t: BillingNote['docType']) => (t === 'receipt' ? 'ใบเสร็จรับเงิน' : 'ใบวางบิล')
 
 const THAI_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม']
 
-// ขาที่วางบิลได้ = ขา + รอบแม่ (ผูกวันที่/รหัสไว้ด้วย)
 interface BillableLeg {
   leg: DispatchLeg
   round: Dispatch
@@ -22,13 +21,13 @@ const roundMonth = (d: Dispatch) => (d.returnAt || d.depart || d.date || '').sli
 
 export function CustomerBilling() {
   const thisMonth = new Date().toISOString().slice(0, 7)
-  const [customerId, setCustomerId] = useState('')
+  const [customerId, setCustomerId] = useState('')   // = location id (is_customer)
   const [month, setMonth] = useState(thisMonth)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bankAccountId, setBankAccountId] = useState('')
   const [printNote, setPrintNote] = useState<BillingNote | null>(null)
 
-  const { data: customers = [] } = useList<Customer>('customers')
+  const { data: locations = [] } = useList<Location>('locations')
   const { data: dispatches = [] } = useDispatches()
   const { data: bankAccounts = [] } = useList<CompanyBankAccount>('company_bank_accounts')
   const { data: notes = [] } = useList<BillingNote>('billing_notes')
@@ -36,14 +35,30 @@ export function CustomerBilling() {
   const updateNote = useUpdate<BillingNote>('billing_notes')
   const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
 
-  // default bank account = ที่ตั้งเป็นค่าเริ่มต้น ไม่งั้นตัวแรกที่ active
+  const customerLocs = useMemo(
+    () => locations.filter(l => l.isCustomer && l.active).sort((a, b) => a.name.localeCompare(b.name, 'th')),
+    [locations],
+  )
+  const locById = useMemo(() => new Map(locations.map(l => [l.id, l])), [locations])
+  const custByName = useMemo(() => {
+    const m = new Map<string, Location>()
+    for (const l of customerLocs) m.set(l.name, l)
+    return m
+  }, [customerLocs])
+
+  // ผู้รับบิลของขา: override (billToLocationId) ก่อน, ไม่งั้น = ปลายทางถ้าเป็นลูกค้า
+  const billTo = (leg: DispatchLeg): Location | null => {
+    if (leg.billToLocationId) return locById.get(leg.billToLocationId) ?? null
+    return custByName.get(leg.destination) ?? null
+  }
+
+  // default bank account
   useEffect(() => {
     if (bankAccountId) return
     const def = bankAccounts.find(b => b.isDefault && b.active) || bankAccounts.find(b => b.active)
     if (def) setBankAccountId(def.id)
   }, [bankAccounts, bankAccountId])
 
-  // leg id ที่อยู่ในใบวางบิล (status≠void) แล้ว → เลือกซ้ำไม่ได้
   const billedLegIds = useMemo(() => {
     const s = new Set<string>()
     for (const n of notes) {
@@ -53,53 +68,50 @@ export function CustomerBilling() {
     return s
   }, [notes])
 
-  // ขาทั้งหมด (พร้อมรอบแม่) ที่ปิดแล้ว มีลูกค้า + ยังไม่วางบิล
-  const allBillableLegs = useMemo<BillableLeg[]>(() => {
+  const mk = (leg: DispatchLeg, round: Dispatch): BillableLeg => {
+    const wht = db.legWht(leg)
+    return { leg, round, gross: leg.amount || 0, wht, net: (leg.amount || 0) - wht }
+  }
+
+  const eligible = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
-      if (d.roundStatus !== 'closed') continue
+      if (d.roundStatus !== 'closed' || roundMonth(d) !== month) continue
       for (const leg of d.legs ?? []) {
-        if (!leg.customerId || !leg.id) continue
-        if ((leg.amount || 0) <= 0) continue
-        const wht = db.legWht(leg)
-        out.push({ leg, round: d, gross: leg.amount || 0, wht, net: (leg.amount || 0) - wht })
+        if (!leg.id || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
+        if (billTo(leg)?.id !== customerId) continue
+        out.push(mk(leg, d))
       }
     }
-    return out
-  }, [dispatches])
+    return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatches, customerId, month, billedLegIds, custByName, locById])
 
-  const eligible = useMemo(
-    () => allBillableLegs
-      .filter(b => b.leg.customerId === customerId && roundMonth(b.round) === month && !billedLegIds.has(b.leg.id!))
-      .sort((a, b) => (a.round.date || '').localeCompare(b.round.date || '')),
-    [allBillableLegs, customerId, month, billedLegIds],
-  )
+  // ขาที่ปิดงานในเดือนนี้ มีค่าขนส่ง แต่ยังหา "ผู้รับบิล" ไม่ได้ (ปลายทางไม่ใช่ลูกค้า & ไม่ override)
+  const unassignedLegs = useMemo<BillableLeg[]>(() => {
+    const out: BillableLeg[] = []
+    for (const d of dispatches) {
+      if (d.roundStatus !== 'closed' || roundMonth(d) !== month) continue
+      for (const leg of d.legs ?? []) {
+        if (!leg.id || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
+        if (billTo(leg)) continue
+        out.push(mk(leg, d))
+      }
+    }
+    return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatches, month, billedLegIds, custByName, locById])
 
   const selectedLegs = useMemo(() => eligible.filter(b => selected.has(b.leg.id!)), [eligible, selected])
   const gross = selectedLegs.reduce((s, b) => s + b.gross, 0)
   const whtAmount = selectedLegs.reduce((s, b) => s + b.wht, 0)
   const net = gross - whtAmount
 
-  const customer = customers.find(c => c.id === customerId)
+  const customer = customerLocs.find(c => c.id === customerId)
 
-  // ขาที่ปิดงานแล้วในเดือนที่เลือก แต่ยังไม่ได้ระบุลูกค้า (งานเก่าก่อนมีช่องเลือกลูกค้า)
-  // — ให้ระบุลูกค้าได้ที่นี่เลย ไม่ต้องเปิดรอบใหม่
-  const unassignedLegs = useMemo<BillableLeg[]>(() => {
-    const out: BillableLeg[] = []
-    for (const d of dispatches) {
-      if (d.roundStatus !== 'closed' || roundMonth(d) !== month) continue
-      for (const leg of d.legs ?? []) {
-        if (leg.customerId || !leg.id || (leg.amount || 0) <= 0) continue
-        const wht = db.legWht(leg)
-        out.push({ leg, round: d, gross: leg.amount || 0, wht, net: (leg.amount || 0) - wht })
-      }
-    }
-    return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
-  }, [dispatches, month])
-
-  const assignCustomer = (legId: string, cid: string) => {
-    if (!cid) return
-    updateLeg.mutate({ id: legId, patch: { customerId: cid } })
+  const assignBillTo = (legId: string, locId: string) => {
+    if (!locId) return
+    updateLeg.mutate({ id: legId, patch: { billToLocationId: locId } })
   }
 
   const toggle = (id: string) => setSelected(prev => {
@@ -107,13 +119,11 @@ export function CustomerBilling() {
     if (next.has(id)) next.delete(id); else next.add(id)
     return next
   })
-  const toggleAll = () => setSelected(prev =>
-    prev.size === eligible.length ? new Set() : new Set(eligible.map(b => b.leg.id!)),
-  )
+  const toggleAll = () => setSelected(prev => prev.size === eligible.length ? new Set() : new Set(eligible.map(b => b.leg.id!)))
 
   const customerNotes = useMemo(
     () => notes
-      .filter(n => n.customerId === customerId && `${n.year}-${String(n.month).padStart(2, '0')}` === month)
+      .filter(n => (n.billToLocationId ?? '') === customerId && `${n.year}-${String(n.month).padStart(2, '0')}` === month)
       .sort((a, b) => (b.issuedAt || '').localeCompare(a.issuedAt || '')),
     [notes, customerId, month],
   )
@@ -127,16 +137,13 @@ export function CustomerBilling() {
     const code = `${prefix}-${y}-${String(m).padStart(2, '0')}-${String(seq).padStart(4, '0')}`
     try {
       const created = await insertNote.mutateAsync({
-        code,
-        docType,
-        customerId,
+        code, docType,
+        billToLocationId: customerId,
+        customerId: null,
         customerName: customer?.name ?? '',
-        year: y,
-        month: m,
+        year: y, month: m,
         bankAccountId: bankAccountId || null,
-        gross,
-        whtAmount,
-        net,
+        gross, whtAmount, net,
         legIds: selectedLegs.map(b => b.leg.id!),
         status: docType === 'receipt' ? 'paid' : 'issued',
         notes: '',
@@ -152,13 +159,11 @@ export function CustomerBilling() {
     if (!confirm(`บันทึกว่าได้รับเงินตาม ${docTypeLabel(n.docType)} ${n.code} แล้ว?`)) return
     await updateNote.mutateAsync({ id: n.id, patch: { status: 'paid', paidAt: new Date().toISOString() } })
   }
-
   const voidNote = async (n: BillingNote) => {
     if (!confirm(`ยกเลิก ${docTypeLabel(n.docType)} ${n.code}? ขาในบิลจะกลับมาเลือกวางบิลใหม่ได้`)) return
     await updateNote.mutateAsync({ id: n.id, patch: { status: 'void' } })
   }
 
-  // พิมพ์: แสดง print-only document แล้วเรียก window.print()
   useEffect(() => {
     if (!printNote) return
     const t = setTimeout(() => { window.print(); setPrintNote(null) }, 60)
@@ -166,18 +171,10 @@ export function CustomerBilling() {
   }, [printNote])
 
   const noteBank = (n: BillingNote) => bankAccounts.find(b => b.id === n.bankAccountId)
-  // หา BillableLeg จาก leg id (รวมที่วางบิลไปแล้ว) เพื่อพิมพ์รายการ
   const legsForNote = (n: BillingNote): BillableLeg[] => {
     const ids = new Set(n.legIds ?? [])
     const out: BillableLeg[] = []
-    for (const d of dispatches) {
-      for (const leg of d.legs ?? []) {
-        if (leg.id && ids.has(leg.id)) {
-          const wht = db.legWht(leg)
-          out.push({ leg, round: d, gross: leg.amount || 0, wht, net: (leg.amount || 0) - wht })
-        }
-      }
-    }
+    for (const d of dispatches) for (const leg of d.legs ?? []) if (leg.id && ids.has(leg.id)) out.push(mk(leg, d))
     return out
   }
 
@@ -195,35 +192,23 @@ export function CustomerBilling() {
           <Field label="ลูกค้า *">
             <select value={customerId} onChange={e => { setCustomerId(e.target.value); setSelected(new Set()) }}>
               <option value="">— เลือกลูกค้า —</option>
-              {customers.slice().sort((a, b) => a.name.localeCompare(b.name, 'th')).map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
+              {customerLocs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </Field>
           <Field label="เดือน / ปี">
             <div className="row" style={{ gap: 8 }}>
-              <select
-                value={Number(month.slice(5, 7))}
-                onChange={e => { setMonth(`${month.slice(0, 4)}-${String(Number(e.target.value)).padStart(2, '0')}`); setSelected(new Set()) }}
-                style={{ flex: 1 }}
-              >
+              <select value={Number(month.slice(5, 7))} onChange={e => { setMonth(`${month.slice(0, 4)}-${String(Number(e.target.value)).padStart(2, '0')}`); setSelected(new Set()) }} style={{ flex: 1 }}>
                 {THAI_MONTHS.map((nm, i) => <option key={i} value={i + 1}>{nm}</option>)}
               </select>
-              <select
-                value={Number(month.slice(0, 4))}
-                onChange={e => { setMonth(`${e.target.value}-${month.slice(5, 7)}`); setSelected(new Set()) }}
-                style={{ flex: 1 }}
-              >
-                {Array.from({ length: 5 }, (_, i) => 2026 + i).map(y => (
-                  <option key={y} value={y}>{y}</option>
-                ))}
+              <select value={Number(month.slice(0, 4))} onChange={e => { setMonth(`${e.target.value}-${month.slice(5, 7)}`); setSelected(new Set()) }} style={{ flex: 1 }}>
+                {Array.from({ length: 5 }, (_, i) => 2026 + i).map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
           </Field>
         </div>
-        {customers.length === 0 && (
+        {customerLocs.length === 0 && (
           <div className="muted" style={{ fontSize: 12.5, marginTop: 10, color: 'var(--amber)' }}>
-            ⚠️ ยังไม่มีลูกค้าในระบบ — เพิ่มลูกค้าที่เมนู “ลูกค้า” ก่อน แล้วผูกลูกค้าให้แต่ละขาตอนเปิดงาน
+            ⚠️ ยังไม่มีสถานที่ที่ตั้งเป็น “ลูกค้า” — ไปที่ งานขนส่ง → จัดการสถานที่ แล้วติ๊ก “เป็นลูกค้า” ให้สถานที่ที่ต้องวางบิล
           </div>
         )}
       </div>
@@ -231,15 +216,15 @@ export function CustomerBilling() {
       {unassignedLegs.length > 0 && (
         <div className="card no-print" style={{ marginBottom: 16, borderColor: '#FCD34D' }}>
           <div className="head" style={{ background: '#FFFBEB' }}>
-            <h3>⚠️ ขาที่ปิดงานแล้วยังไม่ได้ระบุลูกค้า — เดือนนี้ ({unassignedLegs.length})</h3>
+            <h3>⚠️ ขาที่ปิดงานแล้วยังไม่มีผู้รับบิล — เดือนนี้ ({unassignedLegs.length})</h3>
           </div>
           <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
-            งานเก่าที่ปิดก่อนมีช่องเลือกลูกค้า จะยังไม่มีลูกค้าผูกไว้ — ระบุลูกค้าให้แต่ละขาที่นี่ แล้วขานั้นจะไปอยู่ในรายการวางบิลของลูกค้านั้นทันที
+            ขาเหล่านี้ปลายทางยังไม่ได้ตั้งเป็นลูกค้า — เลือก “เก็บเงินจาก” ให้แต่ละขา (หรือไปติ๊กปลายทางเป็นลูกค้าที่จัดการสถานที่ แล้วจะเข้าอัตโนมัติ)
           </div>
           <div className="tbl-wrap" style={{ border: 'none' }}>
             <table className="tbl">
               <thead>
-                <tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th><th className="num right">ยอด</th><th>ระบุลูกค้า</th></tr>
+                <tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th className="num right">ยอด</th><th>เก็บเงินจาก</th></tr>
               </thead>
               <tbody>
                 {unassignedLegs.map(b => (
@@ -247,14 +232,11 @@ export function CustomerBilling() {
                     <td className="mono">{b.round.code}</td>
                     <td>{db.thaiDate(b.round.date)}</td>
                     <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
-                    <td style={{ fontSize: 12.5 }}>{b.leg.cargoType || '—'}</td>
                     <td className="num right">{db.thb(b.gross)}</td>
                     <td>
-                      <select defaultValue="" onChange={e => assignCustomer(b.leg.id!, e.target.value)} disabled={updateLeg.isPending} style={{ minWidth: 160 }}>
+                      <select defaultValue="" onChange={e => assignBillTo(b.leg.id!, e.target.value)} disabled={updateLeg.isPending} style={{ minWidth: 160 }}>
                         <option value="">— เลือกลูกค้า —</option>
-                        {customers.slice().sort((a, c) => a.name.localeCompare(c.name, 'th')).map(c => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
+                        {customerLocs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                     </td>
                   </tr>
@@ -268,14 +250,12 @@ export function CustomerBilling() {
       {customerId && (
         <>
           <div className="card no-print" style={{ marginBottom: 16 }}>
-            <div className="head">
-              <h3>ขาที่ปิดงานแล้ว ยังไม่วางบิล ({eligible.length})</h3>
-            </div>
+            <div className="head"><h3>ขาที่ปิดงานแล้ว ยังไม่วางบิล ({eligible.length})</h3></div>
             {eligible.length === 0 ? (
               <div className="empty" style={{ padding: 32 }}>
                 ไม่มีขาของลูกค้ารายนี้ที่ปิดงานแล้วและยังไม่วางบิลในเดือนนี้
                 <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                  (ขาจะมาที่นี่เมื่อ: ผูกลูกค้ารายนี้ที่ขา + ปิดงานรอบนั้นแล้ว + มีค่าขนส่ง &gt; 0)
+                  (ขาจะมาที่นี่เมื่อ: ปลายทาง = ลูกค้ารายนี้ หรือเลือก “เก็บเงินจาก” เป็นรายนี้ + ปิดงานแล้ว + มีค่าขนส่ง &gt; 0)
                 </div>
               </div>
             ) : (
@@ -283,16 +263,9 @@ export function CustomerBilling() {
                 <table className="tbl">
                   <thead>
                     <tr>
-                      <th style={{ width: 36 }}>
-                        <input type="checkbox" checked={selected.size === eligible.length && eligible.length > 0} onChange={toggleAll} style={{ accentColor: 'var(--primary)' }} />
-                      </th>
-                      <th>รหัสรอบ</th>
-                      <th>วันที่</th>
-                      <th>เส้นทาง</th>
-                      <th>สินค้า</th>
-                      <th className="num right">ยอดเต็ม</th>
-                      <th className="num right">หัก 1%</th>
-                      <th className="num right">สุทธิ</th>
+                      <th style={{ width: 36 }}><input type="checkbox" checked={selected.size === eligible.length && eligible.length > 0} onChange={toggleAll} style={{ accentColor: 'var(--primary)' }} /></th>
+                      <th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th>
+                      <th className="num right">ยอดเต็ม</th><th className="num right">หัก 1%</th><th className="num right">สุทธิ</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -326,18 +299,12 @@ export function CustomerBilling() {
                   <Field label="บัญชีรับเงิน (พิมพ์บนใบวางบิล)">
                     <select value={bankAccountId} onChange={e => setBankAccountId(e.target.value)}>
                       <option value="">— ไม่ระบุ —</option>
-                      {bankAccounts.filter(b => b.active).map(b => (
-                        <option key={b.id} value={b.id}>{b.bankName} {b.accountNo} ({b.accountName})</option>
-                      ))}
+                      {bankAccounts.filter(b => b.active).map(b => <option key={b.id} value={b.id}>{b.bankName} {b.accountNo} ({b.accountName})</option>)}
                     </select>
                   </Field>
                   <div className="row btn-row" style={{ justifyContent: 'flex-end', marginTop: 12, gap: 8 }}>
-                    <button className="btn" onClick={() => issue('receipt')} disabled={insertNote.isPending}>
-                      <Icon name="check" size={14} /> ออกใบเสร็จ (รับเงินแล้ว)
-                    </button>
-                    <button className="btn primary" onClick={() => issue('billing_note')} disabled={insertNote.isPending}>
-                      <Icon name="download" size={14} /> ออกใบวางบิล
-                    </button>
+                    <button className="btn" onClick={() => issue('receipt')} disabled={insertNote.isPending}><Icon name="check" size={14} /> ออกใบเสร็จ (รับเงินแล้ว)</button>
+                    <button className="btn primary" onClick={() => issue('billing_note')} disabled={insertNote.isPending}><Icon name="download" size={14} /> ออกใบวางบิล</button>
                   </div>
                 </div>
               </div>
@@ -349,20 +316,14 @@ export function CustomerBilling() {
               <div className="head"><h3>เอกสารที่ออกแล้วในเดือนนี้ ({customerNotes.length})</h3></div>
               <div className="tbl-wrap" style={{ border: 'none' }}>
                 <table className="tbl">
-                  <thead>
-                    <tr><th>เลขที่</th><th>ประเภท</th><th className="num right">ยอดสุทธิ</th><th>สถานะ</th><th></th></tr>
-                  </thead>
+                  <thead><tr><th>เลขที่</th><th>ประเภท</th><th className="num right">ยอดสุทธิ</th><th>สถานะ</th><th></th></tr></thead>
                   <tbody>
                     {customerNotes.map(n => (
                       <tr key={n.id} style={{ opacity: n.status === 'void' ? 0.5 : 1 }}>
                         <td className="mono">{n.code}</td>
                         <td>{docTypeLabel(n.docType)}</td>
                         <td className="num right">{db.thb(n.net)}</td>
-                        <td>
-                          <span className={`badge ${n.status === 'paid' ? 'green' : n.status === 'void' ? 'red' : 'amber'}`} style={{ fontSize: 11 }}>
-                            {n.status === 'paid' ? 'รับเงินแล้ว' : n.status === 'void' ? 'ยกเลิก' : 'รอชำระ'}
-                          </span>
-                        </td>
+                        <td><span className={`badge ${n.status === 'paid' ? 'green' : n.status === 'void' ? 'red' : 'amber'}`} style={{ fontSize: 11 }}>{n.status === 'paid' ? 'รับเงินแล้ว' : n.status === 'void' ? 'ยกเลิก' : 'รอชำระ'}</span></td>
                         <td>
                           <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
                             <button className="btn ghost sm" onClick={() => setPrintNote(n)}><Icon name="download" size={13} /> พิมพ์</button>
@@ -380,7 +341,7 @@ export function CustomerBilling() {
         </>
       )}
 
-      {/* ── เอกสารสำหรับพิมพ์ (แสดงเฉพาะตอนพิมพ์) ── */}
+      {/* เอกสารสำหรับพิมพ์ */}
       {printNote && (
         <div className="print-only">
           <div className="kps-print-header">
@@ -393,9 +354,7 @@ export function CustomerBilling() {
             <div><strong>วันที่ออก:</strong> {db.thaiDate((printNote.issuedAt || new Date().toISOString()).slice(0, 10))}</div>
           </div>
           <table className="tbl" style={{ width: '100%' }}>
-            <thead>
-              <tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th><th className="num right">ยอดเต็ม</th><th className="num right">หัก 1%</th><th className="num right">สุทธิ</th></tr>
-            </thead>
+            <thead><tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th><th className="num right">ยอดเต็ม</th><th className="num right">หัก 1%</th><th className="num right">สุทธิ</th></tr></thead>
             <tbody>
               {legsForNote(printNote).map(b => (
                 <tr key={b.leg.id}>

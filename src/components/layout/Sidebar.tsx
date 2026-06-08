@@ -63,7 +63,6 @@ const MENU: MenuItem[] = [
       { id: 'dispatch.report', label: 'รายงานสรุป', icon: 'chart' },
       { id: 'dispatch.vehicleMonthly', label: 'สรุปรายเที่ยวรายเดือน (ต่อคัน)', icon: 'calendar' },
       { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน', icon: 'history' },
-      { id: 'customers', label: 'ลูกค้า', icon: 'client' },
       { id: 'dispatch.billing', label: 'สรุป/วางบิลรายลูกค้า', icon: 'money' },
       { id: 'dispatch.locations', label: 'จัดการสถานที่', icon: 'pin' },
     ],

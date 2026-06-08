@@ -93,6 +93,8 @@ export interface BillingNote {
   gross: number
   whtAmount: number
   net: number
+  /** สถานที่-ลูกค้าที่รับบิลนี้ (locations.is_customer) */
+  billToLocationId?: string | null
   /** id ของ "ขา" (dispatch_legs) ที่อยู่ในบิลนี้ — ลูกค้าผูกระดับขา */
   legIds: string[]
   /** เดิม: id ของรอบ — เลิกใช้ คงไว้เพื่อความเข้ากันได้ */
@@ -111,6 +113,12 @@ export interface Location {
   address: string
   notes: string
   active: boolean
+  // เป็นลูกค้า (วางบิลได้) + ข้อมูลตั้งบิล
+  isCustomer?: boolean
+  credit?: number
+  taxId?: string
+  phone?: string
+  contact?: string
 }
 
 export interface Subcontractor {
@@ -146,6 +154,8 @@ export interface DispatchLeg {
   sortOrder?: number
   /** ลูกค้าหักภาษี ณ ที่จ่าย 1% บนขานี้ (มักเป็นขากลับ). gross=amount, net=amount*0.99 */
   wht?: boolean
+  /** ผู้รับบิลของขา (override). ว่าง = ใช้ปลายทางอัตโนมัติถ้าปลายทางเป็นลูกค้า */
+  billToLocationId?: string | null
 }
 
 export interface OtherExpense {

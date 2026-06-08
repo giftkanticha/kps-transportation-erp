@@ -10,9 +10,14 @@ interface LocationForm {
   province: string
   address: string
   notes: string
+  isCustomer: boolean
+  credit: number | string
+  taxId: string
+  phone: string
+  contact: string
 }
 
-const EMPTY: LocationForm = { name: '', category: '', province: '', address: '', notes: '' }
+const EMPTY: LocationForm = { name: '', category: '', province: '', address: '', notes: '', isCustomer: false, credit: 30, taxId: '', phone: '', contact: '' }
 
 // แต่ละแถว = ชื่อสถานที่ที่ใช้จริง (จากทะเบียน ∪ ที่พิมพ์ไว้ในงาน) พร้อมจำนวนขาที่ใช้
 interface Row {
@@ -124,6 +129,11 @@ export function LocationsPage() {
       province: r.master?.province ?? '',
       address: r.master?.address ?? '',
       notes: r.master?.notes ?? '',
+      isCustomer: r.master?.isCustomer ?? false,
+      credit: r.master?.credit ?? 30,
+      taxId: r.master?.taxId ?? '',
+      phone: r.master?.phone ?? '',
+      contact: r.master?.contact ?? '',
     })
     setShow(true)
   }
@@ -146,10 +156,11 @@ export function LocationsPage() {
       setBusy(true)
       try {
         if (newName !== oldName) await renameInLegs(oldName, newName)
+        const fields = { name: newName, category: form.category, province: form.province, address: form.address, notes: form.notes, isCustomer: form.isCustomer, credit: +form.credit || 0, taxId: form.taxId, phone: form.phone, contact: form.contact }
         if (editRow.master) {
-          await updateLocation.mutateAsync({ id: editRow.master.id, patch: { name: newName, category: form.category, province: form.province, address: form.address, notes: form.notes } })
+          await updateLocation.mutateAsync({ id: editRow.master.id, patch: fields })
         } else {
-          await insertLocation.mutateAsync({ name: newName, category: form.category, province: form.province, address: form.address, notes: form.notes, active: true })
+          await insertLocation.mutateAsync({ ...fields, active: true })
         }
         setShow(false); setForm(EMPTY); setEditRow(null)
       } catch (e) {
@@ -161,7 +172,7 @@ export function LocationsPage() {
     // สร้างใหม่
     setBusy(true)
     try {
-      await insertLocation.mutateAsync({ name: newName, category: form.category, province: form.province, address: form.address, notes: form.notes, active: true })
+      await insertLocation.mutateAsync({ name: newName, category: form.category, province: form.province, address: form.address, notes: form.notes, isCustomer: form.isCustomer, credit: +form.credit || 0, taxId: form.taxId, phone: form.phone, contact: form.contact, active: true })
       setShow(false); setForm(EMPTY)
     } catch (e) {
       alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
@@ -221,6 +232,7 @@ export function LocationsPage() {
               <th>สถานที่</th>
               <th>หมวด</th>
               <th>จังหวัด</th>
+              <th>ลูกค้า</th>
               <th className="num right">ใช้ในงาน</th>
               <th>ทะเบียน</th>
               <th></th>
@@ -235,6 +247,11 @@ export function LocationsPage() {
                 </td>
                 <td>{r.master?.category || <span className="muted">—</span>}</td>
                 <td>{r.master?.province || <span className="muted">—</span>}</td>
+                <td>
+                  {r.master?.isCustomer
+                    ? <span className="badge green" style={{ fontSize: 11 }}>ลูกค้า · เครดิต {r.master.credit ?? 30} วัน</span>
+                    : <span className="muted">—</span>}
+                </td>
                 <td className="num right">{r.usage > 0 ? `${r.usage} ขา` : <span className="muted">—</span>}</td>
                 <td>
                   {r.master
@@ -264,7 +281,7 @@ export function LocationsPage() {
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={6} className="empty" style={{ padding: 32 }}>ยังไม่มีสถานที่ — กด “เพิ่มสถานที่ใหม่”</td></tr>
+              <tr><td colSpan={7} className="empty" style={{ padding: 32 }}>ยังไม่มีสถานที่ — กด “เพิ่มสถานที่ใหม่”</td></tr>
             )}
           </tbody>
         </table>
@@ -307,6 +324,34 @@ export function LocationsPage() {
           <Field label="หมายเหตุ">
             <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} style={{ width: '100%', resize: 'vertical' }} />
           </Field>
+        </div>
+
+        <div style={{ marginTop: 14, padding: 12, borderRadius: 8, background: form.isCustomer ? '#ECFDF5' : 'var(--bg)', border: form.isCustomer ? '1px solid #A7F3D0' : '1px dashed var(--line)' }}>
+          <label className="row" style={{ gap: 8, cursor: 'pointer', fontSize: 13.5, alignItems: 'center', fontWeight: 600 }}>
+            <input type="checkbox" checked={form.isCustomer} onChange={e => setForm(f => ({ ...f, isCustomer: e.target.checked }))} style={{ accentColor: 'var(--primary)' }} />
+            <span>เป็นลูกค้า (ใช้วางบิล/เก็บเงินได้)</span>
+          </label>
+          {form.isCustomer && (
+            <>
+              <div className="grid-2" style={{ gap: 12, marginTop: 12 }}>
+                <Field label="เครดิตเทอม (วัน)">
+                  <input type="number" value={form.credit} onChange={e => setForm(f => ({ ...f, credit: e.target.value }))} placeholder="30" />
+                </Field>
+                <Field label="เลขผู้เสียภาษี">
+                  <input value={form.taxId} onChange={e => setForm(f => ({ ...f, taxId: e.target.value }))} />
+                </Field>
+                <Field label="ผู้ติดต่อ">
+                  <input value={form.contact} onChange={e => setForm(f => ({ ...f, contact: e.target.value }))} />
+                </Field>
+                <Field label="เบอร์โทร">
+                  <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} />
+                </Field>
+              </div>
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 8 }}>
+                💡 งานที่ "ปลายทาง" เป็นสถานที่นี้ จะถูกตั้งให้ลูกค้ารายนี้รับบิลอัตโนมัติ (เปลี่ยนรายขาได้ตอนเพิ่มขา)
+              </div>
+            </>
+          )}
         </div>
       </Modal>
 

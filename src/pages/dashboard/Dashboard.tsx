@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner, EditApprovalRequest, BillingNote } from '../../types'
+import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner, EditApprovalRequest, BillingNote, Location, DispatchLeg } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
 import { canAccessRoute } from '../../lib/permissions'
 
@@ -306,6 +306,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const { data: stock = [] } = useList<StockItem>('stock_items')
   const { data: subJobs = [] } = useList<SubJob>('sub_jobs')
   const { data: billingNotes = [] } = useList<BillingNote>('billing_notes')
+  const { data: locationsD = [] } = useList<Location>('locations')
 
   const netOf = (j: SubJob) => (j.total || 0) - (j.wht ? (j.total || 0) * 0.01 : 0)
   const subUnpaid      = useMemo(() => subJobs.filter(j => j.status === 'unpaid'), [subJobs])
@@ -358,6 +359,16 @@ export function Dashboard({ user, setActive }: DashboardProps) {
     for (const n of billingNotes) if (n.status === 'issued') for (const id of n.legIds ?? []) s.add(id)
     return s
   }, [billingNotes])
+  // ผู้รับบิลของขา = สถานที่ที่เป็นลูกค้า (override ก่อน, ไม่งั้น = ปลายทางถ้าเป็นลูกค้า)
+  const custLocById = useMemo(() => new Map(locationsD.map(l => [l.id, l])), [locationsD])
+  const custLocByName = useMemo(() => {
+    const m = new Map<string, Location>()
+    for (const l of locationsD) if (l.isCustomer && l.active) m.set(l.name, l)
+    return m
+  }, [locationsD])
+  const billToOf = (leg: DispatchLeg): Location | null =>
+    leg.billToLocationId ? (custLocById.get(leg.billToLocationId) ?? null) : (custLocByName.get(leg.destination) ?? null)
+
   const unpaidByCustomer = useMemo(() => {
     const todayMs = Date.now()
     const map = new Map<string, { name: string; outstanding: number; legs: number; billed: number; overdue: boolean }>()
@@ -365,24 +376,25 @@ export function Dashboard({ user, setActive }: DashboardProps) {
       if (d.roundStatus !== 'closed') continue
       const baseDate = (d.returnAt || d.depart || d.date || '').slice(0, 10)
       for (const leg of d.legs ?? []) {
-        if (!leg.customerId || !leg.id) continue
+        if (!leg.id) continue
         const net = (leg.amount || 0) - db.legWht(leg)
-        if (net <= 0) continue
-        if (paidLegIds.has(leg.id)) continue
-        const cust = customers.find(c => c.id === leg.customerId)
-        const cur = map.get(leg.customerId) ?? { name: cust?.name ?? 'ไม่ระบุลูกค้า', outstanding: 0, legs: 0, billed: 0, overdue: false }
+        if (net <= 0 || paidLegIds.has(leg.id)) continue
+        const loc = billToOf(leg)
+        if (!loc) continue
+        const cur = map.get(loc.id) ?? { name: loc.name, outstanding: 0, legs: 0, billed: 0, overdue: false }
         cur.outstanding += net
         cur.legs += 1
         if (issuedLegIds.has(leg.id)) cur.billed += 1
         if (baseDate) {
-          const dueMs = new Date(baseDate).getTime() + (cust?.credit ?? 30) * 86400000
+          const dueMs = new Date(baseDate).getTime() + (loc.credit ?? 30) * 86400000
           if (todayMs > dueMs) cur.overdue = true
         }
-        map.set(leg.customerId, cur)
+        map.set(loc.id, cur)
       }
     }
     return [...map.values()].sort((a, b) => b.outstanding - a.outstanding)
-  }, [dispatch, customers, paidLegIds, issuedLegIds])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatch, locationsD, paidLegIds, issuedLegIds])
   const totalUnpaidLegs = useMemo(() => unpaidByCustomer.reduce((s, c) => s + c.legs, 0), [unpaidByCustomer])
   const totalUnpaidAmount = useMemo(() => unpaidByCustomer.reduce((s, c) => s + c.outstanding, 0), [unpaidByCustomer])
 

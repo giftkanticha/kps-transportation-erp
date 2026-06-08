@@ -3,7 +3,7 @@ import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole, Customer } from '../../types'
+import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole, Location } from '../../types'
 import { Icon, Field, LocationCombobox } from '../../components/ui'
 
 interface Props {
@@ -37,7 +37,7 @@ function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
 interface LegFormState {
   origin: string
   destination: string
-  customerId: string
+  billToLocationId: string
   cargo: string
   cargoType: string
   priceMode: 'per_ton' | 'per_kg' | 'lump'
@@ -49,7 +49,7 @@ interface LegFormState {
 }
 
 const EMPTY_LEG: LegFormState = {
-  origin: '', destination: '', customerId: '', cargo: '', cargoType: '',
+  origin: '', destination: '', billToLocationId: '', cargo: '', cargoType: '',
   priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '', wht: false,
 }
 
@@ -102,7 +102,10 @@ function LegModal({
   onCancel: () => void
 }) {
   const [f, setF] = useState(initial)
-  const { data: customers = [] } = useList<Customer>('customers')
+  const { data: locations = [] } = useList<Location>('locations')
+  const customerLocs = locations.filter(l => l.isCustomer && l.active).sort((a, b) => a.name.localeCompare(b.name, 'th'))
+  // ปลายทางเป็นลูกค้าไหม → ใช้เป็นค่าเริ่มต้นผู้รับบิล
+  const destIsCustomer = customerLocs.some(l => l.name === f.destination.trim())
   const set = <K extends keyof LegFormState>(k: K, v: LegFormState[K]) => setF(s => ({ ...s, [k]: v }))
   const isReturn = f.legType === 'return'
   const isLump = f.priceMode === 'lump'
@@ -177,11 +180,11 @@ function LegModal({
                 <option value="return">Return (เที่ยวกลับ เปล่า)</option>
               </select>
             </Field>
-            <Field label="ลูกค้า (สำหรับวางบิล)">
-              <select value={f.customerId} onChange={e => set('customerId', e.target.value)}>
-                <option value="">— ไม่ระบุ —</option>
-                {customers.slice().sort((a, b) => a.name.localeCompare(b.name, 'th')).map(c => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+            <Field label="เก็บเงินจาก (ลูกค้า)">
+              <select value={f.billToLocationId} onChange={e => set('billToLocationId', e.target.value)}>
+                <option value="">{destIsCustomer ? `— ใช้ปลายทาง: ${f.destination} —` : '— ใช้ปลายทางอัตโนมัติ —'}</option>
+                {customerLocs.map(l => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
                 ))}
               </select>
             </Field>
@@ -628,7 +631,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
     const fields = {
       origin: form.origin.trim(),
       destination: form.destination.trim(),
-      customerId: form.customerId || null,
+      billToLocationId: form.billToLocationId || null,
       cargo: form.cargo.trim(),
       cargoType: form.cargoType.trim(),
       priceMode: form.priceMode,
@@ -862,7 +865,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                                 data: {
                                   origin: l.origin,
                                   destination: l.destination,
-                                  customerId: l.customerId || '',
+                                  billToLocationId: l.billToLocationId || '',
                                   cargo: l.cargo || '',
                                   cargoType: l.cargoType || '',
                                   priceMode: mode,
