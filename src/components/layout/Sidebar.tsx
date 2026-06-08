@@ -63,6 +63,8 @@ const MENU: MenuItem[] = [
       { id: 'dispatch.report', label: 'รายงานสรุป', icon: 'chart' },
       { id: 'dispatch.vehicleMonthly', label: 'สรุปรายเที่ยวรายเดือน (ต่อคัน)', icon: 'calendar' },
       { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน', icon: 'history' },
+      { id: 'dispatch.billing', label: 'สรุป/วางบิลรายลูกค้า', icon: 'money' },
+      { id: 'dispatch.locations', label: 'จัดการสถานที่', icon: 'pin' },
     ],
   },
   {
@@ -96,6 +98,7 @@ const MENU: MenuItem[] = [
     sub: [
       { id: 'settings.users', label: 'จัดการผู้ใช้งาน', icon: 'users' },
       { id: 'settings.company', label: 'ข้อมูลบริษัท', icon: 'building' },
+      { id: 'settings.bankAccounts', label: 'บัญชีธนาคารบริษัท', icon: 'money' },
     ],
   },
   {

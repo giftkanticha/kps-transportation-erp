@@ -343,6 +343,35 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const customersWithDebt = useMemo(() => customers.filter(c => (c.openInvoice ?? 0) > 0), [customers])
   const totalOpenInvoice  = useMemo(() => customersWithDebt.reduce((s, c) => s + (c.openInvoice ?? 0), 0), [customersWithDebt])
 
+  // AR per closed-but-unpaid round (decoupled from job closing). Grouped by
+  // customer so the dashboard nags about uncollected haulage fees. Overdue =
+  // beyond the customer's credit terms (days) since the return/run date.
+  const unpaidRounds = useMemo(
+    () => dispatch.filter(d => d.roundStatus === 'closed' && (d.paymentStatus ?? 'unpaid') !== 'paid'),
+    [dispatch],
+  )
+  const unpaidByCustomer = useMemo(() => {
+    const todayMs = Date.now()
+    const map = new Map<string, { name: string; outstanding: number; rounds: number; overdue: boolean }>()
+    for (const d of unpaidRounds) {
+      const net = db.roundNetRevenue(d) - (d.amountPaid || 0)
+      if (net <= 0) continue
+      const cust = customers.find(c => c.id === d.customerId)
+      const key = d.customerId || '__none__'
+      const cur = map.get(key) ?? { name: cust?.name ?? 'ไม่ระบุลูกค้า', outstanding: 0, rounds: 0, overdue: false }
+      cur.outstanding += net
+      cur.rounds += 1
+      const baseDate = (d.returnAt || d.depart || d.date || '').slice(0, 10)
+      if (baseDate) {
+        const dueMs = new Date(baseDate).getTime() + (cust?.credit ?? 30) * 86400000
+        if (todayMs > dueMs) cur.overdue = true
+      }
+      map.set(key, cur)
+    }
+    return [...map.values()].sort((a, b) => b.outstanding - a.outstanding)
+  }, [unpaidRounds, customers])
+  const totalUnpaidRounds = useMemo(() => unpaidByCustomer.reduce((s, c) => s + c.outstanding, 0), [unpaidByCustomer])
+
   // AP — group unpaid expense_headers by creditor (partner) so the dashboard
   // surfaces 'who owes what' instead of a per-invoice list. Vehicle is
   // intentionally ignored — AP is per-creditor, not per-truck.
@@ -583,6 +612,24 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                             .map(c => `${c.name} ${db.thb(c.openInvoice)}`)
                             .join(' · ')}
                           {customersWithDebt.length > 3 && ` และอีก ${customersWithDebt.length - 3}`}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {unpaidByCustomer.length > 0 && (
+                    <div className="feed-item" onClick={() => setActive('dispatch.billing')} style={{ cursor: 'pointer' }}>
+                      <div className={`ic ${unpaidByCustomer.some(c => c.overdue) ? 'red' : 'amber'}`}><Icon name="money" size={16} /></div>
+                      <div className="body">
+                        <div className="who">
+                          งานปิดแล้วยังไม่ได้รับเงิน {unpaidRounds.length} รอบ · รวม {db.thb(totalUnpaidRounds)}
+                          {unpaidByCustomer.some(c => c.overdue) && <span className="badge red" style={{ marginLeft: 8, fontSize: 10.5 }}>เกินกำหนด</span>}
+                        </div>
+                        <div className="txt">
+                          {unpaidByCustomer
+                            .slice(0, 3)
+                            .map(c => `${c.name} ${db.thb(c.outstanding)}${c.overdue ? ' ⚠️' : ''}`)
+                            .join(' · ')}
+                          {unpaidByCustomer.length > 3 && ` และอีก ${unpaidByCustomer.length - 3}`}
                         </div>
                       </div>
                     </div>

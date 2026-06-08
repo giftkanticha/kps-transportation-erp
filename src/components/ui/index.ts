@@ -1,6 +1,7 @@
 export { Icon } from './Icon'
 export type { IconProps } from './Icon'
 export { Field } from './Field'
+export { LocationCombobox } from './LocationCombobox'
 export { SearchInput } from './SearchInput'
 export { SegmentedFilter } from './SegmentedFilter'
 export type { SegmentOption } from './SegmentedFilter'

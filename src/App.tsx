@@ -35,6 +35,9 @@ import { VehicleManagement } from './pages/vehicles/VehicleManagement'
 import { MaintenancePage } from './pages/maintenance/MaintenancePage'
 import { CustomersPage } from './pages/customers/CustomersPage'
 import { PartnersPage } from './pages/customers/PartnersPage'
+import { LocationsPage } from './pages/locations/LocationsPage'
+import { CustomerBilling } from './pages/dispatch/CustomerBilling'
+import { CompanyBankAccountsPage } from './pages/settings/CompanyBankAccountsPage'
 import { SettingsUsers } from './pages/settings/SettingsUsers'
 import { SettingsCompany } from './pages/settings/SettingsCompany'
 
@@ -68,6 +71,9 @@ const crumbMap: Record<string, string> = {
   'dispatch.vehicleMonthly': 'งานขนส่ง • สรุปรายเที่ยวรายเดือน (ต่อคัน)',
   'dispatch.report': 'งานขนส่ง • รายงานสรุป',
   'dispatch.history': 'งานขนส่ง • ประวัติงาน',
+  'dispatch.locations': 'งานขนส่ง • จัดการสถานที่',
+  'dispatch.billing': 'งานขนส่ง • สรุป/วางบิลรายลูกค้า',
+  'settings.bankAccounts': 'ตั้งค่า • บัญชีธนาคารบริษัท',
   subcontractors: 'รถรับจ้างร่วม',
   'subcontractors.close': 'รถรับจ้างร่วม • ปิดงาน',
   'subcontractors.history': 'รถรับจ้างร่วม • ประวัติการจ้าง',
@@ -228,11 +234,17 @@ export default function App() {
         return <CustomersPage />
       case 'partners':
         return <PartnersPage />
+      case 'dispatch.locations':
+        return <LocationsPage />
+      case 'dispatch.billing':
+        return <CustomerBilling />
 
       case 'settings.users':
         return <SettingsUsers />
       case 'settings.company':
         return <SettingsCompany setActive={setActive} />
+      case 'settings.bankAccounts':
+        return <CompanyBankAccountsPage />
 
       case 'admin.users':
         return isAdmin ? <UserManagementPage /> : <Dashboard user={legacyUser} setActive={setActive} />

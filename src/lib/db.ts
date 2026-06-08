@@ -208,6 +208,19 @@ export const db = {
     return (d.legs ?? []).reduce((s, l) => s + (l.amount || 0), 0)
   },
 
+  // ── Withholding tax (ภาษีหัก ณ ที่จ่าย 1% — ฝั่งลูกค้า) ─────────────────────
+  // gross (amount) คือค่าหลักเสมอ; WHT/net เป็นค่า derived เพื่อแสดงผลและวางบิล
+  // ไม่ได้เปลี่ยนค่าใน dispatch.revenue (mirror แนวทางฝั่งผู้รับเหมา sub_jobs.wht)
+  legWht(l: DispatchLeg): number {
+    return l.wht ? (l.amount || 0) * 0.01 : 0
+  },
+  roundWht(d: Dispatch): number {
+    return (d.legs ?? []).reduce((s, l) => s + (l.wht ? (l.amount || 0) * 0.01 : 0), 0)
+  },
+  roundNetRevenue(d: Dispatch): number {
+    return (d.legs ?? []).reduce((s, l) => s + (l.amount || 0) - (l.wht ? (l.amount || 0) * 0.01 : 0), 0)
+  },
+
   roundPerDiem(d: Dispatch): number {
     return (d.legs ?? []).reduce((s, l) => s + (l.perDiem || 0), 0)
   },

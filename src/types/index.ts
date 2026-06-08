@@ -71,6 +71,45 @@ export interface Customer {
   address: string
 }
 
+export interface CompanyBankAccount {
+  id: string
+  bankName: string
+  accountNo: string
+  accountName: string
+  branch: string
+  isDefault: boolean
+  active: boolean
+}
+
+export interface BillingNote {
+  id: string
+  code: string
+  docType: 'billing_note' | 'receipt'
+  customerId: string | null
+  customerName: string
+  year: number
+  month: number
+  bankAccountId: string | null
+  gross: number
+  whtAmount: number
+  net: number
+  dispatchIds: string[]
+  status: 'issued' | 'paid' | 'void'
+  issuedAt?: string
+  paidAt?: string | null
+  notes: string
+}
+
+export interface Location {
+  id: string
+  name: string
+  category: string
+  province: string
+  address: string
+  notes: string
+  active: boolean
+}
+
 export interface Subcontractor {
   id: string
   code: string
@@ -102,6 +141,8 @@ export interface DispatchLeg {
   closed?: boolean
   dispatchId?: string
   sortOrder?: number
+  /** ลูกค้าหักภาษี ณ ที่จ่าย 1% บนขานี้ (มักเป็นขากลับ). gross=amount, net=amount*0.99 */
+  wht?: boolean
 }
 
 export interface OtherExpense {
@@ -146,6 +187,11 @@ export interface Dispatch {
   carryForwardFrom?: string | null
   splitParentId?: string | null
   locked?: boolean
+  // Customer payment tracking — fully decoupled from roundStatus. A round can be
+  // CLOSED while still 'unpaid'; the dashboard surfaces outstanding amounts.
+  paymentStatus?: 'unpaid' | 'partial' | 'paid'
+  amountPaid?: number
+  paidAt?: string | null
 }
 
 export type AccountingPeriodStatus = 'OPEN' | 'PENDING_CLOSE' | 'CLOSED'
