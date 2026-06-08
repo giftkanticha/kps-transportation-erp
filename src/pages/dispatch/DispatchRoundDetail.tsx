@@ -46,11 +46,12 @@ interface LegFormState {
   legType: 'outbound' | 'backhaul' | 'return'
   notes: string
   wht: boolean
+  noBill: boolean
 }
 
 const EMPTY_LEG: LegFormState = {
   origin: '', destination: '', billToLocationId: '', cargo: '', cargoType: '',
-  priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '', wht: false,
+  priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '', wht: false, noBill: false,
 }
 
 function legTypeLabel(t?: string): string {
@@ -181,7 +182,7 @@ function LegModal({
               </select>
             </Field>
             <Field label="เก็บเงินจาก (ลูกค้า)">
-              <select value={f.billToLocationId} onChange={e => set('billToLocationId', e.target.value)}>
+              <select value={f.billToLocationId} onChange={e => set('billToLocationId', e.target.value)} disabled={f.noBill}>
                 <option value="">{destIsCustomer ? `— ใช้ปลายทาง: ${f.destination} —` : '— ใช้ปลายทางอัตโนมัติ —'}</option>
                 {customerLocs.map(l => (
                   <option key={l.id} value={l.id}>{l.name}</option>
@@ -189,6 +190,10 @@ function LegModal({
               </select>
             </Field>
           </div>
+          <label className="row" style={{ gap: 8, cursor: 'pointer', fontSize: 13, alignItems: 'center' }}>
+            <input type="checkbox" checked={f.noBill} onChange={e => set('noBill', e.target.checked)} style={{ accentColor: 'var(--primary)' }} />
+            <span>ไม่ต้องวางบิล (งานภายใน / ไม่มีลูกค้า) — ตัดออกจากหน้าวางบิลและยอดค้าง</span>
+          </label>
           <div className="grid-2" style={{ gap: 12 }}>
             <Field label="ต้นทาง *">
               <LocationCombobox value={f.origin} onChange={v => set('origin', v)} placeholder="เช่น โรงงาน KPS" />
@@ -631,7 +636,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
     const fields = {
       origin: form.origin.trim(),
       destination: form.destination.trim(),
-      billToLocationId: form.billToLocationId || null,
+      billToLocationId: form.noBill ? null : (form.billToLocationId || null),
       cargo: form.cargo.trim(),
       cargoType: form.cargoType.trim(),
       priceMode: form.priceMode,
@@ -641,6 +646,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       legType: form.legType,
       notes: form.notes.trim() || null,
       wht: form.legType !== 'outbound' ? form.wht : false,
+      noBill: form.noBill,
     } as Partial<DispatchLeg>
     try {
       let nextLegs: DispatchLeg[]
@@ -866,6 +872,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                                   origin: l.origin,
                                   destination: l.destination,
                                   billToLocationId: l.billToLocationId || '',
+                                  noBill: l.noBill ?? false,
                                   cargo: l.cargo || '',
                                   cargoType: l.cargoType || '',
                                   priceMode: mode,

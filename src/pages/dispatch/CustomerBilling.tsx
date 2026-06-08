@@ -80,7 +80,7 @@ export function CustomerBilling() {
     for (const d of dispatches) {
       if (d.roundStatus !== 'closed' || roundMonth(d) !== month) continue
       for (const leg of d.legs ?? []) {
-        if (!leg.id || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
+        if (!leg.id || leg.noBill || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
         if (billTo(leg)?.id !== customerId) continue
         out.push(mk(leg, d))
       }
@@ -95,7 +95,7 @@ export function CustomerBilling() {
     for (const d of dispatches) {
       if (d.roundStatus !== 'closed' || roundMonth(d) !== month) continue
       for (const leg of d.legs ?? []) {
-        if (!leg.id || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
+        if (!leg.id || leg.noBill || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
         if (billTo(leg)) continue
         out.push(mk(leg, d))
       }
@@ -116,6 +116,7 @@ export function CustomerBilling() {
   const pickBillTo = async (leg: DispatchLeg, value: string) => {
     if (!value || !leg.id) return
     try {
+      if (value === 'nobill') { await updateLeg.mutateAsync({ id: leg.id, patch: { noBill: true } }); return }
       let locId = ''
       if (value.startsWith('id:')) {
         locId = value.slice(3)
@@ -265,6 +266,7 @@ export function CustomerBilling() {
                             {customerLocs.map(c => <option key={c.id} value={`id:${c.id}`}>{c.name}</option>)}
                           </optgroup>
                         )}
+                        <option value="nobill">— ไม่ต้องวางบิล (ตัดออก) —</option>
                       </select>
                     </td>
                   </tr>

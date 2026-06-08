@@ -376,7 +376,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
       if (d.roundStatus !== 'closed') continue
       const baseDate = (d.returnAt || d.depart || d.date || '').slice(0, 10)
       for (const leg of d.legs ?? []) {
-        if (!leg.id) continue
+        if (!leg.id || leg.noBill) continue
         const net = (leg.amount || 0) - db.legWht(leg)
         if (net <= 0 || paidLegIds.has(leg.id)) continue
         const loc = billToOf(leg)
