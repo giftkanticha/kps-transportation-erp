@@ -63,6 +63,7 @@ const MENU: MenuItem[] = [
       { id: 'dispatch.report', label: 'รายงานสรุป', icon: 'chart' },
       { id: 'dispatch.vehicleMonthly', label: 'สรุปรายเที่ยวรายเดือน (ต่อคัน)', icon: 'calendar' },
       { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน', icon: 'history' },
+      { id: 'customers', label: 'ลูกค้า', icon: 'client' },
       { id: 'dispatch.billing', label: 'สรุป/วางบิลรายลูกค้า', icon: 'money' },
       { id: 'dispatch.locations', label: 'จัดการสถานที่', icon: 'pin' },
     ],
@@ -74,13 +75,6 @@ const MENU: MenuItem[] = [
       { id: 'subcontractors.close', label: 'ปิดงาน', icon: 'check' },
       { id: 'subcontractors.history', label: 'ประวัติการจ้าง', icon: 'history' },
       { id: 'subcontractors.drivers', label: 'คนขับรถร่วม', icon: 'user' },
-    ],
-  },
-  {
-    id: 'customers', label: 'ลูกค้า / คู่ค้า', icon: 'client', roles: ['admin', 'manager'],
-    sub: [
-      { id: 'customers', label: 'ลูกค้า', icon: 'client' },
-      { id: 'partners', label: 'คู่ค้า / ช่าง', icon: 'wrench' },
     ],
   },
   {

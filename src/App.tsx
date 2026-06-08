@@ -84,7 +84,7 @@ const crumbMap: Record<string, string> = {
   'expenses.stock': 'สต็อคคลัง KPS',
   'expenses.report': 'ค่าใช้จ่าย • รายงานสรุป',
   'expenses.vendors': 'ทะเบียนร้านค้า/ช่าง',
-  customers: 'ลูกค้า',
+  customers: 'งานขนส่ง • ลูกค้า',
   partners: 'คู่ค้า / ช่าง',
   maintenance: 'การบำรุงรักษา',
   finance: 'การเงิน • P&L รายคัน',
