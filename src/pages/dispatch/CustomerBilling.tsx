@@ -7,6 +7,8 @@ import type { Customer, CompanyBankAccount, BillingNote, Dispatch, DispatchLeg }
 
 const docTypeLabel = (t: BillingNote['docType']) => (t === 'receipt' ? 'ใบเสร็จรับเงิน' : 'ใบวางบิล')
 
+const THAI_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม']
+
 // ขาที่วางบิลได้ = ขา + รอบแม่ (ผูกวันที่/รหัสไว้ด้วย)
 interface BillableLeg {
   leg: DispatchLeg
@@ -177,8 +179,25 @@ export function CustomerBilling() {
               ))}
             </select>
           </Field>
-          <Field label="เดือน">
-            <input type="month" value={month} onChange={e => { setMonth(e.target.value); setSelected(new Set()) }} />
+          <Field label="เดือน / ปี">
+            <div className="row" style={{ gap: 8 }}>
+              <select
+                value={Number(month.slice(5, 7))}
+                onChange={e => { setMonth(`${month.slice(0, 4)}-${String(Number(e.target.value)).padStart(2, '0')}`); setSelected(new Set()) }}
+                style={{ flex: 1 }}
+              >
+                {THAI_MONTHS.map((nm, i) => <option key={i} value={i + 1}>{nm}</option>)}
+              </select>
+              <select
+                value={Number(month.slice(0, 4))}
+                onChange={e => { setMonth(`${e.target.value}-${month.slice(5, 7)}`); setSelected(new Set()) }}
+                style={{ flex: 1 }}
+              >
+                {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 3 + i).map(y => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
           </Field>
         </div>
         {customers.length === 0 && (
