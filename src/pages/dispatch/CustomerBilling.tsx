@@ -193,7 +193,7 @@ export function CustomerBilling() {
                 onChange={e => { setMonth(`${e.target.value}-${month.slice(5, 7)}`); setSelected(new Set()) }}
                 style={{ flex: 1 }}
               >
-                {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 3 + i).map(y => (
+                {Array.from({ length: 5 }, (_, i) => 2026 + i).map(y => (
                   <option key={y} value={y}>{y}</option>
                 ))}
               </select>
