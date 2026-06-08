@@ -2,9 +2,14 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
+import { useAccountingPeriods, findPeriod } from '../../hooks/useAccountingPeriods'
 import { Icon, SearchInput, FontScaleControl } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
-import type { Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance, Expense, ExpenseHeader, Employee } from '../../types'
+import type {
+  Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance,
+  Expense, ExpenseHeader, Employee,
+  AccountingPeriod, AccountingPeriodSnapshot,
+} from '../../types'
 
 /* ─────────────────────────────────────────────────── helpers ── */
 
@@ -59,19 +64,52 @@ function computeRows(
   expenseHeaders: ExpenseHeader[],
   employees: Employee[],
   ym: string,
+  periods: AccountingPeriod[],
+  snapshots: AccountingPeriodSnapshot[],
 ): VehicleRow[] {
   const driverVehicleCount: Record<string, number> = {}
   for (const v of vehicles) {
     if (v.driverId) driverVehicleCount[v.driverId] = (driverVehicleCount[v.driverId] ?? 0) + 1
   }
 
+  // Find the accounting period for this ym (if any). Used to:
+  //  1. Respect carry-forward (accountingPeriodId overrides depart/date)
+  //  2. Read snapshot when CLOSED → revenue/perDiem are final
+  const [yStr, mStr] = ym.split('-')
+  const targetYear  = Number(yStr)
+  const targetMonth = Number(mStr)
+  const period = findPeriod(periods, targetYear, targetMonth)
+  const periodClosed = period?.status === 'CLOSED'
+
+  // Same filter rule as DispatchVehicleMonthlyReport: closed-only by default
+  // + respect accounting period assignment (carry-forward).
+  const dispatchInPeriod = (d: Dispatch): boolean => {
+    if (d.accountingPeriodId && period && d.accountingPeriodId === period.id) return true
+    if (d.accountingPeriodId && period && d.accountingPeriodId !== period.id) return false
+    // No explicit period assignment → fall back to depart || date month match.
+    const basis = d.depart || d.date
+    if (!basis) return false
+    return ymKey(basis) === ym
+  }
+
   return vehicles.map(v => {
-    const myDispatches = dispatches.filter(d => d.vehicleId === v.id && ymKey(d.date) === ym)
-    const rev = myDispatches.reduce((s, d) => s + (d.revenue ?? d.totalAmount ?? 0), 0)
-    const allowance = myDispatches.reduce((s, d) => {
-      const fromLegs = (d.legs ?? []).reduce((ss, l) => ss + (l.perDiem ?? 0), 0)
-      return s + (fromLegs > 0 ? fromLegs : (d.perDiem ?? 0))
-    }, 0)
+    const myDispatches = dispatches.filter(d =>
+      d.vehicleId === v.id
+      && dispatchInPeriod(d)
+      // Only count rounds that are properly closed (or legacy 'completed').
+      && (d.roundStatus === 'closed' || d.status === 'completed'),
+    )
+    // Use leg sums (db.roundRevenue) to match DispatchVehicleMonthlyReport.
+    // If the period is CLOSED, override with snapshot (locked numbers).
+    const snapshot = periodClosed && period
+      ? snapshots.find(s => s.periodId === period.id && s.vehicleId === v.id)
+      : null
+    const rev = snapshot
+      ? snapshot.data.revenue
+      : myDispatches.reduce((s, d) => s + db.roundRevenue(d), 0)
+    const allowance = snapshot
+      ? snapshot.data.perDiem
+      : myDispatches.reduce((s, d) => s + db.roundPerDiem(d), 0)
 
     // ใช้ accountingDate (เดือนค่าใช้จ่าย) ถ้ามี — น้ำมันปิดรอบที่เติมข้ามเดือนจะตกเดือนของรอบ
     const myFuelLogs = fuel.filter(f => f.vehicleId === v.id && ymKey(f.accountingDate || f.date) === ym)
@@ -499,6 +537,8 @@ export function FinancePL() {
   const { data: expenses = [] } = useList<Expense>('expenses')
   const { data: expenseHeaders = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: employees = [] } = useList<Employee>('employees')
+  const { data: periods = [] } = useAccountingPeriods()
+  const { data: snapshots = [] } = useList<AccountingPeriodSnapshot>('accounting_period_snapshots')
 
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const pickedInited = useRef(false)
@@ -515,12 +555,12 @@ export function FinancePL() {
   /* ── Data computation ── */
   const { allRows, allYearlyRows, allMonthlyData } = useMemo(() => {
     try {
-      const allRows = computeRows(allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, ym)
+      const allRows = computeRows(allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, ym, periods, snapshots)
 
       // Compute all 12 months for yearly view
       const allMonthlyData = Array.from({ length: 12 }, (_, m) => {
         const mYm = `${year}-${String(m + 1).padStart(2, '0')}`
-        return { m, ym: mYm, rows: computeRows(allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, mYm) }
+        return { m, ym: mYm, rows: computeRows(allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, mYm, periods, snapshots) }
       })
 
       // Sum per vehicle across 12 months
@@ -547,7 +587,7 @@ export function FinancePL() {
       console.error('FinancePL aggregation failed', err)
       return { allRows: [], allYearlyRows: [], allMonthlyData: [] }
     }
-  }, [ym, year, allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees])
+  }, [ym, year, allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, periods, snapshots])
 
   // Filter by picked vehicles
   const rows        = useMemo(() => allRows.filter(r => picked.has(r.v.id)), [allRows, picked])
@@ -600,6 +640,16 @@ export function FinancePL() {
             กำไร-ขาดทุนรายคัน ·{' '}
             {viewMode === 'monthly' ? thaiMonthLabel(year, month) : `ปี พ.ศ. ${year + 543}`}
             {' '}· <span className="mono">{picked.size}/{allVehicles.length} คัน</span>
+            {viewMode === 'monthly' && (() => {
+              const p = findPeriod(periods, year, month + 1)
+              if (!p) return null
+              if (p.status === 'CLOSED') return (
+                <span className="badge green" style={{ fontSize: 11, marginLeft: 8 }}>
+                  🔒 ปิดงวดแล้ว · ตัวเลขจาก snapshot
+                </span>
+              )
+              return null
+            })()}
           </div>
         </div>
       </div>
