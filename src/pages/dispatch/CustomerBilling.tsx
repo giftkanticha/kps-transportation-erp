@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import * as XLSX from 'xlsx'
 import { db } from '../../lib/db'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
@@ -239,6 +240,48 @@ export function CustomerBilling() {
     return out
   }
 
+  // ดาวน์โหลดใบวางบิล/ใบเสร็จเป็น Excel (.xlsx) — ตัวเลขเป็นค่าจริง คิดต่อใน Excel ได้
+  const exportNoteExcel = (n: BillingNote) => {
+    const rows = legsForNote(n)
+    const body = rows.map(b => [
+      b.round.code,
+      db.thaiDate(b.round.date),
+      `${b.leg.origin} → ${b.leg.destination}`,
+      b.leg.cargoType || '',
+      b.gross,
+      b.wht,
+      b.net,
+    ])
+    const aoa: (string | number)[][] = [
+      ['KPS TRANSPORTATION'],
+      [docTypeLabel(n.docType)],
+      [`เลขที่ ${n.code}   ประจำเดือน ${n.month}/${n.year}`],
+      [`ลูกค้า: ${n.customerName}`],
+      [`วันที่ออก: ${db.thaiDate((n.issuedAt || new Date().toISOString()).slice(0, 10))}`],
+      [],
+      ['รหัสรอบ', 'วันที่', 'เส้นทาง', 'สินค้า', 'ยอดเต็ม', 'หัก 1%', 'สุทธิ'],
+      ...body,
+      ['', '', '', 'รวม', n.gross, n.whtAmount, n.net],
+    ]
+    const bank = noteBank(n)
+    if (bank) {
+      aoa.push([])
+      aoa.push([`ชำระโดยโอนเข้าบัญชี: ${bank.bankName} ${bank.accountNo} ${bank.accountName}${bank.branch ? ` สาขา ${bank.branch}` : ''}`])
+    }
+    const ws = XLSX.utils.aoa_to_sheet(aoa)
+    ws['!cols'] = [{ wch: 16 }, { wch: 14 }, { wch: 32 }, { wch: 16 }, { wch: 13 }, { wch: 12 }, { wch: 13 }]
+    // ทศนิยม 2 ตำแหน่งสำหรับคอลัมน์เงิน (E,F,G) ของรายการ + แถวรวม
+    for (let r = 7; r <= 7 + body.length; r++) {
+      for (const c of [4, 5, 6]) {
+        const addr = XLSX.utils.encode_cell({ r, c })
+        if (ws[addr] && typeof ws[addr].v === 'number') ws[addr].z = '#,##0.00'
+      }
+    }
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, docTypeLabel(n.docType))
+    XLSX.writeFile(wb, `${n.code}.xlsx`)
+  }
+
   return (
     <div>
       <div className="page-head no-print">
@@ -457,6 +500,7 @@ export function CustomerBilling() {
                         <td>
                           <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
                             <button className="btn ghost sm" onClick={() => setPrintNote(n)}><Icon name="download" size={13} /> พิมพ์</button>
+                            <button className="btn ghost sm" onClick={() => exportNoteExcel(n)} style={{ color: 'var(--green)' }}><Icon name="download" size={13} /> Excel</button>
                             {n.status === 'issued' && <button className="btn ghost sm" onClick={() => markNotePaid(n)} style={{ color: 'var(--green)' }}>รับเงินแล้ว</button>}
                             {n.status !== 'void' && <button className="btn ghost sm" onClick={() => voidNote(n)} style={{ color: 'var(--red)' }}>ยกเลิก</button>}
                           </div>
