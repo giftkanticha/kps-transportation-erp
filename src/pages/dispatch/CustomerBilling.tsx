@@ -104,6 +104,21 @@ export function CustomerBilling() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatches, month, billedLegIds, custByName, locById])
 
+  // ขาที่เผลอตั้ง "ไม่ต้องวางบิล" ในเดือนนี้ — ให้เอากลับมาได้
+  const noBillLegs = useMemo<BillableLeg[]>(() => {
+    const out: BillableLeg[] = []
+    for (const d of dispatches) {
+      if (d.roundStatus !== 'closed' || roundMonth(d) !== month) continue
+      for (const leg of d.legs ?? []) {
+        if (!leg.id || !leg.noBill || (leg.amount || 0) <= 0) continue
+        out.push(mk(leg, d))
+      }
+    }
+    return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
+  }, [dispatches, month])
+
+  const restoreNoBill = (legId: string) => updateLeg.mutate({ id: legId, patch: { noBill: false } })
+
   const selectedLegs = useMemo(() => eligible.filter(b => selected.has(b.leg.id!)), [eligible, selected])
   const gross = selectedLegs.reduce((s, b) => s + b.gross, 0)
   const whtAmount = selectedLegs.reduce((s, b) => s + b.wht, 0)
@@ -134,6 +149,18 @@ export function CustomerBilling() {
       if (locId) await updateLeg.mutateAsync({ id: leg.id, patch: { billToLocationId: locId } })
     } catch (e) {
       alert('ตั้งลูกค้าไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
+  // แก้ผู้รับบิลของขาที่กดผิด: ย้ายลูกค้า / คืนค่าอัตโนมัติ / ตั้งไม่วางบิล
+  const changeBillTo = async (leg: DispatchLeg, value: string) => {
+    if (!leg.id || !value) return
+    try {
+      if (value === 'auto') await updateLeg.mutateAsync({ id: leg.id, patch: { billToLocationId: null, noBill: false } })
+      else if (value === 'nobill') await updateLeg.mutateAsync({ id: leg.id, patch: { noBill: true } })
+      else if (value.startsWith('id:')) await updateLeg.mutateAsync({ id: leg.id, patch: { billToLocationId: value.slice(3), noBill: false } })
+    } catch (e) {
+      alert('แก้ผู้รับบิลไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
   }
 
@@ -277,6 +304,34 @@ export function CustomerBilling() {
         </div>
       )}
 
+      {noBillLegs.length > 0 && (
+        <details className="card no-print" style={{ marginBottom: 16 }}>
+          <summary style={{ cursor: 'pointer', padding: '12px 16px', fontSize: 13.5, fontWeight: 600 }}>
+            ขาที่ตั้ง “ไม่ต้องวางบิล” เดือนนี้ ({noBillLegs.length}) — กดเพื่อเอากลับมา
+          </summary>
+          <div className="tbl-wrap" style={{ border: 'none' }}>
+            <table className="tbl">
+              <thead>
+                <tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th className="num right">ยอด</th><th></th></tr>
+              </thead>
+              <tbody>
+                {noBillLegs.map(b => (
+                  <tr key={b.leg.id}>
+                    <td className="mono">{b.round.code}</td>
+                    <td>{db.thaiDate(b.round.date)}</td>
+                    <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
+                    <td className="num right">{db.thb(b.gross)}</td>
+                    <td className="right">
+                      <button className="btn ghost sm" onClick={() => restoreNoBill(b.leg.id!)} disabled={updateLeg.isPending}>เอากลับมา</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+
       {customerId && (
         <>
           <div className="card no-print" style={{ marginBottom: 16 }}>
@@ -301,6 +356,7 @@ export function CustomerBilling() {
                       <th style={{ width: 36 }}><input type="checkbox" checked={selected.size === eligible.length && eligible.length > 0} onChange={toggleAll} style={{ accentColor: 'var(--primary)' }} /></th>
                       <th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th>
                       <th className="num right">ยอดเต็ม</th><th className="num right">หัก 1%</th><th className="num right">สุทธิ</th>
+                      <th>แก้ผู้รับบิล</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -314,6 +370,16 @@ export function CustomerBilling() {
                         <td className="num right">{db.thb(b.gross)}</td>
                         <td className="num right" style={{ color: b.wht > 0 ? 'var(--amber)' : undefined }}>{b.wht > 0 ? `− ${db.thb(b.wht)}` : '—'}</td>
                         <td className="num right">{db.thb(b.net)}</td>
+                        <td onClick={e => e.stopPropagation()}>
+                          <select value="" onChange={e => { changeBillTo(b.leg, e.target.value); e.target.value = '' }} disabled={updateLeg.isPending} style={{ minWidth: 110, fontSize: 12 }}>
+                            <option value="">เปลี่ยน…</option>
+                            <optgroup label="ย้ายไปลูกค้า">
+                              {customerLocs.filter(c => c.id !== customerId).map(c => <option key={c.id} value={`id:${c.id}`}>{c.name}</option>)}
+                            </optgroup>
+                            <option value="auto">คืนค่าอัตโนมัติ (ตามปลายทาง)</option>
+                            <option value="nobill">ไม่ต้องวางบิล</option>
+                          </select>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
