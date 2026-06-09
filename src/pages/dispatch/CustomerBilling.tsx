@@ -29,6 +29,7 @@ export function CustomerBilling() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bankAccountId, setBankAccountId] = useState('')
   const [printNote, setPrintNote] = useState<BillingNote | null>(null)
+  const [printOrient, setPrintOrient] = useState<'portrait' | 'landscape'>('landscape')
 
   const { data: locations = [] } = useList<Location>('locations')
   const { data: dispatches = [] } = useDispatches()
@@ -240,14 +241,24 @@ export function CustomerBilling() {
     return out
   }
 
+  // ค่าบรรทุก (เรท) พร้อมหน่วยตามโหมดราคา
+  const legPriceLabel = (l: DispatchLeg) =>
+    l.priceMode === 'lump' ? 'เหมา' : l.priceMode === 'per_kg' ? `${db.fmt2(l.price)} ฿/กก.` : `${db.fmt2(l.price)} ฿/ตัน`
+  // น้ำหนักหาย(+)/เกิน(−) เป็นกิโลกรัม — null ถ้ายังไม่กรอกน้ำหนักปลายทาง
+  const lossKgOf = (l: DispatchLeg): number | null =>
+    l.deliveredWeight == null ? null : Math.round(((l.weight || 0) - l.deliveredWeight) * 1000)
+  const lossLabel = (kg: number | null) => kg == null ? '—' : kg === 0 ? '0' : kg > 0 ? `หาย ${kg}` : `เกิน ${Math.abs(kg)}`
+
   // ดาวน์โหลดใบวางบิล/ใบเสร็จเป็น Excel (.xlsx) — ตัวเลขเป็นค่าจริง คิดต่อใน Excel ได้
   const exportNoteExcel = (n: BillingNote) => {
     const rows = legsForNote(n)
     const body = rows.map(b => [
-      b.round.code,
       db.thaiDate(b.round.date),
       `${b.leg.origin} → ${b.leg.destination}`,
-      b.leg.cargoType || '',
+      b.leg.weight || 0,
+      b.leg.deliveredWeight ?? '',
+      lossKgOf(b.leg) ?? '',
+      legPriceLabel(b.leg),
       b.gross,
       b.wht,
       b.net,
@@ -259,9 +270,9 @@ export function CustomerBilling() {
       [`ลูกค้า: ${n.customerName}`],
       [`วันที่ออก: ${db.thaiDate((n.issuedAt || new Date().toISOString()).slice(0, 10))}`],
       [],
-      ['รหัสรอบ', 'วันที่', 'เส้นทาง', 'สินค้า', 'ยอดเต็ม', 'หัก 1%', 'สุทธิ'],
+      ['วันที่', 'เส้นทาง', 'น้ำหนักต้น (ตัน)', 'น้ำหนักปลาย (ตัน)', 'หาย/เกิน (กก.)', 'ค่าบรรทุก', 'ยอดเต็ม', 'หัก 1%', 'สุทธิ'],
       ...body,
-      ['', '', '', 'รวม', n.gross, n.whtAmount, n.net],
+      ['', '', '', '', '', 'รวม', n.gross, n.whtAmount, n.net],
     ]
     const bank = noteBank(n)
     if (bank) {
@@ -269,13 +280,14 @@ export function CustomerBilling() {
       aoa.push([`ชำระโดยโอนเข้าบัญชี: ${bank.bankName} ${bank.accountNo} ${bank.accountName}${bank.branch ? ` สาขา ${bank.branch}` : ''}`])
     }
     const ws = XLSX.utils.aoa_to_sheet(aoa)
-    ws['!cols'] = [{ wch: 16 }, { wch: 14 }, { wch: 32 }, { wch: 16 }, { wch: 13 }, { wch: 12 }, { wch: 13 }]
-    // ทศนิยม 2 ตำแหน่งสำหรับคอลัมน์เงิน (E,F,G) ของรายการ + แถวรวม
+    ws['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 15 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 13 }, { wch: 12 }, { wch: 13 }]
     for (let r = 7; r <= 7 + body.length; r++) {
-      for (const c of [4, 5, 6]) {
+      for (const c of [2, 3, 6, 7, 8]) {  // น้ำหนัก + เงิน → 2 ตำแหน่ง
         const addr = XLSX.utils.encode_cell({ r, c })
         if (ws[addr] && typeof ws[addr].v === 'number') ws[addr].z = '#,##0.00'
       }
+      const lossAddr = XLSX.utils.encode_cell({ r, c: 4 })  // หาย/เกิน → จำนวนเต็ม กก.
+      if (ws[lossAddr] && typeof ws[lossAddr].v === 'number') ws[lossAddr].z = '#,##0'
     }
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, docTypeLabel(n.docType))
@@ -486,7 +498,16 @@ export function CustomerBilling() {
 
           {customerNotes.length > 0 && (
             <div className="card no-print">
-              <div className="head"><h3>เอกสารที่ออกแล้วในเดือนนี้ ({customerNotes.length})</h3></div>
+              <div className="head">
+                <h3>เอกสารที่ออกแล้วในเดือนนี้ ({customerNotes.length})</h3>
+                <div className="right row" style={{ gap: 6, alignItems: 'center', fontSize: 12.5 }}>
+                  <span className="muted">แนวกระดาษพิมพ์:</span>
+                  <select value={printOrient} onChange={e => setPrintOrient(e.target.value as typeof printOrient)} style={{ fontSize: 12.5 }}>
+                    <option value="landscape">แนวนอน</option>
+                    <option value="portrait">แนวตั้ง</option>
+                  </select>
+                </div>
+              </div>
               <div className="tbl-wrap" style={{ border: 'none' }}>
                 <table className="tbl">
                   <thead><tr><th>เลขที่</th><th>ประเภท</th><th className="num right">ยอดสุทธิ</th><th>สถานะ</th><th></th></tr></thead>
@@ -517,7 +538,8 @@ export function CustomerBilling() {
 
       {/* เอกสารสำหรับพิมพ์ */}
       {printNote && (
-        <div className="print-only">
+        <div className="print-only" style={{ fontSize: '8.5pt' }}>
+          <style>{`@page { size: A4 ${printOrient}; margin: 10mm; }`}</style>
           <div className="kps-print-header">
             <p className="co">KPS TRANSPORTATION</p>
             <p className="ttl">{docTypeLabel(printNote.docType)}</p>
@@ -528,14 +550,25 @@ export function CustomerBilling() {
             <div><strong>วันที่ออก:</strong> {db.thaiDate((printNote.issuedAt || new Date().toISOString()).slice(0, 10))}</div>
           </div>
           <table className="tbl" style={{ width: '100%' }}>
-            <thead><tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th><th className="num right">ยอดเต็ม</th><th className="num right">หัก 1%</th><th className="num right">สุทธิ</th></tr></thead>
+            <thead><tr>
+              <th>วันที่</th><th>เส้นทาง</th>
+              <th className="num right">น้ำหนักต้น (ตัน)</th>
+              <th className="num right">น้ำหนักปลาย (ตัน)</th>
+              <th className="num right">หาย/เกิน (กก.)</th>
+              <th className="num right">ค่าบรรทุก</th>
+              <th className="num right">ยอดเต็ม</th>
+              <th className="num right">หัก 1%</th>
+              <th className="num right">สุทธิ</th>
+            </tr></thead>
             <tbody>
               {legsForNote(printNote).map(b => (
                 <tr key={b.leg.id}>
-                  <td className="mono">{b.round.code}</td>
                   <td>{db.thaiDate(b.round.date)}</td>
                   <td>{b.leg.origin} → {b.leg.destination}</td>
-                  <td>{b.leg.cargoType || '—'}</td>
+                  <td className="num right">{db.fmt2(b.leg.weight || 0)}</td>
+                  <td className="num right">{b.leg.deliveredWeight != null ? db.fmt2(b.leg.deliveredWeight) : '—'}</td>
+                  <td className="num right">{lossLabel(lossKgOf(b.leg))}</td>
+                  <td className="num right">{legPriceLabel(b.leg)}</td>
                   <td className="num right">{db.thb2(b.gross)}</td>
                   <td className="num right">{b.wht > 0 ? `− ${db.thb2(b.wht)}` : '—'}</td>
                   <td className="num right">{db.thb2(b.net)}</td>
@@ -543,7 +576,7 @@ export function CustomerBilling() {
               ))}
             </tbody>
             <tfoot>
-              <tr><td colSpan={4} className="right"><strong>รวม</strong></td><td className="num right">{db.thb2(printNote.gross)}</td><td className="num right">− {db.thb2(printNote.whtAmount)}</td><td className="num right"><strong>{db.thb2(printNote.net)}</strong></td></tr>
+              <tr><td colSpan={6} className="right"><strong>รวม</strong></td><td className="num right">{db.thb2(printNote.gross)}</td><td className="num right">− {db.thb2(printNote.whtAmount)}</td><td className="num right"><strong>{db.thb2(printNote.net)}</strong></td></tr>
             </tfoot>
           </table>
           {noteBank(printNote) && (
