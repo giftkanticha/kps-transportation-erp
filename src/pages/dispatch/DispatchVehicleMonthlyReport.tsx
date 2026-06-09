@@ -45,6 +45,7 @@ export function DispatchVehicleMonthlyReport() {
   const [year, setYear] = useState(today.getFullYear())
   const [vehicleId, setVehicleId] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('closed')
+  const [showWht, setShowWht] = useState(true)  // หักภาษี ณ ที่จ่าย 1% ออกจากกำไร (ให้ตรงยอดโอน)
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
@@ -143,11 +144,13 @@ export function DispatchVehicleMonthlyReport() {
   // Totals (per รอบ — ไม่นับซ้ำต่อ leg)
   const totals = useMemo(() => {
     // เมื่อปิดงวดแล้ว → อ่านจาก snapshot (ตัวเลข final, ไม่คำนวณใหม่)
+    // WHT 1% ของเดือนนี้ (ยอดเต็มเป็นค่าหลัก; WHT เป็นรายการแยก คิดจากรอบเสมอ)
+    const wht = rounds.reduce((s, r) => s + db.roundWht(r), 0)
     if (snapshot) {
       const d = snapshot.data
       return {
         revenue: d.revenue, fuelCost: d.fuelCost, perDiem: d.perDiem, other: d.other,
-        profit: d.profit, distance: d.distance, liters: d.liters, avgKmPerL: d.avgKmPerL,
+        profit: d.profit, distance: d.distance, liters: d.liters, avgKmPerL: d.avgKmPerL, wht,
       }
     }
     let revenue = 0, fuelCost = 0, perDiem = 0, other = 0, distance = 0, liters = 0
@@ -163,8 +166,21 @@ export function DispatchVehicleMonthlyReport() {
     })
     const profit = revenue - fuelCost - perDiem - other
     const avgKmPerL = liters > 0 && distance > 0 ? distance / liters : null
-    return { revenue, fuelCost, perDiem, other, profit, distance, liters, avgKmPerL }
+    return { revenue, fuelCost, perDiem, other, profit, distance, liters, avgKmPerL, wht }
   }, [rounds, fuelRounds, snapshot])
+
+  // WHT สะสมทั้งปีของรถคันนี้ (ภาษีถูกหัก ณ ที่จ่าย รอเครดิตคืน) — นับตามวันเปิดงาน
+  const whtYear = useMemo(() => {
+    if (!vehicleId) return 0
+    return dispatch
+      .filter(d => d.vehicleId === vehicleId)
+      .filter(d => d.roundStatus === 'closed' || d.status === 'completed')
+      .filter(d => (d.depart || d.date || '').slice(0, 4) === String(year))
+      .reduce((s, d) => s + db.roundWht(d), 0)
+  }, [dispatch, vehicleId, year])
+
+  // กำไรสุทธิที่แสดง: ถ้าเปิด "หัก 1%" ให้ลบ WHT ออก → ตรงยอดเงินโอนเข้าจริง
+  const netProfit = showWht ? totals.profit - totals.wht : totals.profit
 
   const crossMonthCount = legRows.filter(r => r.crossMonth).length
   const abnormalCount = rounds.filter(r => {
@@ -237,6 +253,10 @@ export function DispatchVehicleMonthlyReport() {
               <option value="all">รวม DRAFT</option>
             </select>
           </Field>
+          <label className="row" style={{ gap: 7, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+            <input type="checkbox" checked={showWht} onChange={e => setShowWht(e.target.checked)} style={{ accentColor: 'var(--primary)' }} />
+            <span>หักภาษี ณ ที่จ่าย 1% ออกจากกำไร (ให้ตรงยอดโอน)</span>
+          </label>
           <div className="spacer" />
           <div className="muted" style={{ fontSize: 12.5 }}>
             {rounds.length} รอบ · {legRows.length} เที่ยว
@@ -399,13 +419,21 @@ export function DispatchVehicleMonthlyReport() {
               <span><span style={{ color: '#666' }}>ค่าน้ำมัน </span><strong className="mono">{db.thb(totals.fuelCost)}</strong></span>
               <span><span style={{ color: '#666' }}>เบี้ยเลี้ยง </span><strong className="mono">{db.thb(totals.perDiem)}</strong></span>
               <span><span style={{ color: '#666' }}>อื่นๆ </span><strong className="mono">{db.thb(totals.other)}</strong></span>
+              {showWht && totals.wht > 0 && (
+                <span><span style={{ color: '#666' }}>หัก ณ ที่จ่าย 1% </span><strong className="mono" style={{ color: '#A32D2D' }}>− {db.thb(totals.wht)}</strong></span>
+              )}
               <span style={{ marginLeft: 'auto' }}>
-                <span style={{ color: '#666' }}>กำไรสุทธิ </span>
+                <span style={{ color: '#666' }}>{showWht ? 'กำไร (เงินรับจริง) ' : 'กำไรสุทธิ '}</span>
                 <strong className="mono" style={{
                   fontSize: 13,
-                  color: totals.profit >= 0 ? '#166534' : '#A32D2D',
-                }}>{db.thb(totals.profit)}</strong>
+                  color: netProfit >= 0 ? '#166534' : '#A32D2D',
+                }}>{db.thb(netProfit)}</strong>
               </span>
+            </div>
+          )}
+          {whtYear > 0 && (
+            <div className="mono" style={{ fontSize: 11.5, color: '#92400E', marginTop: 6, textAlign: 'right' }}>
+              WHT สะสมทั้งปี {year + 543} (ภาษีถูกหัก ณ ที่จ่าย รอเครดิตคืน): {db.thb(whtYear)}
             </div>
           )}
         </div>
