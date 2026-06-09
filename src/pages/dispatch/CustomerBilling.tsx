@@ -23,6 +23,8 @@ export function CustomerBilling() {
   const thisMonth = new Date().toISOString().slice(0, 7)
   const [customerId, setCustomerId] = useState('')   // = location id (is_customer)
   const [month, setMonth] = useState(thisMonth)
+  const [allMonths, setAllMonths] = useState(false)  // รวมข้ามเดือนในใบเดียว
+  const [whtMode, setWhtMode] = useState<'per_leg' | 'total' | 'none'>('per_leg')  // วิธีหัก ณ ที่จ่าย
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bankAccountId, setBankAccountId] = useState('')
   const [printNote, setPrintNote] = useState<BillingNote | null>(null)
@@ -78,7 +80,7 @@ export function CustomerBilling() {
   const eligible = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
-      if (d.roundStatus !== 'closed' || roundMonth(d) !== month) continue
+      if (d.roundStatus !== 'closed' || (!allMonths && roundMonth(d) !== month)) continue
       for (const leg of d.legs ?? []) {
         if (!leg.id || leg.noBill || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
         if (billTo(leg)?.id !== customerId) continue
@@ -87,13 +89,13 @@ export function CustomerBilling() {
     }
     return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatches, customerId, month, billedLegIds, custByName, locById])
+  }, [dispatches, customerId, month, allMonths, billedLegIds, custByName, locById])
 
   // ขาที่ปิดงานในเดือนนี้ มีค่าขนส่ง แต่ยังหา "ผู้รับบิล" ไม่ได้ (ปลายทางไม่ใช่ลูกค้า & ไม่ override)
   const unassignedLegs = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
-      if (d.roundStatus !== 'closed' || roundMonth(d) !== month) continue
+      if (d.roundStatus !== 'closed' || (!allMonths && roundMonth(d) !== month)) continue
       for (const leg of d.legs ?? []) {
         if (!leg.id || leg.noBill || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
         if (billTo(leg)) continue
@@ -102,27 +104,36 @@ export function CustomerBilling() {
     }
     return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatches, month, billedLegIds, custByName, locById])
+  }, [dispatches, month, allMonths, billedLegIds, custByName, locById])
 
   // ขาที่เผลอตั้ง "ไม่ต้องวางบิล" ในเดือนนี้ — ให้เอากลับมาได้
   const noBillLegs = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
-      if (d.roundStatus !== 'closed' || roundMonth(d) !== month) continue
+      if (d.roundStatus !== 'closed' || (!allMonths && roundMonth(d) !== month)) continue
       for (const leg of d.legs ?? []) {
         if (!leg.id || !leg.noBill || (leg.amount || 0) <= 0) continue
         out.push(mk(leg, d))
       }
     }
     return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
-  }, [dispatches, month])
+  }, [dispatches, month, allMonths])
 
   const restoreNoBill = (legId: string) => updateLeg.mutate({ id: legId, patch: { noBill: false } })
 
   const selectedLegs = useMemo(() => eligible.filter(b => selected.has(b.leg.id!)), [eligible, selected])
   const gross = selectedLegs.reduce((s, b) => s + b.gross, 0)
-  const whtAmount = selectedLegs.reduce((s, b) => s + b.wht, 0)
+  const whtAmount = whtMode === 'none'
+    ? 0
+    : whtMode === 'total'
+      ? Math.round(gross * 0.01 * 100) / 100      // หัก 1% จากยอดรวมทั้งใบ
+      : selectedLegs.reduce((s, b) => s + b.wht, 0)  // หักรายเที่ยว (ตามที่ตั้งในแต่ละขา)
   const net = gross - whtAmount
+
+  const toggleLegWht = (leg: DispatchLeg) => {
+    if (!leg.id) return
+    updateLeg.mutate({ id: leg.id, patch: { wht: !leg.wht } })
+  }
 
   const customer = customerLocs.find(c => c.id === customerId)
 
@@ -247,15 +258,19 @@ export function CustomerBilling() {
           </Field>
           <Field label="เดือน / ปี">
             <div className="row" style={{ gap: 8 }}>
-              <select value={Number(month.slice(5, 7))} onChange={e => { setMonth(`${month.slice(0, 4)}-${String(Number(e.target.value)).padStart(2, '0')}`); setSelected(new Set()) }} style={{ flex: 1 }}>
+              <select value={Number(month.slice(5, 7))} disabled={allMonths} onChange={e => { setMonth(`${month.slice(0, 4)}-${String(Number(e.target.value)).padStart(2, '0')}`); setSelected(new Set()) }} style={{ flex: 1 }}>
                 {THAI_MONTHS.map((nm, i) => <option key={i} value={i + 1}>{nm}</option>)}
               </select>
-              <select value={Number(month.slice(0, 4))} onChange={e => { setMonth(`${e.target.value}-${month.slice(5, 7)}`); setSelected(new Set()) }} style={{ flex: 1 }}>
+              <select value={Number(month.slice(0, 4))} disabled={allMonths} onChange={e => { setMonth(`${e.target.value}-${month.slice(5, 7)}`); setSelected(new Set()) }} style={{ flex: 1 }}>
                 {Array.from({ length: 5 }, (_, i) => 2026 + i).map(y => <option key={y} value={y}>{y}</option>)}
               </select>
             </div>
           </Field>
         </div>
+        <label className="row" style={{ gap: 8, cursor: 'pointer', fontSize: 13, alignItems: 'center', marginTop: 10 }}>
+          <input type="checkbox" checked={allMonths} onChange={e => { setAllMonths(e.target.checked); setSelected(new Set()) }} style={{ accentColor: 'var(--primary)' }} />
+          <span>รวมข้ามเดือนในใบเดียว (แสดงทุกขาที่ยังไม่วางบิลของลูกค้านี้ ทุกเดือน)</span>
+        </label>
         {customerLocs.length === 0 && (
           <div className="muted" style={{ fontSize: 12.5, marginTop: 10, color: 'var(--amber)' }}>
             ⚠️ ยังไม่มีสถานที่ที่ตั้งเป็น “ลูกค้า” — ไปที่ งานขนส่ง → จัดการสถานที่ แล้วติ๊ก “เป็นลูกค้า” ให้สถานที่ที่ต้องวางบิล
@@ -266,7 +281,7 @@ export function CustomerBilling() {
       {unassignedLegs.length > 0 && (
         <div className="card no-print" style={{ marginBottom: 16, borderColor: '#FCD34D' }}>
           <div className="head" style={{ background: '#FFFBEB' }}>
-            <h3>⚠️ ขาที่ปิดงานแล้วยังไม่มีผู้รับบิล — เดือนนี้ ({unassignedLegs.length})</h3>
+            <h3>⚠️ ขาที่ปิดงานแล้วยังไม่มีผู้รับบิล — {allMonths ? 'ทุกเดือน' : 'เดือนนี้'} ({unassignedLegs.length})</h3>
           </div>
           <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
             เลือก “เก็บเงินจาก” ให้แต่ละขา — เลือกปลายทาง/ต้นทางของขานั้นได้เลย ระบบจะตั้งเป็นลูกค้าให้อัตโนมัติ (ครั้งหน้าขาที่ไปที่เดียวกันจะเข้าเอง)
@@ -368,8 +383,15 @@ export function CustomerBilling() {
                         <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
                         <td style={{ fontSize: 12.5 }}>{b.leg.cargoType || '—'}</td>
                         <td className="num right">{db.thb(b.gross)}</td>
-                        <td className="num right" style={{ color: b.wht > 0 ? 'var(--amber)' : undefined }}>{b.wht > 0 ? `− ${db.thb(b.wht)}` : '—'}</td>
-                        <td className="num right">{db.thb(b.net)}</td>
+                        <td className="num right" onClick={e => e.stopPropagation()}>
+                          {whtMode === 'per_leg' ? (
+                            <label className="row" style={{ gap: 5, justifyContent: 'flex-end', cursor: 'pointer', color: b.leg.wht ? 'var(--amber)' : undefined }} title="หัก ณ ที่จ่าย 1% ของขานี้">
+                              <input type="checkbox" checked={!!b.leg.wht} onChange={() => toggleLegWht(b.leg)} disabled={updateLeg.isPending} style={{ accentColor: 'var(--amber)' }} />
+                              <span>{b.leg.wht ? `− ${db.thb(b.wht)}` : ''}</span>
+                            </label>
+                          ) : whtMode === 'total' ? <span className="muted" style={{ fontSize: 11 }}>คิดรวม</span> : '—'}
+                        </td>
+                        <td className="num right">{db.thb(whtMode === 'per_leg' ? b.net : b.gross)}</td>
                         <td onClick={e => e.stopPropagation()}>
                           <select value="" onChange={e => { changeBillTo(b.leg, e.target.value); e.target.value = '' }} disabled={updateLeg.isPending} style={{ minWidth: 110, fontSize: 12 }}>
                             <option value="">เปลี่ยน…</option>
@@ -392,8 +414,15 @@ export function CustomerBilling() {
             <div className="card pad no-print" style={{ marginBottom: 16 }}>
               <div className="grid-2" style={{ gap: 18, alignItems: 'end' }}>
                 <div>
-                  <div className="row" style={{ fontSize: 14 }}><span>ยอดรวม ({selectedLegs.length} ขา)</span><div className="spacer" /><span className="mono">{db.thb(gross)}</span></div>
-                  {whtAmount > 0 && <div className="row" style={{ fontSize: 14, color: 'var(--amber)' }}><span>หัก ณ ที่จ่าย 1%</span><div className="spacer" /><span className="mono">− {db.thb(whtAmount)}</span></div>}
+                  <Field label="การหัก ณ ที่จ่าย 1%">
+                    <select value={whtMode} onChange={e => setWhtMode(e.target.value as typeof whtMode)}>
+                      <option value="per_leg">หักรายเที่ยว (ติ๊กทีละขาในตาราง)</option>
+                      <option value="total">หักจากยอดรวมทั้งใบ 1%</option>
+                      <option value="none">ไม่หัก</option>
+                    </select>
+                  </Field>
+                  <div className="row" style={{ fontSize: 14, marginTop: 10 }}><span>ยอดรวม ({selectedLegs.length} ขา)</span><div className="spacer" /><span className="mono">{db.thb(gross)}</span></div>
+                  {whtAmount > 0 && <div className="row" style={{ fontSize: 14, color: 'var(--amber)' }}><span>หัก ณ ที่จ่าย 1% {whtMode === 'total' ? '(จากยอดรวม)' : '(รายเที่ยว)'}</span><div className="spacer" /><span className="mono">− {db.thb(whtAmount)}</span></div>}
                   <div className="row" style={{ fontSize: 16, fontWeight: 700, borderTop: '1px solid var(--line)', paddingTop: 6, marginTop: 6 }}><span>ยอดสุทธิ</span><div className="spacer" /><span className="mono" style={{ color: 'var(--primary)' }}>{db.thb(net)}</span></div>
                 </div>
                 <div>
