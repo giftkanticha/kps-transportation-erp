@@ -496,7 +496,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
                 patch: { roundStatus: 'draft', status: 'in-progress' },
               })
               setReopenTarget(null)
-              setSubject({ type: 'round', id: reopenTarget.id, origin: 'dispatch.summary' })
+              setSubject({ type: 'round', id: reopenTarget.id, origin: 'dispatch.report' })
               setActive('dispatch.close')
             } catch (e) {
               setToastMsg({ kind: 'err', text: e instanceof Error ? e.message : 'เปิดรอบไม่สำเร็จ' })
