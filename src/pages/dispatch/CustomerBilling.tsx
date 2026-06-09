@@ -543,7 +543,6 @@ export function CustomerBilling() {
           <div className="kps-print-header">
             <p className="co">KPS TRANSPORTATION</p>
             <p className="ttl">{docTypeLabel(printNote.docType)}</p>
-            <p className="sub">เลขที่ {printNote.code} · ประจำเดือน {printNote.month}/{printNote.year}</p>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '9pt', marginBottom: 8 }}>
             <div><strong>ลูกค้า:</strong> {printNote.customerName}</div>
@@ -552,10 +551,10 @@ export function CustomerBilling() {
           <table className="tbl" style={{ width: '100%' }}>
             <thead><tr>
               <th>วันที่</th><th>เส้นทาง</th>
-              <th className="num right">น้ำหนักต้น (ตัน)</th>
-              <th className="num right">น้ำหนักปลาย (ตัน)</th>
-              <th className="num right">หาย/เกิน (กก.)</th>
-              <th className="num right">ค่าบรรทุก</th>
+              <th className="num right">น้ำหนักต้น (กก.)</th>
+              <th className="num right">น้ำหนักปลาย (กก.)</th>
+              <th className="num right" style={{ width: 56 }}>หาย/เกิน</th>
+              <th className="num right" style={{ width: 64 }}>ค่าบรรทุก</th>
               <th className="num right">ยอดเต็ม</th>
               <th className="num right">หัก 1%</th>
               <th className="num right">สุทธิ</th>
@@ -565,18 +564,18 @@ export function CustomerBilling() {
                 <tr key={b.leg.id}>
                   <td>{db.thaiDate(b.round.date)}</td>
                   <td>{b.leg.origin} → {b.leg.destination}</td>
-                  <td className="num right">{db.fmt2(b.leg.weight || 0)}</td>
-                  <td className="num right">{b.leg.deliveredWeight != null ? db.fmt2(b.leg.deliveredWeight) : '—'}</td>
-                  <td className="num right">{lossLabel(lossKgOf(b.leg))}</td>
-                  <td className="num right">{legPriceLabel(b.leg)}</td>
-                  <td className="num right">{db.thb2(b.gross)}</td>
-                  <td className="num right">{b.wht > 0 ? `− ${db.thb2(b.wht)}` : '—'}</td>
-                  <td className="num right">{db.thb2(b.net)}</td>
+                  <td className="num right">{db.fmt((b.leg.weight || 0) * 1000)}</td>
+                  <td className="num right">{b.leg.deliveredWeight != null ? db.fmt(b.leg.deliveredWeight * 1000) : '—'}</td>
+                  <td className="num right" style={{ width: 56 }}>{lossLabel(lossKgOf(b.leg))}</td>
+                  <td className="num right" style={{ width: 64 }}>{b.leg.priceMode === 'lump' ? 'เหมา' : db.fmt2(b.leg.price)}</td>
+                  <td className="num right">{db.fmt2(b.gross)}</td>
+                  <td className="num right">{b.wht > 0 ? `− ${db.fmt2(b.wht)}` : '—'}</td>
+                  <td className="num right">{db.fmt2(b.net)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
-              <tr><td colSpan={6} className="right"><strong>รวม</strong></td><td className="num right">{db.thb2(printNote.gross)}</td><td className="num right">− {db.thb2(printNote.whtAmount)}</td><td className="num right"><strong>{db.thb2(printNote.net)}</strong></td></tr>
+              <tr><td colSpan={6} className="right"><strong>รวม</strong></td><td className="num right">{db.fmt2(printNote.gross)}</td><td className="num right">− {db.fmt2(printNote.whtAmount)}</td><td className="num right"><strong>{db.fmt2(printNote.net)}</strong></td></tr>
             </tfoot>
           </table>
           {noteBank(printNote) && (
