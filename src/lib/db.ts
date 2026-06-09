@@ -122,6 +122,15 @@ export const db = {
     return '฿' + db.fmt(n)
   },
 
+  // ทศนิยม 2 ตำแหน่งเสมอ ไม่ปัดเป็นจำนวนเต็มบาท — ใช้บนเอกสารบัญชี เช่น หัก ณ ที่จ่าย
+  fmt2(n: number | null | undefined): string {
+    if (n === null || n === undefined) return '—'
+    return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+  },
+  thb2(n: number | null | undefined): string {
+    return '฿' + db.fmt2(n)
+  },
+
   thaiDate(s: string): string {
     if (!s) return '—'
     const d = new Date(s)
@@ -211,14 +220,15 @@ export const db = {
   // ── Withholding tax (ภาษีหัก ณ ที่จ่าย 1% — ฝั่งลูกค้า) ─────────────────────
   // gross (amount) คือค่าหลักเสมอ; WHT/net เป็นค่า derived เพื่อแสดงผลและวางบิล
   // ไม่ได้เปลี่ยนค่าใน dispatch.revenue (mirror แนวทางฝั่งผู้รับเหมา sub_jobs.wht)
+  // หัก ณ ที่จ่าย 1% ปัดเป็นสตางค์ (ทศนิยม 2 ตำแหน่ง) ตามหลักบัญชี — ไม่ปัดเป็นจำนวนเต็มบาท
   legWht(l: DispatchLeg): number {
-    return l.wht ? (l.amount || 0) * 0.01 : 0
+    return l.wht ? Math.round((l.amount || 0) * 0.01 * 100) / 100 : 0
   },
   roundWht(d: Dispatch): number {
-    return (d.legs ?? []).reduce((s, l) => s + (l.wht ? (l.amount || 0) * 0.01 : 0), 0)
+    return (d.legs ?? []).reduce((s, l) => s + db.legWht(l), 0)
   },
   roundNetRevenue(d: Dispatch): number {
-    return (d.legs ?? []).reduce((s, l) => s + (l.amount || 0) - (l.wht ? (l.amount || 0) * 0.01 : 0), 0)
+    return (d.legs ?? []).reduce((s, l) => s + (l.amount || 0) - db.legWht(l), 0)
   },
 
   roundPerDiem(d: Dispatch): number {

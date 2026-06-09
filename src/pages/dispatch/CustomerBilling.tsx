@@ -382,16 +382,16 @@ export function CustomerBilling() {
                         <td>{db.thaiDate(b.round.date)}</td>
                         <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
                         <td style={{ fontSize: 12.5 }}>{b.leg.cargoType || '—'}</td>
-                        <td className="num right">{db.thb(b.gross)}</td>
+                        <td className="num right">{db.thb2(b.gross)}</td>
                         <td className="num right" onClick={e => e.stopPropagation()}>
                           {whtMode === 'per_leg' ? (
                             <label className="row" style={{ gap: 5, justifyContent: 'flex-end', cursor: 'pointer', color: b.leg.wht ? 'var(--amber)' : undefined }} title="หัก ณ ที่จ่าย 1% ของขานี้">
                               <input type="checkbox" checked={!!b.leg.wht} onChange={() => toggleLegWht(b.leg)} disabled={updateLeg.isPending} style={{ accentColor: 'var(--amber)' }} />
-                              <span>{b.leg.wht ? `− ${db.thb(b.wht)}` : ''}</span>
+                              <span>{b.leg.wht ? `− ${db.thb2(b.wht)}` : ''}</span>
                             </label>
                           ) : whtMode === 'total' ? <span className="muted" style={{ fontSize: 11 }}>คิดรวม</span> : '—'}
                         </td>
-                        <td className="num right">{db.thb(whtMode === 'per_leg' ? b.net : b.gross)}</td>
+                        <td className="num right">{db.thb2(whtMode === 'per_leg' ? b.net : b.gross)}</td>
                         <td onClick={e => e.stopPropagation()}>
                           <select value="" onChange={e => { changeBillTo(b.leg, e.target.value); e.target.value = '' }} disabled={updateLeg.isPending} style={{ minWidth: 110, fontSize: 12 }}>
                             <option value="">เปลี่ยน…</option>
@@ -421,9 +421,9 @@ export function CustomerBilling() {
                       <option value="none">ไม่หัก</option>
                     </select>
                   </Field>
-                  <div className="row" style={{ fontSize: 14, marginTop: 10 }}><span>ยอดรวม ({selectedLegs.length} ขา)</span><div className="spacer" /><span className="mono">{db.thb(gross)}</span></div>
-                  {whtAmount > 0 && <div className="row" style={{ fontSize: 14, color: 'var(--amber)' }}><span>หัก ณ ที่จ่าย 1% {whtMode === 'total' ? '(จากยอดรวม)' : '(รายเที่ยว)'}</span><div className="spacer" /><span className="mono">− {db.thb(whtAmount)}</span></div>}
-                  <div className="row" style={{ fontSize: 16, fontWeight: 700, borderTop: '1px solid var(--line)', paddingTop: 6, marginTop: 6 }}><span>ยอดสุทธิ</span><div className="spacer" /><span className="mono" style={{ color: 'var(--primary)' }}>{db.thb(net)}</span></div>
+                  <div className="row" style={{ fontSize: 14, marginTop: 10 }}><span>ยอดรวม ({selectedLegs.length} ขา)</span><div className="spacer" /><span className="mono">{db.thb2(gross)}</span></div>
+                  {whtAmount > 0 && <div className="row" style={{ fontSize: 14, color: 'var(--amber)' }}><span>หัก ณ ที่จ่าย 1% {whtMode === 'total' ? '(จากยอดรวม)' : '(รายเที่ยว)'}</span><div className="spacer" /><span className="mono">− {db.thb2(whtAmount)}</span></div>}
+                  <div className="row" style={{ fontSize: 16, fontWeight: 700, borderTop: '1px solid var(--line)', paddingTop: 6, marginTop: 6 }}><span>ยอดสุทธิ</span><div className="spacer" /><span className="mono" style={{ color: 'var(--primary)' }}>{db.thb2(net)}</span></div>
                 </div>
                 <div>
                   <Field label="บัญชีรับเงิน (พิมพ์บนใบวางบิล)">
@@ -452,7 +452,7 @@ export function CustomerBilling() {
                       <tr key={n.id} style={{ opacity: n.status === 'void' ? 0.5 : 1 }}>
                         <td className="mono">{n.code}</td>
                         <td>{docTypeLabel(n.docType)}</td>
-                        <td className="num right">{db.thb(n.net)}</td>
+                        <td className="num right">{db.thb2(n.net)}</td>
                         <td><span className={`badge ${n.status === 'paid' ? 'green' : n.status === 'void' ? 'red' : 'amber'}`} style={{ fontSize: 11 }}>{n.status === 'paid' ? 'รับเงินแล้ว' : n.status === 'void' ? 'ยกเลิก' : 'รอชำระ'}</span></td>
                         <td>
                           <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
@@ -492,14 +492,14 @@ export function CustomerBilling() {
                   <td>{db.thaiDate(b.round.date)}</td>
                   <td>{b.leg.origin} → {b.leg.destination}</td>
                   <td>{b.leg.cargoType || '—'}</td>
-                  <td className="num right">{db.thb(b.gross)}</td>
-                  <td className="num right">{b.wht > 0 ? `− ${db.thb(b.wht)}` : '—'}</td>
-                  <td className="num right">{db.thb(b.net)}</td>
+                  <td className="num right">{db.thb2(b.gross)}</td>
+                  <td className="num right">{b.wht > 0 ? `− ${db.thb2(b.wht)}` : '—'}</td>
+                  <td className="num right">{db.thb2(b.net)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
-              <tr><td colSpan={4} className="right"><strong>รวม</strong></td><td className="num right">{db.thb(printNote.gross)}</td><td className="num right">− {db.thb(printNote.whtAmount)}</td><td className="num right"><strong>{db.thb(printNote.net)}</strong></td></tr>
+              <tr><td colSpan={4} className="right"><strong>รวม</strong></td><td className="num right">{db.thb2(printNote.gross)}</td><td className="num right">− {db.thb2(printNote.whtAmount)}</td><td className="num right"><strong>{db.thb2(printNote.net)}</strong></td></tr>
             </tfoot>
           </table>
           {noteBank(printNote) && (
