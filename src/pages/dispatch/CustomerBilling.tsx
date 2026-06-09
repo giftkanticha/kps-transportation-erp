@@ -248,7 +248,8 @@ export function CustomerBilling() {
   // น้ำหนักหาย(+)/เกิน(−) เป็นกิโลกรัม — null ถ้ายังไม่กรอกน้ำหนักปลายทาง
   const lossKgOf = (l: DispatchLeg): number | null =>
     l.deliveredWeight == null ? null : Math.round(((l.weight || 0) - l.deliveredWeight) * 1000)
-  const lossLabel = (kg: number | null) => kg == null ? '—' : kg === 0 ? '0' : kg > 0 ? `หาย ${kg}` : `เกิน ${Math.abs(kg)}`
+  // หาย/เกิน เป็นเครื่องหมาย: หาย(น้ำหนักลด) = −, เกิน = +
+  const lossLabel = (kg: number | null) => kg == null ? '—' : kg === 0 ? '0' : kg > 0 ? `−${kg}` : `+${Math.abs(kg)}`
 
   // ดาวน์โหลดใบวางบิล/ใบเสร็จเป็น Excel (.xlsx) — ตัวเลขเป็นค่าจริง คิดต่อใน Excel ได้
   const exportNoteExcel = (n: BillingNote) => {
@@ -566,7 +567,7 @@ export function CustomerBilling() {
               <th>วันที่</th><th>เส้นทาง</th>
               <th className="num right">น้ำหนักต้น (กก.)</th>
               <th className="num right">น้ำหนักปลาย (กก.)</th>
-              <th className="num right" style={{ width: 56 }}>หาย/เกิน</th>
+              <th className="num right" style={{ width: 38 }}>± กก.</th>
               <th className="num right" style={{ width: 64 }}>ค่าบรรทุก</th>
               <th className="num right">ยอดเต็ม</th>
               <th className="num right">หัก 1%</th>
@@ -579,7 +580,7 @@ export function CustomerBilling() {
                   <td>{b.leg.origin} → {b.leg.destination}</td>
                   <td className="num right">{db.fmt((b.leg.weight || 0) * 1000)}</td>
                   <td className="num right">{b.leg.deliveredWeight != null ? db.fmt(b.leg.deliveredWeight * 1000) : '—'}</td>
-                  <td className="num right" style={{ width: 56 }}>{lossLabel(lossKgOf(b.leg))}</td>
+                  <td className="num right" style={{ width: 38 }}>{lossLabel(lossKgOf(b.leg))}</td>
                   <td className="num right" style={{ width: 64 }}>{b.leg.priceMode === 'lump' ? 'เหมา' : db.fmt2(b.leg.price)}</td>
                   <td className="num right">{db.fmt2(b.gross)}</td>
                   <td className="num right">{b.wht > 0 ? `− ${db.fmt2(b.wht)}` : '—'}</td>
