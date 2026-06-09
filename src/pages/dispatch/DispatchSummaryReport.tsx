@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useUpdate, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
+import { useSessionState } from '../../hooks/useSessionState'
 import { useAuth } from '../../context/AuthContext'
 import { usePrint } from '../../hooks/usePrint'
 import type { Vehicle, Employee, Dispatch, FuelRound, EditApprovalRequest, KPSRole } from '../../types'
@@ -37,11 +38,13 @@ function isoMonth(s: string): string {
 export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   const today = new Date()
   const { profile, isAdmin } = useAuth()
-  const [from, setFrom] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`)
-  const [to, setTo] = useState(today.toISOString().slice(0, 10))
-  const [vehicleId, setVehicleId] = useState('')
-  const [driverId, setDriverId] = useState('')
-  const [status, setStatus] = useState<StatusFilter>('all')
+  // Filters persist in sessionStorage so they survive leaving the report to
+  // edit/close a round and coming back, instead of resetting every time.
+  const [from, setFrom] = useSessionState('dsp_summary_from', `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`)
+  const [to, setTo] = useSessionState('dsp_summary_to', today.toISOString().slice(0, 10))
+  const [vehicleId, setVehicleId] = useSessionState('dsp_summary_vehicle', '')
+  const [driverId, setDriverId] = useSessionState('dsp_summary_driver', '')
+  const [status, setStatus] = useSessionState<StatusFilter>('dsp_summary_status', 'all')
   const [printScope, setPrintScope] = useState<'both' | 'summary' | 'form'>('both')
   const [reopenTarget, setReopenTarget] = useState<Dispatch | null>(null)
   const [requestTarget, setRequestTarget] = useState<Dispatch | null>(null)
@@ -54,6 +57,12 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
   const { data: dispatch = [] } = useDispatches()
   const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
   const drivers = employees.filter(e => e.position === 'คนขับ')
+  // Only transport-group vehicles can be dispatched on a haul, so the filter
+  // dropdown lists those (treating unset groupKind as TRANSPORT for legacy rows).
+  const transportVehicles = useMemo(
+    () => vehicles.filter(v => (v.groupKind ?? 'TRANSPORT') === 'TRANSPORT'),
+    [vehicles],
+  )
   const { print } = usePrint()
 
   const rows = useMemo<Row[]>(() => {
@@ -219,7 +228,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
           <Field label="รถ">
             <select value={vehicleId} onChange={e => setVehicleId(e.target.value)}>
               <option value="">ทั้งหมด</option>
-              {vehicles.map(v => <option key={v.id} value={v.id}>{v.plate}</option>)}
+              {transportVehicles.map(v => <option key={v.id} value={v.id}>{v.plate}</option>)}
             </select>
           </Field>
           <Field label="คนขับ">
@@ -487,7 +496,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
                 patch: { roundStatus: 'draft', status: 'in-progress' },
               })
               setReopenTarget(null)
-              setSubject({ type: 'round', id: reopenTarget.id })
+              setSubject({ type: 'round', id: reopenTarget.id, origin: 'dispatch.summary' })
               setActive('dispatch.close')
             } catch (e) {
               setToastMsg({ kind: 'err', text: e instanceof Error ? e.message : 'เปิดรอบไม่สำเร็จ' })

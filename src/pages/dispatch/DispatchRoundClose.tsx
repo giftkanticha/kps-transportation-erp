@@ -160,20 +160,21 @@ function DraftRoundsList({
 }
 
 export function DispatchRoundClose({ setActive, setSubject, subject }: Props) {
-  const subj = subject as { type?: string; id?: string } | null
+  const subj = subject as { type?: string; id?: string; origin?: string } | null
 
   if (!subj?.id) {
     return <DraftRoundsList setSubject={setSubject} />
   }
 
-  return <CloseForm roundId={subj.id} setActive={setActive} setSubject={setSubject} />
+  return <CloseForm roundId={subj.id} origin={subj.origin} setActive={setActive} setSubject={setSubject} />
 }
 
 function CloseForm({
   roundId,
+  origin,
   setActive,
   setSubject,
-}: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
+}: { roundId: string; origin?: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
   const { isManager, isAdmin } = useAuth()
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -609,7 +610,9 @@ function CloseForm({
         setToast({ kind: 'success', msg: `✅ ปิดรอบ ${round.code} เรียบร้อย${finalKmPerL ? ` · KM/L = ${finalKmPerL.toFixed(2)}` : ''}` })
         setTimeout(() => {
           setSubject(null)
-          setActive('dispatch.open')
+          // Return to wherever the round was opened from (e.g. the summary
+          // report, which keeps its filters) instead of always the queue.
+          setActive(origin ?? 'dispatch.open')
         }, 1400)
       } else {
         setToast({ kind: 'success', msg: '✅ บันทึกร่างเรียบร้อย' })
