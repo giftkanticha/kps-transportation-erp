@@ -732,7 +732,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             <button
               className="btn primary"
               onClick={() => {
-                setSubject({ type: 'round', id: round.id })
+                setSubject({ type: 'round', id: round.id, origin: 'dispatch.round' })
                 setActive('dispatch.close')
               }}
               disabled={legs.length === 0}
@@ -994,7 +994,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                       patch: { roundStatus: 'draft', status: 'in-progress' },
                     })
                     setShowReopenConfirm(false)
-                    setSubject({ type: 'round', id: round.id })
+                    setSubject({ type: 'round', id: round.id, origin: 'dispatch.round' })
                     setActive('dispatch.close')
                   } catch (e) {
                     setToast({ kind: 'error', msg: e instanceof Error ? e.message : 'เปิดรอบไม่สำเร็จ' })

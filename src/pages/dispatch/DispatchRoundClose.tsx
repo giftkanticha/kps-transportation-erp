@@ -609,9 +609,10 @@ function CloseForm({
       if (mode === 'close') {
         setToast({ kind: 'success', msg: `✅ ปิดรอบ ${round.code} เรียบร้อย${finalKmPerL ? ` · KM/L = ${finalKmPerL.toFixed(2)}` : ''}` })
         setTimeout(() => {
-          setSubject(null)
-          // Return to wherever the round was opened from (e.g. the summary
-          // report, which keeps its filters) instead of always the queue.
+          // Return to whichever page opened the close form (summary report,
+          // history, round detail…) instead of always the queue. When going
+          // back to the round detail we must restore its round subject.
+          setSubject(origin === 'dispatch.round' ? { type: 'round', id: roundId } : null)
           setActive(origin ?? 'dispatch.open')
         }, 1400)
       } else {

@@ -247,7 +247,7 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
                           className="btn primary sm"
                           onClick={e => {
                             e.stopPropagation()
-                            setSubject({ type: 'round', id: round.id })
+                            setSubject({ type: 'round', id: round.id, origin: 'dispatch.history' })
                             setActive('dispatch.close')
                           }}
                         >
