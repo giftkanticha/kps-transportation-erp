@@ -1,20 +1,22 @@
-const STYLE_ID = '__kps_print_page__'
-
 export function usePrint() {
+  // Landscape opt-in via `body.print-landscape` → `@page kps-land` (see print.css).
+  // The print() call is deferred to the next tick so the click handler returns
+  // immediately — keeps INP fast (window.print blocks the main thread while the
+  // browser builds the print preview).
   const print = (orientation: 'portrait' | 'landscape' = 'portrait') => {
-    // Remove any previous override
-    document.getElementById(STYLE_ID)?.remove()
-
-    const style = document.createElement('style')
-    style.id = STYLE_ID
-    style.textContent = `@page { size: A4 ${orientation}; margin: 12mm; }`
-    document.head.appendChild(style)
-
-    window.print()
-
-    window.addEventListener('afterprint', () => {
-      document.getElementById(STYLE_ID)?.remove()
-    }, { once: true })
+    const cls = 'print-landscape'
+    const isLandscape = orientation === 'landscape'
+    document.documentElement.classList.toggle(cls, isLandscape)
+    document.body.classList.toggle(cls, isLandscape)
+    window.addEventListener(
+      'afterprint',
+      () => {
+        document.documentElement.classList.remove(cls)
+        document.body.classList.remove(cls)
+      },
+      { once: true },
+    )
+    setTimeout(() => window.print(), 0)
   }
 
   return { print }

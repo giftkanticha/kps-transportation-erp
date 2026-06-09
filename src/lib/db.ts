@@ -122,6 +122,15 @@ export const db = {
     return '฿' + db.fmt(n)
   },
 
+  // ทศนิยม 2 ตำแหน่งเสมอ ไม่ปัดเป็นจำนวนเต็มบาท — ใช้บนเอกสารบัญชี เช่น หัก ณ ที่จ่าย
+  fmt2(n: number | null | undefined): string {
+    if (n === null || n === undefined) return '—'
+    return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
+  },
+  thb2(n: number | null | undefined): string {
+    return '฿' + db.fmt2(n)
+  },
+
   thaiDate(s: string): string {
     if (!s) return '—'
     const d = new Date(s)
@@ -177,7 +186,11 @@ export const db = {
   lastClosedMileage(vehicleId: string, dispatches?: Dispatch[]): number | null {
     if (!vehicleId) return null
     const rounds = (dispatches ?? db.getAll<Dispatch>('dispatch'))
-      .filter(d => d.vehicleId === vehicleId && d.roundStatus === 'closed' && d.endOdometer != null)
+      .filter(d =>
+        d.vehicleId === vehicleId
+        && (d.roundStatus === 'closed' || d.status === 'completed')
+        && d.endOdometer != null,
+      )
     if (!rounds.length) return null
     return Math.max(...rounds.map(d => d.endOdometer ?? 0))
   },
@@ -190,12 +203,32 @@ export const db = {
       String(today.getDate()).padStart(2, '0')
     const prefix = `DSP-${ymd}-`
     const todays = (dispatches ?? db.getAll<Dispatch>('dispatch')).filter(d => d.code?.startsWith(prefix))
-    const seq = String(todays.length + 1).padStart(3, '0')
-    return prefix + seq
+    // Use the largest existing sequence + 1, not length + 1 — if any of
+    // today's rounds was deleted, length leaves a gap and the same code
+    // would clash with another live row on the next insert.
+    const maxSeq = todays.reduce((max, d) => {
+      const n = parseInt(d.code.slice(prefix.length), 10)
+      return Number.isNaN(n) ? max : Math.max(max, n)
+    }, 0)
+    return prefix + String(maxSeq + 1).padStart(3, '0')
   },
 
   roundRevenue(d: Dispatch): number {
     return (d.legs ?? []).reduce((s, l) => s + (l.amount || 0), 0)
+  },
+
+  // ── Withholding tax (ภาษีหัก ณ ที่จ่าย 1% — ฝั่งลูกค้า) ─────────────────────
+  // gross (amount) คือค่าหลักเสมอ; WHT/net เป็นค่า derived เพื่อแสดงผลและวางบิล
+  // ไม่ได้เปลี่ยนค่าใน dispatch.revenue (mirror แนวทางฝั่งผู้รับเหมา sub_jobs.wht)
+  // หัก ณ ที่จ่าย 1% ปัดเป็นสตางค์ (ทศนิยม 2 ตำแหน่ง) ตามหลักบัญชี — ไม่ปัดเป็นจำนวนเต็มบาท
+  legWht(l: DispatchLeg): number {
+    return l.wht ? Math.round((l.amount || 0) * 0.01 * 100) / 100 : 0
+  },
+  roundWht(d: Dispatch): number {
+    return (d.legs ?? []).reduce((s, l) => s + db.legWht(l), 0)
+  },
+  roundNetRevenue(d: Dispatch): number {
+    return (d.legs ?? []).reduce((s, l) => s + (l.amount || 0) - db.legWht(l), 0)
   },
 
   roundPerDiem(d: Dispatch): number {
@@ -221,8 +254,11 @@ export const db = {
       String(today.getDate()).padStart(2, '0')
     const prefix = `RUND-${ymd}-`
     const todays = (rounds ?? db.getAll<FuelRound>('fuelRounds')).filter(r => r.code?.startsWith(prefix))
-    const seq = String(todays.length + 1).padStart(3, '0')
-    return prefix + seq
+    const maxSeq = todays.reduce((max, r) => {
+      const n = parseInt(r.code.slice(prefix.length), 10)
+      return Number.isNaN(n) ? max : Math.max(max, n)
+    }, 0)
+    return prefix + String(maxSeq + 1).padStart(3, '0')
   },
 
   activeFuelRoundForVehicle(vehicleId: string, rounds?: FuelRound[]): FuelRound | null {

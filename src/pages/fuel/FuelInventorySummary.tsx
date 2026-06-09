@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
 import type { FuelRecord, FuelStock } from '../../types'
-import { Field, PrintButton } from '../../components/ui'
+import { Field, PrintButton, FontScaleControl } from '../../components/ui'
 
 const THAI_MONTHS_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -15,8 +15,12 @@ function daysInMonth(year: number, month1to12: number): number {
 function isoDate(year: number, month1to12: number, day: number): string {
   return `${year}-${String(month1to12).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
-const isFactoryStation = (station: string) =>
-  !['PTT', 'Shell', 'Bangchak', 'Esso'].some(s => station?.includes(s))
+// Factory-tank fills are tagged with the literal Thai string by both
+// ExpressFuelLog (source=FACTORY_TANK → 'ถังโรงงาน') and DispatchRoundClose.
+// The previous exclusion-list ('PTT' / 'Shell' / …) accidentally classified
+// the new Thai supplier names ('บริษัท ปตท.' etc.) as factory, leaking
+// external pumps into the factory daily ledger.
+const isFactoryStation = (station: string) => station === 'ถังโรงงาน'
 
 export function FuelInventorySummary() {
   const today = new Date()
@@ -64,7 +68,8 @@ export function FuelInventorySummary() {
           <h1 className="page-title">สรุปคลังน้ำมันรวม</h1>
           <div className="page-sub">รายงานรายวันต่อเดือน • พิมพ์ได้</div>
         </div>
-        <div className="actions">
+        <div className="actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <FontScaleControl />
           <PrintButton orientation="portrait" label="พิมพ์รายงาน" />
         </div>
       </div>

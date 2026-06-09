@@ -45,7 +45,10 @@ export function DispatchMonthlyReport() {
     dispatches
       .filter(d => d.status === 'completed' && d.distance != null && d.liters != null)
       .filter(d => {
-        const dt = new Date(d.date)
+        // นับเดือนตามวันเปิดงาน (depart) — เที่ยวที่ปิดข้ามเดือนยังคงนับในเดือนที่เปิด
+        const basis = d.depart || d.date
+        if (!basis) return false
+        const dt = new Date(basis)
         if (dt.getMonth() + 1 !== month || dt.getFullYear() !== year) return false
         if (vehicleId && d.vehicleId !== vehicleId) return false
         return true
@@ -72,7 +75,7 @@ export function DispatchMonthlyReport() {
         const kmPerL = liters > 0 ? Math.round((distance / liters) * 10) / 10 : 0
         const costPerKm = distance > 0 ? Math.round(((liters * DEFAULT_LITER_PRICE) / distance) * 100) / 100 : 0
         g.rows.push({
-          date: d.date,
+          date: (d.depart || d.date || '').slice(0, 10),
           cargo: d.legs?.[0]?.cargo ?? '—',
           distance,
           liters,

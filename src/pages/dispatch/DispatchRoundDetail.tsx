@@ -2,8 +2,9 @@ import { useState, useMemo, useEffect } from 'react'
 import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound } from '../../types'
-import { Icon, Field } from '../../components/ui'
+import { useAuth } from '../../context/AuthContext'
+import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole, Location } from '../../types'
+import { Icon, Field, LocationCombobox } from '../../components/ui'
 
 interface Props {
   setActive: (id: string) => void
@@ -36,7 +37,7 @@ function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
 interface LegFormState {
   origin: string
   destination: string
-  customerId: string
+  billToLocationId: string
   cargo: string
   cargoType: string
   priceMode: 'per_ton' | 'per_kg' | 'lump'
@@ -44,11 +45,13 @@ interface LegFormState {
   price: string
   legType: 'outbound' | 'backhaul' | 'return'
   notes: string
+  wht: boolean
+  noBill: boolean
 }
 
 const EMPTY_LEG: LegFormState = {
-  origin: '', destination: '', customerId: '', cargo: '', cargoType: '',
-  priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '',
+  origin: '', destination: '', billToLocationId: '', cargo: '', cargoType: '',
+  priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '', wht: false, noBill: false,
 }
 
 function legTypeLabel(t?: string): string {
@@ -100,6 +103,10 @@ function LegModal({
   onCancel: () => void
 }) {
   const [f, setF] = useState(initial)
+  const { data: locations = [] } = useList<Location>('locations')
+  const customerLocs = locations.filter(l => l.isCustomer && l.active).sort((a, b) => a.name.localeCompare(b.name, 'th'))
+  // ปลายทางเป็นลูกค้าไหม → ใช้เป็นค่าเริ่มต้นผู้รับบิล
+  const destIsCustomer = customerLocs.some(l => l.name === f.destination.trim())
   const set = <K extends keyof LegFormState>(k: K, v: LegFormState[K]) => setF(s => ({ ...s, [k]: v }))
   const isReturn = f.legType === 'return'
   const isLump = f.priceMode === 'lump'
@@ -138,6 +145,17 @@ function LegModal({
     onSave(f)
   }
 
+  // 'บันทึกร่าง' lets the user save partial leg data and come back to fill
+  // in weight / price later (e.g. they don't have the weighbridge ticket yet).
+  // Only requires that at least one of origin / destination is set so the
+  // leg shows up in the list meaningfully.
+  const submitDraft = () => {
+    if (!f.origin.trim() && !f.destination.trim()) {
+      return alert('กรุณากรอกอย่างน้อย ต้นทาง หรือ ปลายทาง')
+    }
+    onSave(f)
+  }
+
   return (
     <div
       onClick={onCancel}
@@ -155,19 +173,33 @@ function LegModal({
           <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>ข้อมูลขา</h2>
         </div>
         <div style={{ padding: '18px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Field label="ประเภทขา">
-            <select value={f.legType} onChange={e => set('legType', e.target.value as LegFormState['legType'])}>
-              <option value="outbound">Outbound (เที่ยวไป)</option>
-              <option value="backhaul">Backhaul (เที่ยวกลับ มีสินค้า)</option>
-              <option value="return">Return (เที่ยวกลับ เปล่า)</option>
-            </select>
-          </Field>
+          <div className="grid-2" style={{ gap: 12 }}>
+            <Field label="ประเภทขา">
+              <select value={f.legType} onChange={e => set('legType', e.target.value as LegFormState['legType'])}>
+                <option value="outbound">Outbound (เที่ยวไป)</option>
+                <option value="backhaul">Backhaul (เที่ยวกลับ มีสินค้า)</option>
+                <option value="return">Return (เที่ยวกลับ เปล่า)</option>
+              </select>
+            </Field>
+            <Field label="เก็บเงินจาก (ลูกค้า)">
+              <select value={f.billToLocationId} onChange={e => set('billToLocationId', e.target.value)} disabled={f.noBill}>
+                <option value="">{destIsCustomer ? `— ใช้ปลายทาง: ${f.destination} —` : '— ใช้ปลายทางอัตโนมัติ —'}</option>
+                {customerLocs.map(l => (
+                  <option key={l.id} value={l.id}>{l.name}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <label className="row" style={{ gap: 8, cursor: 'pointer', fontSize: 13, alignItems: 'center' }}>
+            <input type="checkbox" checked={f.noBill} onChange={e => set('noBill', e.target.checked)} style={{ accentColor: 'var(--primary)' }} />
+            <span>ไม่ต้องวางบิล (งานภายใน / ไม่มีลูกค้า) — ตัดออกจากหน้าวางบิลและยอดค้าง</span>
+          </label>
           <div className="grid-2" style={{ gap: 12 }}>
             <Field label="ต้นทาง *">
-              <input value={f.origin} onChange={e => set('origin', e.target.value)} placeholder="เช่น โรงงาน KPS" />
+              <LocationCombobox value={f.origin} onChange={v => set('origin', v)} placeholder="เช่น โรงงาน KPS" />
             </Field>
             <Field label="ปลายทาง *">
-              <input value={f.destination} onChange={e => set('destination', e.target.value)} placeholder="เช่น กรุงเทพ" />
+              <LocationCombobox value={f.destination} onChange={v => set('destination', v)} placeholder="เช่น กรุงเทพ" />
             </Field>
           </div>
           {!isReturn && (
@@ -255,6 +287,30 @@ function LegModal({
               </div>
             </>
           )}
+          {f.legType !== 'outbound' && (
+            <div
+              style={{
+                padding: '10px 14px', borderRadius: 8,
+                background: f.wht ? '#FEF3C7' : 'var(--bg)',
+                border: f.wht ? '1px solid #FCD34D' : '1px dashed var(--line)',
+              }}
+            >
+              <label className="row" style={{ gap: 8, cursor: 'pointer', fontSize: 13, alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={f.wht}
+                  onChange={e => set('wht', e.target.checked)}
+                  style={{ accentColor: 'var(--primary)' }}
+                />
+                <span>ลูกค้าหักภาษี ณ ที่จ่าย 1% (ขากลับ)</span>
+              </label>
+              {f.wht && !isReturn && previewAmount > 0 && (
+                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                  หัก − {db.fmt(previewAmount * 0.01)} บาท → รับสุทธิ <strong>{db.fmt(previewAmount * 0.99)}</strong> บาท
+                </div>
+              )}
+            </div>
+          )}
           <Field label="หมายเหตุ">
             <textarea value={f.notes} onChange={e => set('notes', e.target.value)} rows={2} style={{ resize: 'vertical', minHeight: 56 }} />
           </Field>
@@ -263,6 +319,13 @@ function LegModal({
           <div className="row btn-row" style={{ justifyContent: 'flex-end' }}>
             <button className="btn" onClick={onCancel}>
               <Icon name="close" size={15} /> ยกเลิก
+            </button>
+            <button
+              className="btn"
+              onClick={submitDraft}
+              title="บันทึกข้อมูลที่กรอกไว้ — เติมน้ำหนัก/ราคาภายหลังได้"
+            >
+              <Icon name="edit" size={15} /> บันทึกร่าง
             </button>
             <button className="btn primary" onClick={submit}>
               <Icon name="check" size={15} /> บันทึก
@@ -274,7 +337,7 @@ function LegModal({
   )
 }
 
-function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelRound | null }) {
+function ClosedSummary({ round, fuelRound, isManager }: { round: Dispatch; fuelRound: FuelRound | null; isManager: boolean }) {
   const legs = round.legs ?? []
   const revenue = db.roundRevenue(round)
   const perDiemTotal = db.roundPerDiem(round)
@@ -305,7 +368,8 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
                 <div style={{ fontWeight: 600 }}>📍 START FULL — {startR.location}</div>
                 <div className="muted" style={{ marginTop: 2 }}>
                   ⏰ {startR.at.slice(11, 16)} ({db.fmt(startR.mileage)} km) ·
-                  🛢️ {startR.liters} L · 💰 ฿{db.fmt(startR.cost)} <em>(คิดในรอบก่อน)</em>
+                  🛢️ {startR.liters} L
+                  {isManager && <> · 💰 ฿{db.fmt(startR.cost)} <em>(คิดในรอบก่อน)</em></>}
                 </div>
               </div>
             )}
@@ -314,7 +378,8 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
                 <div style={{ fontWeight: 600 }}>➕ INTERMEDIATE #{i + 1} — {r.location}</div>
                 <div className="muted" style={{ marginTop: 2 }}>
                   ⏰ {r.at.slice(11, 16)} ({db.fmt(r.mileage)} km) ·
-                  🛢️ {r.liters} L · 💰 ฿{db.fmt(r.cost)}
+                  🛢️ {r.liters} L
+                  {isManager && <> · 💰 ฿{db.fmt(r.cost)}</>}
                 </div>
               </div>
             ))}
@@ -323,7 +388,8 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
                 <div style={{ fontWeight: 600 }}>🏁 END FULL — {endR.location}</div>
                 <div className="muted" style={{ marginTop: 2 }}>
                   ⏰ {endR.at.slice(11, 16)} ({db.fmt(endR.mileage)} km) ·
-                  🛢️ {endR.liters} L (จนเต็ม) · 💰 ฿{db.fmt(endR.cost)}
+                  🛢️ {endR.liters} L (จนเต็ม)
+                  {isManager && <> · 💰 ฿{db.fmt(endR.cost)}</>}
                 </div>
               </div>
             )}
@@ -349,10 +415,12 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
                       {kmPerL?.toFixed(2) ?? '—'} km/L {isLow && '⚠️'}
                     </td>
                   </tr>
-                  <tr>
-                    <td style={{ fontWeight: 600 }}>💰 Fuel cost:</td>
-                    <td className="num right" style={{ fontWeight: 700 }}>฿{db.fmt(fuelCost)}</td>
-                  </tr>
+                  {isManager && (
+                    <tr>
+                      <td style={{ fontWeight: 600 }}>💰 Fuel cost:</td>
+                      <td className="num right" style={{ fontWeight: 700 }}>฿{db.fmt(fuelCost)}</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -360,7 +428,8 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
         </div>
       )}
 
-      {/* P&L summary */}
+      {/* P&L summary — manager+ only; drivers see distance/KM-L below only */}
+      {isManager && (
       <div className="card">
         <div className="head"><h3>📊 สรุป P&amp;L</h3></div>
         <div style={{ padding: 18 }}>
@@ -372,6 +441,20 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
                 <span className="spacer" />
                 <span className="mono">{db.thb(revenue)}</span>
               </div>
+              {db.roundWht(round) > 0 && (
+                <>
+                  <div className="row" style={{ fontSize: 13, color: 'var(--amber)' }}>
+                    <span>หัก ณ ที่จ่าย 1%</span>
+                    <span className="spacer" />
+                    <span className="mono">− {db.thb(db.roundWht(round))}</span>
+                  </div>
+                  <div className="row" style={{ fontSize: 13, fontWeight: 600, borderTop: '1px dashed var(--line)', paddingTop: 4, marginTop: 4 }}>
+                    <span>รับสุทธิจากลูกค้า</span>
+                    <span className="spacer" />
+                    <span className="mono">{db.thb(db.roundNetRevenue(round))}</span>
+                  </div>
+                </>
+              )}
             </div>
             <div>
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--red)', marginBottom: 6 }}>💸 ค่าใช้จ่าย</div>
@@ -485,20 +568,32 @@ function ClosedSummary({ round, fuelRound }: { round: Dispatch; fuelRound: FuelR
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }
 
 export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
+  const { isManager, isAdmin, profile } = useAuth()
+  const [showEditRound, setShowEditRound] = useState(false)
+  const [showDeleteRound, setShowDeleteRound] = useState(false)
+  const [showReopenConfirm, setShowReopenConfirm] = useState(false)
+  const [showRequestEdit, setShowRequestEdit] = useState(false)
   const subj = subject as { type?: string; id?: string } | null
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: allFuelRecs = [] } = useList<FuelRecord>('fuel_records')
   const insertLeg = useInsert<DispatchLeg>('dispatch_legs')
   const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
   const removeLeg = useDelete('dispatch_legs')
   const updateDispatch = useUpdate<Dispatch>('dispatch')
+  const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
+  const deleteFuelRec = useDelete('fuel_records')
+  const deleteDispatch = useDelete('dispatch')
+  const insertApproval = useInsert<EditApprovalRequest>('edit_approvals')
 
   const round = useMemo(
     () => (subj?.id ? dispatches.find(d => d.id === subj.id) : undefined),
@@ -541,7 +636,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
     const fields = {
       origin: form.origin.trim(),
       destination: form.destination.trim(),
-      customerId: form.customerId || null,
+      billToLocationId: form.noBill ? null : (form.billToLocationId || null),
       cargo: form.cargo.trim(),
       cargoType: form.cargoType.trim(),
       priceMode: form.priceMode,
@@ -550,6 +645,8 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       amount,
       legType: form.legType,
       notes: form.notes.trim() || null,
+      wht: form.legType !== 'outbound' ? form.wht : false,
+      noBill: form.noBill,
     } as Partial<DispatchLeg>
     try {
       let nextLegs: DispatchLeg[]
@@ -617,6 +714,21 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
         </div>
         <div className="actions no-print">
           {!isClosed && (
+            <button className="btn" onClick={() => setShowEditRound(true)} title="แก้ไขวันที่/เลขไมล์/คนขับ/รถ">
+              <Icon name="edit" size={14} /> แก้ไขรอบ
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              className="btn"
+              style={{ color: 'var(--red)', borderColor: '#fecaca' }}
+              onClick={() => setShowDeleteRound(true)}
+              title="ลบรอบนี้ถาวร"
+            >
+              <Icon name="trash" size={14} /> ลบรอบ
+            </button>
+          )}
+          {!isClosed && (
             <button
               className="btn primary"
               onClick={() => {
@@ -627,6 +739,24 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
               title={legs.length === 0 ? 'เพิ่มขาอย่างน้อย 1 ขาก่อน' : ''}
             >
               <Icon name="check" size={15} /> ไปปิดงาน →
+            </button>
+          )}
+          {isClosed && isAdmin && (
+            <button
+              className="btn"
+              onClick={() => setShowReopenConfirm(true)}
+              title="ตั้งสถานะรอบกลับเป็น DRAFT เพื่อแก้ไข"
+            >
+              <Icon name="edit" size={14} /> เปิดเพื่อแก้ไข
+            </button>
+          )}
+          {isClosed && !isAdmin && (
+            <button
+              className="btn"
+              onClick={() => setShowRequestEdit(true)}
+              title="ส่งคำขอแก้ไขให้แอดมิน"
+            >
+              <Icon name="bell" size={14} /> ขอแก้ไข
             </button>
           )}
           {isClosed && (
@@ -652,10 +782,12 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             <div className="muted" style={{ fontSize: 11 }}>น้ำหนักโหลดรวม</div>
             <div className="mono" style={{ fontSize: 16, fontWeight: 600 }}>{totalWeight.toFixed(2)} ตัน</div>
           </div>
-          <div>
-            <div className="muted" style={{ fontSize: 11 }}>รายได้รวม</div>
-            <div className="mono" style={{ fontSize: 16, fontWeight: 600, color: 'var(--green)' }}>{db.thb(totalRevenue)}</div>
-          </div>
+          {isManager && (
+            <div>
+              <div className="muted" style={{ fontSize: 11 }}>รายได้รวม</div>
+              <div className="mono" style={{ fontSize: 16, fontWeight: 600, color: 'var(--green)' }}>{db.thb(totalRevenue)}</div>
+            </div>
+          )}
         </div>
         {round.notes && (
           <div style={{ marginTop: 14, padding: 10, background: 'var(--bg)', borderRadius: 6, fontSize: 13 }}>
@@ -701,7 +833,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                   <th>สินค้า</th>
                   <th>ประเภท</th>
                   <th className="num">น้ำหนัก (ตัน)</th>
-                  <th className="num right">ค่าขนส่ง</th>
+                  {isManager && <th className="num right">ค่าขนส่ง</th>}
                   {!isClosed && <th></th>}
                 </tr>
               </thead>
@@ -716,7 +848,16 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                     <td>{l.cargoType || <span className="muted">—</span>}</td>
                     <td><span className="badge" style={{ fontSize: 11 }}>{legTypeLabel(l.legType)}</span></td>
                     <td className="num">{(l.weight || 0).toFixed(2)}</td>
-                    <td className="num right">{db.thb(l.amount)}</td>
+                    {isManager && (
+                      <td className="num right">
+                        {db.thb(l.amount)}
+                        {l.wht && (
+                          <div className="muted" style={{ fontSize: 10.5, color: 'var(--amber)' }}>
+                            หัก 1% → {db.thb((l.amount || 0) * 0.99)}
+                          </div>
+                        )}
+                      </td>
+                    )}
                     {!isClosed && (
                       <td>
                         <div className="row" style={{ gap: 4 }}>
@@ -730,7 +871,8 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                                 data: {
                                   origin: l.origin,
                                   destination: l.destination,
-                                  customerId: l.customerId || '',
+                                  billToLocationId: l.billToLocationId || '',
+                                  noBill: l.noBill ?? false,
                                   cargo: l.cargo || '',
                                   cargoType: l.cargoType || '',
                                   priceMode: mode,
@@ -738,6 +880,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                                   price: String(l.price || ''),
                                   legType: l.legType ?? 'outbound',
                                   notes: l.notes || '',
+                                  wht: l.wht ?? false,
                                 },
                               })
                             }}
@@ -760,7 +903,16 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                 <tr style={{ fontWeight: 600, background: 'var(--bg)' }}>
                   <td colSpan={4} className="right">รวม {legs.length} ขา</td>
                   <td className="num">{totalWeight.toFixed(2)}</td>
-                  <td className="num right" style={{ color: 'var(--green)' }}>{db.thb(totalRevenue)}</td>
+                  {isManager && (
+                    <td className="num right" style={{ color: 'var(--green)' }}>
+                      {db.thb(totalRevenue)}
+                      {db.roundWht(round) > 0 && (
+                        <div className="muted" style={{ fontSize: 10.5, color: 'var(--amber)', fontWeight: 500 }}>
+                          หัก 1% รวม − {db.thb(db.roundWht(round))} → สุทธิ {db.thb(db.roundNetRevenue(round))}
+                        </div>
+                      )}
+                    </td>
+                  )}
                   {!isClosed && <td></td>}
                 </tr>
               </tbody>
@@ -769,7 +921,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
         )}
       </div>
 
-      {isClosed && <ClosedSummary round={round} fuelRound={fuelRound} />}
+      {isClosed && <ClosedSummary round={round} fuelRound={fuelRound} isManager={isManager} />}
 
       {editingLeg && (
         <LegModal
@@ -803,6 +955,426 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       )}
 
       {toast && <Toast toast={toast} onClose={() => setToast(null)} />}
+
+      {showEditRound && !isClosed && (
+        <EditRoundModal
+          round={round}
+          vehicles={vehicles}
+          employees={employees}
+          updateDispatch={updateDispatch}
+          onClose={() => setShowEditRound(false)}
+          onSaved={() => {
+            setShowEditRound(false)
+            setToast({ kind: 'success', msg: '✅ อัปเดตข้อมูลรอบแล้ว' })
+          }}
+        />
+      )}
+
+      {showReopenConfirm && isClosed && isAdmin && (
+        <div className="modal-bg" onClick={() => setShowReopenConfirm(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+            <div className="head"><h3>เปิดรอบเพื่อแก้ไข</h3></div>
+            <div className="body">
+              <p style={{ marginBottom: 12 }}>
+                รอบ <strong className="mono" style={{ color: 'var(--primary)' }}>{round.code}</strong> ปิดอยู่
+              </p>
+              <p className="muted" style={{ fontSize: 13 }}>
+                กดยืนยันจะตั้งสถานะรอบเป็น <strong>DRAFT</strong> และพาไปหน้าปิดรอบเพื่อแก้ไขข้อมูล —
+                ปิดรอบใหม่อีกครั้งเมื่อแก้เสร็จ
+              </p>
+            </div>
+            <div className="foot">
+              <button className="btn" onClick={() => setShowReopenConfirm(false)}>ยกเลิก</button>
+              <button
+                className="btn primary"
+                onClick={async () => {
+                  try {
+                    await updateDispatch.mutateAsync({
+                      id: round.id,
+                      patch: { roundStatus: 'draft', status: 'in-progress' },
+                    })
+                    setShowReopenConfirm(false)
+                    setSubject({ type: 'round', id: round.id })
+                    setActive('dispatch.close')
+                  } catch (e) {
+                    setToast({ kind: 'error', msg: e instanceof Error ? e.message : 'เปิดรอบไม่สำเร็จ' })
+                  }
+                }}
+              >
+                <Icon name="edit" size={14} /> เปิดเพื่อแก้ไข
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRequestEdit && isClosed && !isAdmin && profile && (
+        <RequestEditRoundModal
+          round={round}
+          onClose={() => setShowRequestEdit(false)}
+          onSubmit={async (fields, reason) => {
+            try {
+              await insertApproval.mutateAsync({
+                requesterId:   profile.id,
+                requesterName: profile.display_name ?? profile.username ?? profile.email ?? 'ผู้ใช้',
+                requesterRole: (String(profile.role).toLowerCase() === 'manager' ? 'manager' : 'driver') as KPSRole,
+                vehicleId:     round.vehicleId ?? '',
+                vehiclePlate:  vehicles.find(v => v.id === round.vehicleId)?.plate ?? round.code,
+                reason,
+                changes: {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  _kind: 'dispatch_reopen',
+                  roundId: round.id,
+                  roundCode: round.code,
+                  fields,
+                } as Partial<Vehicle>,
+                changeFields: fields.map(f => ({ key: f, label: f, before: '', after: 'แก้ไข' })),
+                requestedAt:  new Date().toISOString(),
+                status:       'pending',
+                reviewerId:   null,
+                reviewerName: null,
+                reviewedAt:   null,
+                reviewNote:   '',
+              })
+              setShowRequestEdit(false)
+              setToast({ kind: 'success', msg: '✅ ส่งคำขอให้แอดมินแล้ว' })
+            } catch (e) {
+              setToast({ kind: 'error', msg: 'ส่งคำขอไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)) })
+            }
+          }}
+        />
+      )}
+
+      {showDeleteRound && isAdmin && (
+        <DeleteRoundModal
+          round={round}
+          linkedFuelTxs={allFuelTxs.filter(t => t.tripId === round.id)}
+          mirrorFuelRecs={allFuelRecs.filter(r => r.code?.startsWith(`TRIP-${round.code}-`))}
+          onClose={() => setShowDeleteRound(false)}
+          onConfirm={async () => {
+            try {
+              // 1) Unlink fuel transactions so they don't dangle as TRIP_LINKED
+              //    with a null trip_id (FK is ON DELETE SET NULL).
+              for (const tx of allFuelTxs.filter(t => t.tripId === round.id)) {
+                await updateFuelTx.mutateAsync({
+                  id: tx.id,
+                  patch: { tripId: null, status: 'FLOATING' },
+                })
+              }
+              // 2) Delete the fuel_records mirror (TRIP-{code}-CLOSE etc.).
+              for (const rec of allFuelRecs.filter(r => r.code?.startsWith(`TRIP-${round.code}-`))) {
+                await deleteFuelRec.mutateAsync(rec.id)
+              }
+              // 3) Delete the round — dispatch_legs cascade automatically.
+              await deleteDispatch.mutateAsync(round.id)
+              setShowDeleteRound(false)
+              setActive('dispatch.open')
+            } catch (e) {
+              setToast({ kind: 'error', msg: 'ลบไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)) })
+            }
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+// ─── Delete round modal (admin only) ──────────────────────────────────────────
+function DeleteRoundModal({
+  round, linkedFuelTxs, mirrorFuelRecs, onClose, onConfirm,
+}: {
+  round: Dispatch
+  linkedFuelTxs: FuelTransaction[]
+  mirrorFuelRecs: FuelRecord[]
+  onClose: () => void
+  onConfirm: () => Promise<void>
+}) {
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const isClosed = round.roundStatus === 'closed'
+  const ok = confirm === round.code
+
+  const submit = async () => {
+    setBusy(true)
+    try { await onConfirm() } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 500 }}>
+        <div className="head"><h3>🗑️ ลบรอบ {round.code}</h3></div>
+        <div className="body">
+          <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: 14, marginBottom: 16 }}>
+            <div style={{ fontWeight: 700, color: '#991b1b', marginBottom: 8, fontSize: 13.5 }}>
+              ⚠️ การลบนี้ทำถาวร ย้อนกลับไม่ได้
+            </div>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, color: '#7f1d1d', lineHeight: 1.8 }}>
+              <li>รอบ <strong className="mono">{round.code}</strong> + ขา <strong>{round.legs?.length ?? 0}</strong> ขา จะถูกลบ</li>
+              {linkedFuelTxs.length > 0 && (
+                <li>น้ำมัน <strong>{linkedFuelTxs.length}</strong> รายการที่ผูกกับรอบนี้จะกลายเป็น "น้ำมันลอย" (ผูกใหม่ได้)</li>
+              )}
+              {mirrorFuelRecs.length > 0 && (
+                <li>บันทึก fuel_records mirror <strong>{mirrorFuelRecs.length}</strong> ของรอบนี้จะถูกลบด้วย</li>
+              )}
+              {isClosed && (
+                <li>รอบนี้สถานะ <strong>CLOSED</strong> — รายงาน P&L รายเดือนจะหายส่วนนี้</li>
+              )}
+            </ul>
+          </div>
+          <div style={{ fontSize: 13, marginBottom: 8 }}>
+            พิมพ์รหัสรอบ <strong className="mono" style={{ color: 'var(--red)' }}>{round.code}</strong> เพื่อยืนยัน:
+          </div>
+          <input
+            value={confirm}
+            onChange={e => setConfirm(e.target.value)}
+            placeholder={round.code}
+            autoFocus
+            style={{
+              width: '100%', height: 38, padding: '0 12px',
+              border: `2px solid ${ok ? '#16a34a' : confirm ? 'var(--red)' : 'var(--line)'}`,
+              borderRadius: 6, fontSize: 14, letterSpacing: '.05em', fontFamily: 'var(--font-mono)',
+            }}
+          />
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button
+            onClick={submit}
+            disabled={!ok || busy}
+            style={{
+              padding: '8px 18px', borderRadius: 6, fontWeight: 600, fontSize: 13,
+              border: 'none', cursor: ok && !busy ? 'pointer' : 'not-allowed',
+              background: ok ? 'var(--red)' : 'var(--bg-sunk)',
+              color: ok ? '#fff' : 'var(--text-muted)',
+              opacity: busy ? 0.6 : 1,
+            }}
+          >
+            🗑️ {busy ? 'กำลังลบ…' : 'ลบรอบนี้ถาวร'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Edit Round header modal (draft only) ─────────────────────────────────────
+function EditRoundModal({
+  round, vehicles, employees, updateDispatch, onClose, onSaved,
+}: {
+  round: Dispatch
+  vehicles: Vehicle[]
+  employees: Employee[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  updateDispatch: any
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const drivers = employees.filter(e => e.position === 'คนขับ')
+  const transportVehicles = vehicles
+    .filter(v => v.groupKind === 'TRANSPORT')
+    .sort((a, b) => a.plate.localeCompare(b.plate))
+
+  const [form, setForm] = useState({
+    depart: round.depart || (round.date + 'T08:00'),
+    vehicleId: round.vehicleId ?? '',
+    driverId: round.driverId ?? '',
+    startOdometer: round.startOdometer != null ? String(round.startOdometer) : '',
+    notes: round.notes ?? '',
+  })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const save = async () => {
+    setErr('')
+    if (!form.depart) return setErr('กรุณาระบุวันที่/เวลาออกเดินทาง')
+    if (!form.vehicleId) return setErr('กรุณาเลือกรถ')
+    if (!form.driverId) return setErr('กรุณาเลือกคนขับ')
+    const startOdo = Number(form.startOdometer)
+    if (form.startOdometer === '' || isNaN(startOdo) || startOdo < 0)
+      return setErr('กรุณาระบุเลขไมล์ต้นรอบ')
+    setBusy(true)
+    try {
+      await updateDispatch.mutateAsync({
+        id: round.id,
+        patch: {
+          depart: form.depart,
+          date: form.depart.slice(0, 10),
+          vehicleId: form.vehicleId,
+          driverId: form.driverId,
+          startOdometer: startOdo,
+          notes: form.notes,
+        },
+      })
+      onSaved()
+    } catch (e) {
+      setErr('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+        <div className="head"><h3>✏️ แก้ไขข้อมูลรอบ {round.code}</h3></div>
+        <div className="body">
+          {err && (
+            <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: '#DC2626' }}>{err}</div>
+          )}
+          <div className="grid-2" style={{ gap: 14 }}>
+            <Field label="วันที่/เวลาออกเดินทาง *">
+              <input
+                type="datetime-local"
+                value={form.depart}
+                onChange={e => setForm(f => ({ ...f, depart: e.target.value }))}
+              />
+            </Field>
+            <Field label="เลขไมล์ต้นรอบ (km) *">
+              <input
+                type="number"
+                value={form.startOdometer}
+                onChange={e => setForm(f => ({ ...f, startOdometer: e.target.value }))}
+                placeholder="0"
+              />
+            </Field>
+          </div>
+          <div className="grid-2" style={{ gap: 14, marginTop: 14 }}>
+            <Field label="ทะเบียนรถ *">
+              <select value={form.vehicleId} onChange={e => setForm(f => ({ ...f, vehicleId: e.target.value }))}>
+                <option value="">— เลือกรถ —</option>
+                {transportVehicles.map(v => (
+                  <option key={v.id} value={v.id}>{v.plate} ({v.brand} · {v.type})</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="คนขับ *">
+              <select value={form.driverId} onChange={e => setForm(f => ({ ...f, driverId: e.target.value }))}>
+                <option value="">— เลือกคนขับ —</option>
+                {drivers.map(d => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <Field label="หมายเหตุ">
+              <textarea
+                value={form.notes}
+                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                rows={2}
+                style={{ width: '100%', resize: 'vertical' }}
+              />
+            </Field>
+          </div>
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" onClick={save} disabled={busy}>
+            <Icon name="check" size={14} /> {busy ? 'กำลังบันทึก…' : 'บันทึก'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Request-edit modal (employee, closed round) ─────────────────────────────
+// More structured than the basic reason-only modal in DispatchSummaryReport:
+// employee ticks which parts they want to fix so the admin sees the intent
+// straight away on the approval card.
+const EDITABLE_FIELDS: { key: string; label: string }[] = [
+  { key: 'depart',      label: 'วันที่/เวลาออกเดินทาง' },
+  { key: 'odometer',    label: 'เลขไมล์ต้น/ปลาย' },
+  { key: 'vehicle',     label: 'ทะเบียนรถ' },
+  { key: 'driver',      label: 'คนขับ' },
+  { key: 'leg_weight',  label: 'น้ำหนัก/ราคา ของขา' },
+  { key: 'fuel',        label: 'น้ำมัน (ลิตร/ราคา)' },
+  { key: 'per_diem',    label: 'เบี้ยเลี้ยง' },
+  { key: 'other_exp',   label: 'ค่าใช้จ่ายอื่น' },
+  { key: 'notes',       label: 'หมายเหตุ' },
+]
+
+function RequestEditRoundModal({
+  round, onClose, onSubmit,
+}: {
+  round: Dispatch
+  onClose: () => void
+  onSubmit: (fields: string[], reason: string) => Promise<void>
+}) {
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const toggle = (k: string) => setPicked(prev => {
+    const next = new Set(prev)
+    if (next.has(k)) next.delete(k); else next.add(k)
+    return next
+  })
+
+  const submit = async () => {
+    setErr('')
+    if (picked.size === 0) return setErr('กรุณาเลือกส่วนที่ต้องการแก้ไขอย่างน้อย 1 ข้อ')
+    if (!reason.trim()) return setErr('กรุณากรอกเหตุผล')
+    setBusy(true)
+    try { await onSubmit([...picked], reason.trim()) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 540 }}>
+        <div className="head"><h3>🔔 ขอแก้ไขรอบที่ปิดแล้ว</h3></div>
+        <div className="body">
+          {err && (
+            <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6, padding: '8px 12px', marginBottom: 12, fontSize: 13, color: '#DC2626' }}>{err}</div>
+          )}
+          <p style={{ marginBottom: 14, fontSize: 13 }}>
+            รอบ <strong className="mono" style={{ color: 'var(--primary)' }}>{round.code}</strong> — แอดมินจะเห็นคำขอนี้ในแดชบอร์ดและพิจารณาเปิดรอบกลับให้แก้
+          </p>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>ส่วนที่ต้องการแก้ *</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+              {EDITABLE_FIELDS.map(f => {
+                const on = picked.has(f.key)
+                return (
+                  <label key={f.key} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 12px', borderRadius: 6, cursor: 'pointer',
+                    border: `1px solid ${on ? 'var(--primary)' : 'var(--line)'}`,
+                    background: on ? 'var(--primary-50)' : '#fff',
+                    fontSize: 13,
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={() => toggle(f.key)}
+                      style={{ accentColor: 'var(--primary)' }}
+                    />
+                    <span>{f.label}</span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+
+          <Field label="เหตุผล *">
+            <textarea
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              rows={3}
+              placeholder="เช่น เลขไมล์ปลายผิด ใส่เกิน 100 km"
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+          </Field>
+        </div>
+        <div className="foot">
+          <button className="btn" onClick={onClose} disabled={busy}>ยกเลิก</button>
+          <button className="btn primary" onClick={submit} disabled={busy}>
+            <Icon name="check" size={14} /> {busy ? 'กำลังส่ง…' : 'ส่งคำขอ'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

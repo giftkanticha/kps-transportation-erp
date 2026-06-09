@@ -1,8 +1,8 @@
 import { useState, useRef } from 'react'
-import type { SubDriver, SubJob, User, Vehicle } from '../../types'
+import type { SubDriver, SubJob, Subcontractor, User, Vehicle } from '../../types'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
-import { Icon, Field, Info, PrintButton } from '../../components/ui'
+import { Icon, Field, Info, PrintButton, SearchInput } from '../../components/ui'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -328,27 +328,31 @@ function SubOpenForm() {
     if (!form.destination.trim()) { alert('กรุณาระบุปลายทาง'); return }
     if (!form.price) { alert('กรุณากรอกค่าบรรทุก'); return }
     if (!picked) return
-    await insertJob.mutateAsync({
-      code: 'SUB-' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + String(Math.floor(Math.random() * 100)).padStart(2, '0'),
-      date: form.date,
-      subId: picked.subId,
-      driverId: picked.id,
-      plate: picked.plate,
-      driverName: picked.name,
-      category: form.category,
-      destination: form.destination.trim(),
-      origin: 'กรุงเทพ',
-      weight: weightKg,
-      finalWeight: 0,
-      mode: form.mode,
-      price: priceNum,
-      total,
-      status: 'open',
-      bank: `${picked.accountBank} ${picked.accountNo}`,
-    })
-    alert('เปิดงานเรียบร้อย')
-    setForm(blank)
-    setCategoryAutoFilled(false)
+    try {
+      await insertJob.mutateAsync({
+        code: 'SUB-' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + String(Math.floor(Math.random() * 100)).padStart(2, '0'),
+        date: form.date,
+        subId: picked.subId,
+        driverId: picked.id,
+        plate: picked.plate,
+        driverName: picked.name,
+        category: form.category,
+        destination: form.destination.trim(),
+        origin: 'กรุงเทพ',
+        weight: weightKg,
+        finalWeight: 0,
+        mode: form.mode,
+        price: priceNum,
+        total,
+        status: 'open',
+        bank: `${picked.accountBank} ${picked.accountNo}`,
+      })
+      alert('เปิดงานเรียบร้อย')
+      setForm(blank)
+      setCategoryAutoFilled(false)
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   const cancel = () => {
@@ -1117,6 +1121,7 @@ function DriverActionMenu({ driver, isAdmin, onEdit, onDelete, onChanged }: Driv
 function SubDriversList({ user }: { user?: User }) {
   const isAdmin = user?.role === 'admin'
   const { data: drivers = [] } = useList<SubDriver>('sub_drivers')
+  const { data: subs = [] } = useList<Subcontractor>('subcontractors')
   const { data: allJobs = [] } = useList<SubJob>('sub_jobs')
   const deleteDriver = useDelete('sub_drivers')
   const [q, setQ] = useState('')
@@ -1124,7 +1129,16 @@ function SubDriversList({ user }: { user?: User }) {
   const [addNew, setAddNew] = useState(false)
   const [deleting, setDeleting] = useState<SubDriver | null>(null)
 
-  const filtered = drivers.filter(d => !q || d.name.toLowerCase().includes(q.toLowerCase()) || d.phone.includes(q) || d.plate.toLowerCase().includes(q.toLowerCase()))
+  const subById = new Map(subs.map(s => [s.id, s]))
+  const groupName = (d: SubDriver) => subById.get(d.subId)?.name ?? ''
+
+  const filtered = drivers.filter(d =>
+    !q
+    || d.name.toLowerCase().includes(q.toLowerCase())
+    || d.phone.includes(q)
+    || d.plate.toLowerCase().includes(q.toLowerCase())
+    || groupName(d).toLowerCase().includes(q.toLowerCase()),
+  )
   const today = new Date()
 
   const confirmDelete = async () => {
@@ -1157,15 +1171,12 @@ function SubDriversList({ user }: { user?: User }) {
           )}
         </div>
 
-        <div style={{ position: 'relative', marginTop: 14, maxWidth: 360 }}>
-          <Icon name="search" size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-faint)' }} />
-          <input
-            value={q}
-            onChange={e => setQ(e.target.value)}
-            placeholder="ค้นหาชื่อ / เบอร์โทร / ทะเบียน..."
-            style={{ width: '100%', height: 36, padding: '0 12px 0 34px', border: '1px solid var(--line)', borderRadius: 8, background: 'var(--bg)', fontSize: 13 }}
-          />
-        </div>
+        <SearchInput
+          value={q}
+          onChange={setQ}
+          placeholder="ค้นหาชื่อ / เบอร์โทร / ทะเบียน / กลุ่มขนส่ง..."
+          style={{ marginTop: 14, maxWidth: 360 }}
+        />
       </div>
 
       <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
@@ -1173,6 +1184,7 @@ function SubDriversList({ user }: { user?: User }) {
           <thead>
             <tr>
               <th>รหัส/ชื่อ-นามสกุล</th>
+              <th>กลุ่มขนส่ง</th>
               <th>เบอร์โทร</th>
               <th>ทะเบียนรถ</th>
               <th>ดั้ม</th>
@@ -1195,6 +1207,11 @@ function SubDriversList({ user }: { user?: User }) {
                   <td>
                     <div style={{ fontWeight: 500 }}>{d.name}</div>
                     <div className="muted mono" style={{ fontSize: 11.5 }}>{d.code}</div>
+                  </td>
+                  <td>
+                    {groupName(d)
+                      ? <span style={{ fontWeight: 500 }}>{groupName(d)}</span>
+                      : <span className="muted" style={{ fontSize: 12 }}>—</span>}
                   </td>
                   <td className="mono">{d.phone}</td>
                   <td>
@@ -1245,7 +1262,7 @@ function SubDriversList({ user }: { user?: User }) {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={10}>
                   <div className="empty">ไม่พบข้อมูลคนขับ</div>
                 </td>
               </tr>

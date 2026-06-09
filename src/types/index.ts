@@ -53,7 +53,7 @@ export interface Vehicle {
   tax: string
   insurance: string
   dispatchPermit: string
-  groupKind?: 'INTERNAL' | 'TRANSPORT'
+  groupKind?: 'INTERNAL' | 'TRANSPORT' | 'EQUIPMENT'
 }
 
 export interface Customer {
@@ -69,6 +69,56 @@ export interface Customer {
   industry: string
   since: string
   address: string
+}
+
+export interface CompanyBankAccount {
+  id: string
+  bankName: string
+  accountNo: string
+  accountName: string
+  branch: string
+  isDefault: boolean
+  active: boolean
+}
+
+export interface BillingNote {
+  id: string
+  code: string
+  docType: 'billing_note' | 'receipt'
+  customerId: string | null
+  customerName: string
+  year: number
+  month: number
+  bankAccountId: string | null
+  gross: number
+  whtAmount: number
+  net: number
+  /** สถานที่-ลูกค้าที่รับบิลนี้ (locations.is_customer) */
+  billToLocationId?: string | null
+  /** id ของ "ขา" (dispatch_legs) ที่อยู่ในบิลนี้ — ลูกค้าผูกระดับขา */
+  legIds: string[]
+  /** เดิม: id ของรอบ — เลิกใช้ คงไว้เพื่อความเข้ากันได้ */
+  dispatchIds?: string[]
+  status: 'issued' | 'paid' | 'void'
+  issuedAt?: string
+  paidAt?: string | null
+  notes: string
+}
+
+export interface Location {
+  id: string
+  name: string
+  category: string
+  province: string
+  address: string
+  notes: string
+  active: boolean
+  // เป็นลูกค้า (วางบิลได้) + ข้อมูลตั้งบิล
+  isCustomer?: boolean
+  credit?: number
+  taxId?: string
+  phone?: string
+  contact?: string
 }
 
 export interface Subcontractor {
@@ -102,6 +152,12 @@ export interface DispatchLeg {
   closed?: boolean
   dispatchId?: string
   sortOrder?: number
+  /** ลูกค้าหักภาษี ณ ที่จ่าย 1% บนขานี้ (มักเป็นขากลับ). gross=amount, net=amount*0.99 */
+  wht?: boolean
+  /** ผู้รับบิลของขา (override). ว่าง = ใช้ปลายทางอัตโนมัติถ้าปลายทางเป็นลูกค้า */
+  billToLocationId?: string | null
+  /** ไม่ต้องวางบิล/ไม่มีลูกค้า (งานภายใน) — ตัดออกจากหน้าวางบิลและยอดค้าง */
+  noBill?: boolean
 }
 
 export interface OtherExpense {
@@ -140,6 +196,70 @@ export interface Dispatch {
   // survives reopen. The TRIP_CLOSING ledger entry is created on actual close.
   closingFuelLiters?: number | null
   closingFuelPrice?: number | null
+  // Accounting period membership (set on save; can be re-assigned at period close
+  // via "carry forward" decision).
+  accountingPeriodId?: string | null
+  carryForwardFrom?: string | null
+  splitParentId?: string | null
+  locked?: boolean
+  // Customer payment tracking — fully decoupled from roundStatus. A round can be
+  // CLOSED while still 'unpaid'; the dashboard surfaces outstanding amounts.
+  paymentStatus?: 'unpaid' | 'partial' | 'paid'
+  amountPaid?: number
+  paidAt?: string | null
+}
+
+export type AccountingPeriodStatus = 'OPEN' | 'PENDING_CLOSE' | 'CLOSED'
+
+export interface AccountingPeriod {
+  id: string
+  year: number
+  month: number
+  status: AccountingPeriodStatus
+  closedAt?: string | null
+  closedBy?: string | null
+  closedByName?: string | null
+  reopenedAt?: string | null
+  reopenedBy?: string | null
+  reopenReason?: string | null
+  notes: string
+  createdAt: string
+}
+
+export interface AccountingPeriodSnapshotData {
+  rounds: number
+  legs: number
+  distance: number
+  liters: number
+  revenue: number
+  fuelCost: number
+  perDiem: number
+  other: number
+  profit: number
+  avgKmPerL: number | null
+}
+
+export interface AccountingPeriodSnapshot {
+  id: string
+  periodId: string
+  vehicleId: string | null
+  plate: string
+  data: AccountingPeriodSnapshotData
+  createdAt: string
+}
+
+export interface PeriodUnlockRequest {
+  id: string
+  periodId: string
+  requesterId: string | null
+  requesterName: string
+  reason: string
+  status: 'pending' | 'approved' | 'rejected'
+  reviewerId?: string | null
+  reviewerName?: string | null
+  reviewedAt?: string | null
+  reviewNote?: string | null
+  createdAt: string
 }
 
 export interface Maintenance {
@@ -206,6 +326,8 @@ export interface FuelRecord {
   odometer: number
   date: string
   type: string
+  /** เดือนค่าใช้จ่ายสำหรับรายงาน (เช่น น้ำมันปิดรอบที่ข้ามเดือน). ว่าง = ใช้ date */
+  accountingDate?: string | null
 }
 
 export interface FuelRefill {
@@ -262,6 +384,20 @@ export interface FuelStock {
   pricePerL: number
   invoiceNo: string
   total: number
+  expenseHeaderId?: string | null  // FK → expense_headers when this purchase is also booked as AP
+}
+
+// Manager-set reference price per source per date. Drivers' fuel entries
+// pull from this table so they don't have to (and aren't supposed to)
+// know the day's price.
+export interface FuelDailyPrice {
+  id: string
+  date: string         // YYYY-MM-DD
+  source: 'EXTERNAL_PUMP' | 'FACTORY_TANK'
+  pricePerL: number
+  notes: string
+  setBy?: string | null
+  createdAt?: string
 }
 
 export interface Expense {
@@ -372,6 +508,11 @@ export interface SubDriver {
   vehicleTypes?: string[]
   truckDump?: 'dump' | 'no-dump'
   cpAccess?: 'yes' | 'no'
+  province?: string
+  followerName?: string
+  followerIdCard?: string
+  accountName?: string
+  vehicleOwner?: string
 }
 
 export interface SubJob {

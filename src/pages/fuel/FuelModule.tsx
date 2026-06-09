@@ -4,7 +4,9 @@ import { useList, useInsert } from '../../hooks/useTable'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import { VehiclePickerSidebar } from '../../components/ui/VehiclePickerSidebar'
+import { FontScaleControl } from '../../components/ui/FontScaleControl'
 import { usePrint } from '../../hooks/usePrint'
+import { useAuth } from '../../context/AuthContext'
 import type { CSSProperties } from 'react'
 import type { FuelRecord, Vehicle, Employee } from '../../types'
 import { FuelStockDashboard } from './FuelStockDashboard'
@@ -12,6 +14,7 @@ import { FuelInventorySummary } from './FuelInventorySummary'
 import { ExpressFuelLog } from './ExpressFuelLog'
 import { FloatingFuel } from './FloatingFuel'
 import { FuelReconciliation } from './FuelReconciliation'
+import { FuelDailyPricesPage } from './FuelDailyPricesPage'
 
 const THAI_MONTHS_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -38,13 +41,18 @@ const tabBtn = (active: boolean): CSSProperties => ({
   transition: 'all .15s',
 })
 
-const isFactoryFuel = (f: FuelRecord) =>
-  !['PTT', 'Shell', 'Bangchak', 'Esso'].some(s => f.station?.includes(s))
+// Factory-tank fuel uses the literal 'ถังโรงงาน' Thai string in
+// fuel_records.station (set by ExpressFuelLog source=FACTORY_TANK and by
+// DispatchRoundClose TRIP_CLOSING). The old exclusion-list approach
+// ('PTT' / 'Shell' / …) leaked external pump rows into the factory daily
+// table now that supplier names are Thai ('บริษัท ปตท.' etc.).
+const isFactoryFuel = (f: FuelRecord) => f.station === 'ถังโรงงาน'
 
 type FuelVal = { liters: number; amount: number }
 
 // ─── Tab 2: บันทึก ─── (Fuel record form)
 function FuelRecord() {
+  const { isManager } = useAuth()
   const [form, setForm] = useState({
     vehicleId: '',
     driverId: '',
@@ -88,8 +96,7 @@ function FuelRecord() {
     }
   }
 
-  const isExternal = (station: string) =>
-    ['PTT', 'Shell', 'Bangchak', 'Esso'].some((s) => station.includes(s))
+  const isExternal = (station: string) => station === 'ปั๊มภายนอก'
 
   return (
     <div>
@@ -238,7 +245,7 @@ function FuelRecord() {
                 <th>วันที่</th>
                 <th>ทะเบียนรถ</th>
                 <th className="right">ปริมาณ (ลิตร)</th>
-                <th className="right">จำนวนเงิน</th>
+                {isManager && <th className="right">จำนวนเงิน</th>}
                 <th>คนขับ</th>
                 <th>แหล่งน้ำมัน</th>
               </tr>
@@ -253,9 +260,11 @@ function FuelRecord() {
                     </a>
                   </td>
                   <td className="num right">{f.liters}</td>
-                  <td className="num right" style={{ fontWeight: 600 }}>
-                    {db.fmt(f.total)} บาท
-                  </td>
+                  {isManager && (
+                    <td className="num right" style={{ fontWeight: 600 }}>
+                      {db.fmt(f.total)} บาท
+                    </td>
+                  )}
                   <td>{employees.find(e => e.id === f.driverId)?.name ?? '—'}</td>
                   <td>
                     {isExternal(f.station) ? (
@@ -330,7 +339,13 @@ function FuelReportV2() {
     return vehicles.filter(v => pickedVehicles.has(v.id))
   }, [vehicles, pickedVehicles])
 
-  const fmt = (n: number) => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const fmt = (n: number) => {
+    if (n <= 0) return ''
+    const cents = Math.round(n * 100) % 100
+    // .00 → ซ่อนทศนิยม / .99 → ปัดขึ้นเป็นจำนวนเต็ม
+    if (cents === 0 || cents === 99) return Math.round(n).toLocaleString('en-US')
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
   const getVal = (v: FuelVal | undefined) => metric === 'liters' ? (v?.liters || 0) : (v?.amount || 0)
   const unitLabel = metric === 'liters' ? 'ลิตร' : 'บาท'
   const unitBadge = (
@@ -437,6 +452,7 @@ function FuelReportV2() {
               <button style={tabBtn(viewMode === 'yearly')} onClick={() => setViewMode('yearly')}>ภาพรวมรายปี</button>
             </>,
           )}
+          <FontScaleControl />
           <button className="btn primary" onClick={() => print('landscape')} style={{ height: 36 }}>
             <Icon name="download" size={15} /> พิมพ์
           </button>
@@ -448,7 +464,6 @@ function FuelReportV2() {
         <p className="co">KPS Transportations</p>
         <p className="ttl">รายงานการใช้น้ำมัน{viewMode === 'yearly' ? 'ภาพรวมรายปี' : 'รายเดือน'} — {sourceLabel} ({metric === 'liters' ? 'จำนวนลิตร' : 'จำนวนเงิน'})</p>
         <p className="sub">{periodLabel}</p>
-        <p className="ts">พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</p>
       </div>
 
       {/* Sidebar + main */}
@@ -457,6 +472,16 @@ function FuelReportV2() {
           vehicles={vehicles}
           picked={pickedVehicles}
           onChange={setPickedVehicles}
+          groups={[
+            {
+              label: '🚛 ขนส่ง',
+              vehicles: vehicles.filter(v => (v.groupKind ?? 'TRANSPORT') === 'TRANSPORT'),
+            },
+            {
+              label: '🏭 โรงงานและอุปกรณ์',
+              vehicles: vehicles.filter(v => v.groupKind === 'INTERNAL' || v.groupKind === 'EQUIPMENT'),
+            },
+          ]}
         />
 
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -506,12 +531,12 @@ function FuelReportV2() {
                           const val = getVal(monthlyMatrix[d]?.[v.id])
                           return (
                             <td key={v.id} className="num right mono" style={{ color: val > 0 ? 'var(--text-1)' : 'var(--text-faint)' }}>
-                              {val > 0 ? fmt(val) : '—'}
+                              {fmt(val)}
                             </td>
                           )
                         })}
                         <td className="num right mono" style={{ background: '#FFF8E1', fontWeight: 700, color: '#7A5A00' }}>
-                          {tot > 0 ? fmt(tot) : '—'}
+                          {fmt(tot)}
                         </td>
                       </tr>
                     )
@@ -576,7 +601,7 @@ function FuelReportV2() {
                         const val = getVal(yearlyMatrix[v.id]?.[m])
                         return (
                           <td key={m} className="num right mono" style={{ color: val > 0 ? 'var(--text-1)' : 'var(--text-faint)' }}>
-                            {val > 0 ? fmt(val) : '—'}
+                            {fmt(val)}
                           </td>
                         )
                       })}
@@ -593,7 +618,7 @@ function FuelReportV2() {
                       const tot = monthColTotal(m)
                       return (
                         <td key={m} className="num right mono" style={{ color: 'var(--primary)' }}>
-                          {tot > 0 ? fmt(tot) : '—'}
+                          {fmt(tot)}
                         </td>
                       )
                     })}
@@ -611,22 +636,6 @@ function FuelReportV2() {
         </div>
       </div>
 
-      {/* Signature block (print only) */}
-      <div
-        className="print-only"
-        style={{ marginTop: 40, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 60, pageBreakInside: 'avoid', breakInside: 'avoid' }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 50, fontSize: 13 }}>ผู้จัดทำ</div>
-          <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>(.....................................)  </div>
-          <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ borderTop: '1px solid #000', paddingTop: 6, marginTop: 50, fontSize: 13 }}>ผู้อนุมัติ</div>
-          <div style={{ fontSize: 11, color: '#666', marginTop: 2 }}>(.....................................)  </div>
-          <div style={{ fontSize: 11, color: '#666' }}>วันที่ ......./......./.......</div>
-        </div>
-      </div>
     </div>
   )
 }
@@ -639,6 +648,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
     tab === 'express' ? 'express' :
     tab === 'floating' ? 'floating' :
     tab === 'reconcile' ? 'reconcile' :
+    tab === 'prices' ? 'prices' :
     'overview'
 
   return (
@@ -652,12 +662,13 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       <div className="tabs no-print" style={{ marginBottom: 22 }}>
         {(
           [
-            ['overview', 'fuel', '📊 ภาพรวม', 'fuel'],
-            ['express', 'express', '⚡ คีย์ด่วน', 'edit'],
-            ['floating', 'floating', '🟡 น้ำมันลอย', 'alert'],
-            ['report', 'report', '📋 รายงาน', 'chart'],
-            ['summary', 'summary', '📦 สรุปคลัง', 'download'],
-            ['reconcile', 'reconcile', '🔍 ตรวจสอบข้อมูล', 'search'],
+            ['overview', 'fuel', 'ภาพรวม', 'gauge'],
+            ['express', 'express', 'คีย์ด่วน', 'bolt'],
+            ['floating', 'floating', 'น้ำมันลอย', 'alert'],
+            ['prices', 'prices', 'ราคารายวัน', 'money'],
+            ['report', 'report', 'รายงาน', 'chart'],
+            ['summary', 'summary', 'สรุปคลัง', 'package'],
+            ['reconcile', 'reconcile', 'ตรวจสอบข้อมูล', 'search'],
           ] as [string, string, string, string][]
         ).map(([id, route, label, ic]) => (
           <button
@@ -677,6 +688,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
       {current === 'report' && <FuelReportV2 />}
       {current === 'summary' && <FuelInventorySummary />}
       {current === 'reconcile' && <FuelReconciliation />}
+      {current === 'prices' && <FuelDailyPricesPage />}
     </div>
   )
 }

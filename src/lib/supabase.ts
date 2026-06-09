@@ -21,4 +21,6 @@ export interface UserProfile {
   approved_at:  string | null
   created_at:   string
   updated_at:   string
+  email:        string | null
+  username:     string | null
 }

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { db } from '../../lib/db'
-import { useList, useInsert } from '../../hooks/useTable'
-import { Icon, Field, StatusBadge } from '../../components/ui'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
+import { Icon, Field, StatusBadge, SearchInput } from '../../components/ui'
 import type { Customer } from '../../types'
 
 interface CustomerForm {
@@ -82,52 +82,71 @@ function Modal({
   )
 }
 
+const EMPTY_FORM: CustomerForm = { name: '', contact: '', phone: '', credit: 30, industry: '', address: '' }
+
 export function CustomersPage() {
   const [q, setQ] = useState('')
   const [show, setShow] = useState(false)
-  const [form, setForm] = useState<CustomerForm>({
-    name: '',
-    contact: '',
-    phone: '',
-    credit: 30,
-    industry: '',
-    address: '',
-  })
+  const [editId, setEditId] = useState<string | null>(null)
+  const [form, setForm] = useState<CustomerForm>(EMPTY_FORM)
 
   const { data: customers = [] } = useList<Customer>('customers')
   const insertCustomer = useInsert<Customer>('customers')
+  const updateCustomer = useUpdate<Customer>('customers')
   const list = customers.filter(
     (c) => !q || c.name.toLowerCase().includes(q.toLowerCase()) || c.code.includes(q),
   )
+
+  const busy = insertCustomer.isPending || updateCustomer.isPending
+
+  const openCreate = () => { setEditId(null); setForm(EMPTY_FORM); setShow(true) }
+  const openEdit = (c: Customer) => {
+    setEditId(c.id)
+    setForm({ name: c.name, contact: c.contact, phone: c.phone, credit: c.credit, industry: c.industry, address: c.address })
+    setShow(true)
+  }
 
   const save = () => {
     if (!form.name) {
       alert('กรุณากรอกชื่อลูกค้า')
       return
     }
-    if (insertCustomer.isPending) return
-    insertCustomer.mutate(
-      {
-        name: form.name,
-        contact: form.contact,
-        phone: form.phone,
-        industry: form.industry,
-        address: form.address,
-        code: 'CUS-' + (1000 + customers.length + 1),
-        totalJobs: 0,
-        openInvoice: 0,
-        status: 'active',
-        since: new Date().toISOString().slice(0, 10),
-        credit: +form.credit,
-      },
-      {
-        onSuccess: () => {
-          setShow(false)
-          setForm({ name: '', contact: '', phone: '', credit: 30, industry: '', address: '' })
+    if (busy) return
+    const onSuccess = () => { setShow(false); setForm(EMPTY_FORM); setEditId(null) }
+    const onError = (err: unknown) => alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ')
+    if (editId) {
+      updateCustomer.mutate(
+        {
+          id: editId,
+          patch: {
+            name: form.name,
+            contact: form.contact,
+            phone: form.phone,
+            industry: form.industry,
+            address: form.address,
+            credit: +form.credit,
+          },
         },
-        onError: (err) => alert(err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'),
-      },
-    )
+        { onSuccess, onError },
+      )
+    } else {
+      insertCustomer.mutate(
+        {
+          name: form.name,
+          contact: form.contact,
+          phone: form.phone,
+          industry: form.industry,
+          address: form.address,
+          code: 'CUS-' + (1000 + customers.length + 1),
+          totalJobs: 0,
+          openInvoice: 0,
+          status: 'active',
+          since: new Date().toISOString().slice(0, 10),
+          credit: +form.credit,
+        },
+        { onSuccess, onError },
+      )
+    }
   }
 
   const totalOpenInvoice = customers.reduce((s, c) => s + c.openInvoice, 0)
@@ -142,40 +161,14 @@ export function CustomersPage() {
           </div>
         </div>
         <div className="actions">
-          <button className="btn primary" onClick={() => setShow(true)}>
+          <button className="btn primary" onClick={openCreate}>
             <Icon name="plus" size={15} /> เพิ่มลูกค้าใหม่
           </button>
         </div>
       </div>
 
       <div className="toolbar">
-        <div style={{ position: 'relative' }}>
-          <Icon
-            name="search"
-            size={15}
-            style={{
-              position: 'absolute',
-              left: 11,
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: 'var(--text-faint)',
-            }}
-          />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="ค้นหาลูกค้า..."
-            style={{
-              height: 36,
-              padding: '0 12px 0 34px',
-              width: 280,
-              border: '1px solid var(--line)',
-              borderRadius: 8,
-              background: '#fff',
-              fontSize: 13,
-            }}
-          />
-        </div>
+        <SearchInput value={q} onChange={setQ} placeholder="ค้นหาลูกค้า..." width={280} />
       </div>
 
       <div className="tbl-wrap">
@@ -190,6 +183,7 @@ export function CustomersPage() {
               <th className="right">งานทั้งหมด</th>
               <th className="right">ลูกหนี้คงค้าง</th>
               <th>สถานะ</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -228,6 +222,13 @@ export function CustomersPage() {
                 <td>
                   <StatusBadge status={c.status} />
                 </td>
+                <td>
+                  <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
+                    <button className="btn ghost icon sm" title="แก้ไข" onClick={() => openEdit(c)}>
+                      <Icon name="edit" size={14} />
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -237,14 +238,14 @@ export function CustomersPage() {
       <Modal
         open={show}
         onClose={() => setShow(false)}
-        title="เพิ่มลูกค้าใหม่"
+        title={editId ? 'แก้ไขข้อมูลลูกค้า' : 'เพิ่มลูกค้าใหม่'}
         footer={
           <>
-            <button className="btn" onClick={() => setShow(false)}>
+            <button className="btn" onClick={() => setShow(false)} disabled={busy}>
               ยกเลิก
             </button>
-            <button className="btn primary" onClick={save}>
-              บันทึก
+            <button className="btn primary" onClick={save} disabled={busy}>
+              {busy ? 'กำลังบันทึก…' : 'บันทึก'}
             </button>
           </>
         }

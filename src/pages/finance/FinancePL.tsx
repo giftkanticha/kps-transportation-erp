@@ -2,9 +2,14 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import { Icon } from '../../components/ui'
+import { useAccountingPeriods, findPeriod } from '../../hooks/useAccountingPeriods'
+import { Icon, SearchInput, FontScaleControl } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
-import type { Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance, Expense, ExpenseHeader, Employee } from '../../types'
+import type {
+  Vehicle, Dispatch, FuelRecord, FuelRound, Maintenance,
+  Expense, ExpenseHeader, Employee,
+  AccountingPeriod, AccountingPeriodSnapshot,
+} from '../../types'
 
 /* ─────────────────────────────────────────────────── helpers ── */
 
@@ -59,21 +64,55 @@ function computeRows(
   expenseHeaders: ExpenseHeader[],
   employees: Employee[],
   ym: string,
+  periods: AccountingPeriod[],
+  snapshots: AccountingPeriodSnapshot[],
 ): VehicleRow[] {
   const driverVehicleCount: Record<string, number> = {}
   for (const v of vehicles) {
     if (v.driverId) driverVehicleCount[v.driverId] = (driverVehicleCount[v.driverId] ?? 0) + 1
   }
 
-  return vehicles.map(v => {
-    const myDispatches = dispatches.filter(d => d.vehicleId === v.id && ymKey(d.date) === ym)
-    const rev = myDispatches.reduce((s, d) => s + (d.revenue ?? d.totalAmount ?? 0), 0)
-    const allowance = myDispatches.reduce((s, d) => {
-      const fromLegs = (d.legs ?? []).reduce((ss, l) => ss + (l.perDiem ?? 0), 0)
-      return s + (fromLegs > 0 ? fromLegs : (d.perDiem ?? 0))
-    }, 0)
+  // Find the accounting period for this ym (if any). Used to:
+  //  1. Respect carry-forward (accountingPeriodId overrides depart/date)
+  //  2. Read snapshot when CLOSED → revenue/perDiem are final
+  const [yStr, mStr] = ym.split('-')
+  const targetYear  = Number(yStr)
+  const targetMonth = Number(mStr)
+  const period = findPeriod(periods, targetYear, targetMonth)
+  const periodClosed = period?.status === 'CLOSED'
 
-    const myFuelLogs = fuel.filter(f => f.vehicleId === v.id && ymKey(f.date) === ym)
+  // Same filter rule as DispatchVehicleMonthlyReport: closed-only by default
+  // + respect accounting period assignment (carry-forward).
+  const dispatchInPeriod = (d: Dispatch): boolean => {
+    if (d.accountingPeriodId && period && d.accountingPeriodId === period.id) return true
+    if (d.accountingPeriodId && period && d.accountingPeriodId !== period.id) return false
+    // No explicit period assignment → fall back to depart || date month match.
+    const basis = d.depart || d.date
+    if (!basis) return false
+    return ymKey(basis) === ym
+  }
+
+  return vehicles.map(v => {
+    const myDispatches = dispatches.filter(d =>
+      d.vehicleId === v.id
+      && dispatchInPeriod(d)
+      // Only count rounds that are properly closed (or legacy 'completed').
+      && (d.roundStatus === 'closed' || d.status === 'completed'),
+    )
+    // Use leg sums (db.roundRevenue) to match DispatchVehicleMonthlyReport.
+    // If the period is CLOSED, override with snapshot (locked numbers).
+    const snapshot = periodClosed && period
+      ? snapshots.find(s => s.periodId === period.id && s.vehicleId === v.id)
+      : null
+    const rev = snapshot
+      ? snapshot.data.revenue
+      : myDispatches.reduce((s, d) => s + db.roundRevenue(d), 0)
+    const allowance = snapshot
+      ? snapshot.data.perDiem
+      : myDispatches.reduce((s, d) => s + db.roundPerDiem(d), 0)
+
+    // ใช้ accountingDate (เดือนค่าใช้จ่าย) ถ้ามี — น้ำมันปิดรอบที่เติมข้ามเดือนจะตกเดือนของรอบ
+    const myFuelLogs = fuel.filter(f => f.vehicleId === v.id && ymKey(f.accountingDate || f.date) === ym)
     const logIn  = myFuelLogs.filter(f =>  isFactoryStation(f.station)).reduce((s, f) => s + (f.total ?? 0), 0)
     const logOut = myFuelLogs.filter(f => !isFactoryStation(f.station)).reduce((s, f) => s + (f.total ?? 0), 0)
 
@@ -256,10 +295,19 @@ function VehiclePicker({ vehicles, picked, onChange }: {
   onChange: (next: Set<string>) => void
 }) {
   const [search, setSearch] = useState('')
-  const visible = vehicles.filter(v =>
-    !search || v.plate.toLowerCase().includes(search.toLowerCase()),
-  )
-  const allChecked = vehicles.every(v => picked.has(v.id))
+  const matchSearch = (v: Vehicle) => !search || v.plate.toLowerCase().includes(search.toLowerCase())
+  const allChecked = vehicles.length > 0 && vehicles.every(v => picked.has(v.id))
+
+  const groups = [
+    {
+      label: '🚛 ขนส่ง',
+      vehicles: vehicles.filter(v => (v.groupKind ?? 'TRANSPORT') === 'TRANSPORT'),
+    },
+    {
+      label: '🏭 โรงงานและเครื่องจักร',
+      vehicles: vehicles.filter(v => v.groupKind === 'INTERNAL' || v.groupKind === 'EQUIPMENT'),
+    },
+  ]
 
   const toggle = (id: string) => {
     const next = new Set(picked)
@@ -269,6 +317,19 @@ function VehiclePicker({ vehicles, picked, onChange }: {
 
   const selectAll = () => onChange(new Set(vehicles.map(v => v.id)))
   const clearAll = () => onChange(new Set())
+  const setMany = (ids: string[], on: boolean) => {
+    const next = new Set(picked)
+    for (const id of ids) {
+      if (on) next.add(id); else next.delete(id)
+    }
+    onChange(next)
+  }
+
+  const renderedGroups = groups.map(g => ({
+    ...g,
+    visible: g.vehicles.filter(matchSearch),
+  }))
+  const hasAny = renderedGroups.some(g => g.visible.length > 0)
 
   return (
     <div
@@ -282,21 +343,7 @@ function VehiclePicker({ vehicles, picked, onChange }: {
             {picked.size}/{vehicles.length} คัน
           </span>
         </div>
-        <div style={{ position: 'relative' }}>
-          <span style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
-            <Icon name="search" size={13} />
-          </span>
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="ค้นหาทะเบียน..."
-            style={{
-              width: '100%', padding: '5px 8px 5px 28px',
-              border: '1px solid #CBD5E1', borderRadius: 6,
-              fontSize: 12.5, background: 'var(--bg)',
-            }}
-          />
-        </div>
+        <SearchInput value={search} onChange={setSearch} placeholder="ค้นหาทะเบียน..." width="100%" />
       </div>
 
       <label
@@ -313,33 +360,62 @@ function VehiclePicker({ vehicles, picked, onChange }: {
       </label>
 
       <div style={{ flex: 1, overflowY: 'auto', maxHeight: 400 }}>
-        {visible.map(v => (
-          <label
-            key={v.id}
-            className="row"
-            style={{
-              gap: 8, padding: '8px 14px', cursor: 'pointer',
-              borderBottom: '1px solid var(--line)', fontSize: 12.5,
-              background: picked.has(v.id) ? 'var(--primary-50, #EFF6FF)' : 'transparent',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={picked.has(v.id)}
-              onChange={() => toggle(v.id)}
-              style={{ accentColor: 'var(--primary)' }}
-            />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="mono" style={{ fontWeight: 600, fontSize: 12 }}>{v.plate}</div>
-              <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{v.type}</div>
-            </div>
-          </label>
-        ))}
-        {visible.length === 0 && (
+        {!hasAny && (
           <div style={{ padding: 16, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
             ไม่พบทะเบียน
           </div>
         )}
+        {renderedGroups.map(g => {
+          if (g.visible.length === 0) return null
+          const groupAllChecked = g.vehicles.length > 0 && g.vehicles.every(v => picked.has(v.id))
+          return (
+            <div key={g.label}>
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 14px',
+                  background: '#F8FAFC',
+                  borderTop: '1px solid var(--line)',
+                  borderBottom: '1px solid var(--line)',
+                  fontSize: 11.5, fontWeight: 700, color: '#334155',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={groupAllChecked}
+                  onChange={e => setMany(g.vehicles.map(v => v.id), e.target.checked)}
+                  style={{ accentColor: 'var(--primary)' }}
+                />
+                <span style={{ flex: 1 }}>{g.label}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 600, color: '#64748B' }}>
+                  {g.vehicles.filter(v => picked.has(v.id)).length}/{g.vehicles.length}
+                </span>
+              </div>
+              {g.visible.map(v => (
+                <label
+                  key={v.id}
+                  className="row"
+                  style={{
+                    gap: 8, padding: '8px 14px', cursor: 'pointer',
+                    borderBottom: '1px solid var(--line)', fontSize: 12.5,
+                    background: picked.has(v.id) ? 'var(--primary-50, #EFF6FF)' : 'transparent',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={picked.has(v.id)}
+                    onChange={() => toggle(v.id)}
+                    style={{ accentColor: 'var(--primary)' }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="mono" style={{ fontWeight: 600, fontSize: 12 }}>{v.plate}</div>
+                    <div style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{v.type}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          )
+        })}
       </div>
 
       <div className="row" style={{ padding: '10px 14px', gap: 8, borderTop: '1px solid var(--line)' }}>
@@ -374,6 +450,7 @@ function PLTable({
             <th className="num right" style={{ whiteSpace: 'nowrap' }}>เบี้ยเลี้ยง</th>
             <th className="num right" style={{ whiteSpace: 'nowrap' }}>เงินเดือนคนขับ</th>
             <th className="num right" style={{ whiteSpace: 'nowrap' }}>ค่าใช้จ่าย</th>
+            <th className="num right" style={{ whiteSpace: 'nowrap', color: '#6D28D9' }}>สุทธิก่อนหักดอกเบี้ย</th>
             <th className="num right" style={{ whiteSpace: 'nowrap', color: '#B45309' }}>ดอกเบี้ย</th>
             <th className="num right" style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>กำไรสุทธิ</th>
           </tr>
@@ -381,15 +458,13 @@ function PLTable({
         <tbody>
           {rows.map(r => {
             const profitColor = r.profit >= 0 ? '#10B981' : '#EF4444'
+            const beforeInterest = r.profit + r.interest
             const hasActivity = r.rev > 0 || r.totalCost > 0
             return (
               <tr key={r.v.id} style={{ opacity: hasActivity ? 1 : 0.5 }}>
                 <td>
-                  <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 13 }}>
+                  <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>
                     {r.v.plate}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {r.v.type} · {r.v.brand}
                   </div>
                 </td>
                 <td className="num right mono" style={{ fontWeight: 600 }}>{fmt2(r.rev)}</td>
@@ -398,6 +473,9 @@ function PLTable({
                 <td className="num right mono">{fmt2(r.allowance)}</td>
                 <td className="num right mono">{fmt2(r.salary)}</td>
                 <td className="num right mono">{fmt2(r.expense)}</td>
+                <td className="num right mono" style={{ fontWeight: 600, color: beforeInterest >= 0 ? '#6D28D9' : '#EF4444' }}>
+                  {fmt2(beforeInterest)}
+                </td>
                 <td className="num right mono" style={{ color: '#B45309' }}>
                   {viewMode === 'monthly' ? (
                     <InterestCell
@@ -425,6 +503,9 @@ function PLTable({
             <td className="num right mono">{fmt2(totals.allowance)}</td>
             <td className="num right mono">{fmt2(totals.salary)}</td>
             <td className="num right mono">{fmt2(totals.expense)}</td>
+            <td className="num right mono" style={{ color: (totals.profit + totals.interest) >= 0 ? '#6D28D9' : '#EF4444' }}>
+              {fmt2(totals.profit + totals.interest)}
+            </td>
             <td className="num right mono" style={{ color: '#B45309' }}>{fmt2(totals.interest)}</td>
             <td className="num right mono" style={{ color: isProfit ? '#10B981' : '#EF4444' }}>
               {fmt2(totals.profit)}
@@ -446,6 +527,7 @@ export function FinancePL() {
   const [year, setYear]       = useState(today.getFullYear())
   const [month, setMonth]     = useState(today.getMonth())
   const [viewMode, setViewMode] = useState<ViewMode>('monthly')
+  const [onlyWithData, setOnlyWithData] = useState(true)
 
   const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
   const { data: dispatches = [] } = useDispatches()
@@ -455,6 +537,8 @@ export function FinancePL() {
   const { data: expenses = [] } = useList<Expense>('expenses')
   const { data: expenseHeaders = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: employees = [] } = useList<Employee>('employees')
+  const { data: periods = [] } = useAccountingPeriods()
+  const { data: snapshots = [] } = useList<AccountingPeriodSnapshot>('accounting_period_snapshots')
 
   const [picked, setPicked] = useState<Set<string>>(new Set())
   const pickedInited = useRef(false)
@@ -471,12 +555,12 @@ export function FinancePL() {
   /* ── Data computation ── */
   const { allRows, allYearlyRows, allMonthlyData } = useMemo(() => {
     try {
-      const allRows = computeRows(allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, ym)
+      const allRows = computeRows(allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, ym, periods, snapshots)
 
       // Compute all 12 months for yearly view
       const allMonthlyData = Array.from({ length: 12 }, (_, m) => {
         const mYm = `${year}-${String(m + 1).padStart(2, '0')}`
-        return { m, ym: mYm, rows: computeRows(allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, mYm) }
+        return { m, ym: mYm, rows: computeRows(allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, mYm, periods, snapshots) }
       })
 
       // Sum per vehicle across 12 months
@@ -503,7 +587,7 @@ export function FinancePL() {
       console.error('FinancePL aggregation failed', err)
       return { allRows: [], allYearlyRows: [], allMonthlyData: [] }
     }
-  }, [ym, year, allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees])
+  }, [ym, year, allVehicles, dispatches, fuel, fuelRounds, maint, expenses, expenseHeaders, employees, periods, snapshots])
 
   // Filter by picked vehicles
   const rows        = useMemo(() => allRows.filter(r => picked.has(r.v.id)), [allRows, picked])
@@ -520,8 +604,16 @@ export function FinancePL() {
   const totals       = useMemo(() => sumRows(rows), [rows])
   const yearlyTotals = useMemo(() => sumRows(yearlyRows), [yearlyRows])
 
-  const activeTotals  = viewMode === 'yearly' ? yearlyTotals : totals
-  const activeRows    = viewMode === 'yearly' ? yearlyRows : rows
+  const activeRowsRaw = viewMode === 'yearly' ? yearlyRows : rows
+  // 'มียอด' = the truck actually had revenue / fuel / expense activity this
+  // period — not just the baseline driver salary that makes idle trucks show
+  // a flat -17,000. Hiding those keeps the table to what matters.
+  const hasActivity = (r: VehicleRow) =>
+    r.rev !== 0 || r.fuelIn !== 0 || r.fuelOut !== 0 || r.allowance !== 0 || r.expense !== 0 || r.interest !== 0
+  const activeRows    = onlyWithData ? activeRowsRaw.filter(hasActivity) : activeRowsRaw
+  const activeTotals  = onlyWithData
+    ? sumRows(activeRows)
+    : (viewMode === 'yearly' ? yearlyTotals : totals)
   const isProfit      = activeTotals.profit >= 0
 
   const inputStyle: React.CSSProperties = {
@@ -548,6 +640,16 @@ export function FinancePL() {
             กำไร-ขาดทุนรายคัน ·{' '}
             {viewMode === 'monthly' ? thaiMonthLabel(year, month) : `ปี พ.ศ. ${year + 543}`}
             {' '}· <span className="mono">{picked.size}/{allVehicles.length} คัน</span>
+            {viewMode === 'monthly' && (() => {
+              const p = findPeriod(periods, year, month + 1)
+              if (!p) return null
+              if (p.status === 'CLOSED') return (
+                <span className="badge green" style={{ fontSize: 11, marginLeft: 8 }}>
+                  🔒 ปิดงวดแล้ว · ตัวเลขจาก snapshot
+                </span>
+              )
+              return null
+            })()}
           </div>
         </div>
       </div>
@@ -601,6 +703,20 @@ export function FinancePL() {
             </button>
           </div>
 
+          <label
+            className="row no-print"
+            style={{ gap: 6, cursor: 'pointer', fontSize: 13, color: 'var(--text-muted)', userSelect: 'none' }}
+            title="ซ่อนรถที่ไม่มีรายรับ/น้ำมัน/ค่าใช้จ่ายในงวดนี้"
+          >
+            <input
+              type="checkbox"
+              checked={onlyWithData}
+              onChange={e => setOnlyWithData(e.target.checked)}
+              style={{ accentColor: 'var(--primary)' }}
+            />
+            แสดงเฉพาะที่มียอด
+          </label>
+
           <div style={{ width: 1, height: 24, background: '#E2E8F0' }} />
 
           {/* Month picker — monthly mode only */}
@@ -645,6 +761,7 @@ export function FinancePL() {
           )}
 
           <div className="row" style={{ gap: 8, marginLeft: 'auto' }}>
+            <FontScaleControl />
             <button className="btn" onClick={() => print('landscape')}>
               <Icon name="download" size={14} />
               {viewMode === 'yearly'

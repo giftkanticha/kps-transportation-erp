@@ -37,7 +37,8 @@ export function UserManagementPage() {
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 3000) }
 
   const log = async (action: string, targetId: string, details?: string) => {
-    await supabase.from('acl_audit_log').insert({ actor_id: myProfile?.id, target_id: targetId, action, details })
+    const { error } = await supabase.from('acl_audit_log').insert({ actor_id: myProfile?.id, target_id: targetId, action, details })
+    if (error) console.warn('[acl_audit_log] write failed:', error.message)
   }
 
   const load = useCallback(async () => {

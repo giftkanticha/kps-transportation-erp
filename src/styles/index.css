@@ -1,6 +1,10 @@
 /* KPS Transportation ERP — Global styles (matches repo design system: #0066CC primary) */
 
 :root {
+  /* Report font scale (A−/A+ control) — multiplies report table font sizes
+     on screen and in print. 1 = default. See .print-area .tbl rules. */
+  --report-font-scale: 1;
+
   /* Brand palette from repo */
   --primary: #0066CC;
   --primary-50: #E6F0FF;
@@ -115,6 +119,19 @@ input, select, textarea { font-family: inherit; }
 .sidebar .collapse-btn:hover { background: var(--bg-sunk); }
 .app.collapsed .sidebar .name,
 .app.collapsed .sidebar .collapse-btn { display: none; }
+/* Drawer close (✕) — only shown when sidebar is an off-canvas drawer on mobile */
+.sidebar .drawer-close {
+  margin-left: auto;
+  width: 30px; height: 30px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  display: none;
+  place-items: center;
+  flex-shrink: 0;
+}
+.sidebar .drawer-close:hover { background: var(--bg-sunk); }
 
 .nav { flex: 1; overflow-y: auto; padding: 12px 10px; }
 .nav-group { margin-bottom: 4px; }
@@ -154,7 +171,9 @@ input, select, textarea { font-family: inherit; }
   padding-left: 12px;
 }
 .subnav-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 7px 11px;
   border-radius: var(--r-sm);
   color: #64748B;
@@ -162,6 +181,7 @@ input, select, textarea { font-family: inherit; }
   cursor: pointer;
   margin-bottom: 1px;
 }
+.subnav-item .ico { width: 16px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; line-height: 1; }
 .subnav-item:hover { background: var(--bg-sunk); color: var(--text-2); }
 .subnav-item.active {
   background: var(--primary-50);
@@ -242,6 +262,8 @@ input, select, textarea { font-family: inherit; }
 }
 .topbar .icon-btn:hover { background: var(--bg-sunk); color: var(--text-2); }
 .topbar .icon-btn .dot { position: absolute; top: 8px; right: 8px; width: 8px; height: 8px; background: var(--red); border-radius: 999px; border: 2px solid var(--bg-elev); }
+/* Hamburger button — only shown on mobile/tablet (see responsive block) */
+.topbar .hamburger { display: none; margin-right: 2px; }
 
 .topbar .user-chip {
   display: flex; align-items: center; gap: 10px;
@@ -455,6 +477,18 @@ input:focus, select:focus, textarea:focus {
 .tbl .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .tbl .right { text-align: right; }
 .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: #fff; }
+
+/* Report tables (printable pages) scale with the A−/A+ control on screen.
+   Base bumped to 14px for readability; multiplied by --report-font-scale.
+   Covers print-area tables plus the compact report variants so the on-screen
+   size matches the printout (WYSIWYG). */
+.print-area .tbl,
+.print-area .tbl thead th,
+.print-area .tbl tbody td,
+.tbl.print-compact, .tbl.print-compact thead th, .tbl.print-compact tbody td,
+.tbl.fuel-report-compact, .tbl.fuel-report-compact thead th, .tbl.fuel-report-compact tbody td {
+  font-size: calc(14px * var(--report-font-scale));
+}
 
 /* ---------- Tabs ---------- */
 .tabs {
@@ -714,7 +748,7 @@ input:focus, select:focus, textarea:focus {
   box-shadow: var(--shadow-md);
   min-width: 180px;
   padding: 6px;
-  z-index: 30;
+  z-index: 1200;
 }
 .menu .item {
   padding: 8px 12px;
@@ -728,6 +762,144 @@ input:focus, select:focus, textarea:focus {
 .menu .item.danger { color: var(--red); }
 .menu .sep { height: 1px; background: var(--line); margin: 4px 0; }
 
+/* ── Responsive ───────────────────────────────────────────────── */
+
+/* Tablet & mobile (≤1024px): sidebar becomes an off-canvas drawer toggled
+   by the hamburger button. Content takes the full width; the drawer slides
+   in over the page and floats above everything (z-index) with a backdrop. */
+@media (max-width: 1024px) {
+  .app,
+  .app.collapsed { grid-template-columns: 1fr; }
+
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 268px;
+    max-width: 82vw;
+    transform: translateX(-100%);
+    transition: transform .25s cubic-bezier(.4,0,.2,1);
+    z-index: 1100;
+  }
+  .app.mobile-open .sidebar {
+    transform: translateX(0);
+    box-shadow: 0 12px 40px rgba(15, 23, 42, .28);
+  }
+
+  /* Dark backdrop behind the open drawer (rendered only while open) */
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, .45);
+    z-index: 1090;
+    animation: kpsFadeIn .2s ease;
+  }
+
+  /* Inside the drawer always show the full menu, regardless of the desktop
+     collapse state — labels, chevrons and submenus must be reachable. */
+  .sidebar .brand .name { display: inline; }
+  .sidebar .collapse-btn { display: none; }
+  .sidebar .drawer-close { display: grid; }
+  .nav-item .lbl { display: block; }
+  .nav-item .chev { display: inline-flex; }
+  .nav-item { justify-content: flex-start; padding: 9px 11px; border-left: 3px solid transparent; }
+  .nav-item.active { padding-left: 8px; }
+  .subnav { display: block; }
+  .logout-btn { justify-content: flex-start; }
+  .logout-btn span { display: inline; }
+
+  /* Even if the desktop "collapsed" (icons-only) class is set, the mobile
+     drawer must always show the full menu so sub-menus stay tappable. These
+     win over the desktop .app.collapsed rules by coming later in the cascade
+     at equal specificity. */
+  .app.collapsed .sidebar .name { display: inline; }
+  .app.collapsed .sidebar .collapse-btn { display: none; }
+  .app.collapsed .nav-item { justify-content: flex-start; padding: 9px 11px; border-left: 3px solid transparent; }
+  .app.collapsed .nav-item.active { padding-left: 8px; }
+  .app.collapsed .nav-item .lbl { display: block; }
+  .app.collapsed .nav-item .chev { display: inline-flex; }
+  .app.collapsed .subnav { display: block; }
+  .app.collapsed .logout-btn { justify-content: flex-start; }
+  .app.collapsed .logout-btn span { display: inline; }
+
+  .topbar .hamburger { display: grid; }
+  .topbar { padding: 0 16px; gap: 10px; }
+  .topbar .search { width: 220px; min-width: 0; }
+  .content { padding: 18px 18px 48px; }
+
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+
+  .login-wrap { grid-template-columns: 1fr; }
+  .login-poster { padding: 32px; }
+  .login-poster h1 { font-size: 30px; }
+}
+
+/* Mobile landscape (≤768px): let search flex, stack grids */
+@media (max-width: 768px) {
+  .topbar { height: 56px; padding: 0 12px; gap: 8px; }
+  .topbar .crumb {
+    font-size: 12px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .topbar .search {
+    width: auto;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .topbar .user-chip { padding: 4px; border-left: none; }
+  .topbar .user-chip .meta { display: none; }
+
+  .content { padding: 14px 12px 40px; }
+
+  .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+
+  .modal-bg { padding: 12px; }
+  .modal .head, .modal .foot { padding: 12px 16px; }
+  .modal .body { padding: 16px; }
+
+  .page-title { font-size: 18px; }
+  .page-head { gap: 12px; margin-bottom: 16px; }
+
+  .login-form { padding: 24px; max-width: 100%; }
+  .login-poster { padding: 24px; }
+  .login-poster h1 { font-size: 26px; }
+  .login-poster p { font-size: 13px; }
+
+  .toolbar { gap: 8px; }
+  .toolbar > * { min-width: 0; }
+}
+
+/* Small mobile (≤480px): hide breadcrumb, shrink controls, scroll tabs */
+@media (max-width: 480px) {
+  .topbar { padding: 0 8px; gap: 6px; }
+  .topbar .crumb { display: none; }
+  .topbar .icon-btn { width: 32px; height: 32px; }
+  .topbar .search input { height: 32px; font-size: 13px; padding-left: 32px; }
+  .topbar .search .icn { left: 9px; }
+  .avatar { width: 30px; height: 30px; font-size: 12px; }
+
+  .content { padding: 10px 10px 32px; }
+  .card.pad { padding: 14px; }
+  .card .head { padding: 12px 14px; }
+  .card .head .right { gap: 6px; }
+
+  .tabs { overflow-x: auto; flex-wrap: nowrap; }
+  .tab { white-space: nowrap; padding: 9px 12px; }
+
+  /* iOS zoom prevention — keep inputs at 16px on tiny screens */
+  .field input,
+  .field select,
+  .field textarea { font-size: 16px; }
+
+  .login-form { padding: 16px; }
+  .login-poster { padding: 20px; }
+  .login-poster h1 { font-size: 22px; }
+}
+
 /* ── Print rules ──────────────────────────────────────────────── */
 @media print {
   body { background: #fff; }
@@ -738,7 +910,7 @@ input:focus, select:focus, textarea:focus {
   .print-area { box-shadow: none !important; border: none !important; }
   .print-area .card { box-shadow: none !important; border: 1px solid #ccc !important; page-break-inside: avoid; }
   .print-area .tbl thead th { background: #f3f4f6 !important; color: #000 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .print-area .tbl td, .print-area .tbl th { font-size: 10.5px !important; padding: 4px 6px !important; }
+  .print-area .tbl td, .print-area .tbl th { font-size: calc(10.5px * var(--report-font-scale)) !important; padding: 4px 6px !important; }
   .print-only { display: block !important; }
   .print-row-hide { display: none !important; }
   .pl-sidebar { display: none !important; }
@@ -748,4 +920,9 @@ input:focus, select:focus, textarea:focus {
 @keyframes kpsToastIn {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes kpsFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }

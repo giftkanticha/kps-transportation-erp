@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
-import { Icon, Field, Info } from '../../components/ui'
+import { Icon, Field, Info, SearchInput, FontScaleControl } from '../../components/ui'
+import { usePrint } from '../../hooks/usePrint'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
 interface ExpensesModuleProps {
@@ -62,7 +63,12 @@ function genExpCode(headers: ExpenseHeader[]): string {
     String(now.getDate()).padStart(2, '0')
   const prefix = `EXP-${yyyymmdd}-`
   const existing = headers.filter(h => h.code.startsWith(prefix))
-  return prefix + String(existing.length + 1).padStart(3, '0')
+  // length+1 leaves gaps when an expense is deleted and collides with a live row.
+  const maxSeq = existing.reduce((max, h) => {
+    const n = parseInt(h.code.slice(prefix.length), 10)
+    return Number.isNaN(n) ? max : Math.max(max, n)
+  }, 0)
+  return prefix + String(maxSeq + 1).padStart(3, '0')
 }
 function toBeCode(code: string): string {
   return code.replace(/^EXP-(\d{4})/, (_, y) => `EXP-${+y + 543}`)
@@ -90,18 +96,19 @@ export function ExpensesModule({ tab, setActive }: ExpensesModuleProps) {
       <div className="tabs" style={{ marginBottom: 22 }}>
         {(
           [
-            ['record', '', 'บันทึกค่าใช้จ่าย'],
-            ['finance', 'finance', 'สถานะการเงิน'],
-            ['stock', 'stock', 'สต็อคคลัง KPS'],
-            ['report', 'report', 'รายงานสรุป'],
-            ['vendors', 'vendors', 'ทะเบียนร้านค้า/ช่าง'],
-          ] as [string, string, string][]
-        ).map(([id, route, label]) => (
+            ['record', '', 'บันทึกค่าใช้จ่าย', 'edit'],
+            ['finance', 'finance', 'สถานะการเงิน', 'money'],
+            ['stock', 'stock', 'สต็อคคลัง KPS', 'package'],
+            ['report', 'report', 'รายงานสรุป', 'chart'],
+            ['vendors', 'vendors', 'ทะเบียนร้านค้า/ช่าง', 'client'],
+          ] as [string, string, string, string][]
+        ).map(([id, route, label, ic]) => (
           <button
             key={id}
             className={`tab ${current === id ? 'active' : ''}`}
             onClick={() => setActive('expenses' + (route ? '.' + route : ''))}
           >
+            <Icon name={ic} size={14} style={{ marginRight: 6, verticalAlign: -3 }} />
             {label}
           </button>
         ))}
@@ -290,36 +297,40 @@ function ExpenseFormBody({
             </Field>
           </div>
 
-          {docCode && (
-            <div style={{ marginTop: 10 }}>
-              <Field label="เลขที่เอกสาร (อัตโนมัติ)">
-                <input
-                  readOnly
-                  value={toBeCode(docCode)}
-                  style={{
-                    background: 'var(--bg-2, #F1F5F9)', color: 'var(--text-muted)',
-                    cursor: 'default', borderRadius: 8, border: '1px solid #E2E8F0',
-                    padding: '8px 14px', fontSize: 13, fontFamily: 'var(--mono)', maxWidth: 280,
-                  }}
-                />
-              </Field>
+          <div style={{ display: 'flex', gap: 16, marginTop: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            {docCode && (
+              <div style={{ flex: '0 0 260px', minWidth: 220 }}>
+                <Field label="เลขที่เอกสาร (อัตโนมัติ)">
+                  <input
+                    readOnly
+                    value={toBeCode(docCode)}
+                    style={{
+                      width: '100%', height: 44,
+                      background: 'var(--bg-sunk)', color: 'var(--text-muted)',
+                      cursor: 'default', borderRadius: 'var(--r-md)', border: '1px solid var(--line)',
+                      padding: '0 14px', fontSize: 13, fontFamily: 'var(--mono)',
+                    }}
+                  />
+                </Field>
+              </div>
+            )}
+            <div
+              style={{
+                flex: 1, minWidth: 240, height: 44,
+                padding: '0 18px',
+                background: 'var(--primary-50)',
+                borderRadius: 'var(--r-md)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+              }}
+            >
+              <span style={{ fontWeight: 600 }}>ยอดรวมสุทธิ</span>
+              <div className="spacer" />
+              <span className="mono" style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary)' }}>
+                {netTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท
+              </span>
             </div>
-          )}
-
-          <div
-            style={{
-              padding: '14px 18px',
-              background: 'var(--primary-50)',
-              borderRadius: 8,
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <span style={{ fontWeight: 500 }}>ยอดรวมสุทธิ:</span>
-            <div className="spacer" />
-            <span className="mono" style={{ fontSize: 22, fontWeight: 700, color: 'var(--primary)' }}>
-              {netTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท
-            </span>
           </div>
         </div>
       </div>
@@ -492,37 +503,41 @@ function ExpRecord() {
       alert('กรุณาเพิ่มรายการอย่างน้อย 1 รายการ')
       return
     }
-    const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
-    const h = await insertHeader.mutateAsync({
-      code: genExpCode(allHeaders),
-      date: hdr.date,
-      vehicleId: hdr.vehicleId,
-      partnerId: hdr.partnerId,
-      odometer: Number(hdr.odometer) || 0,
-      paid: hdr.paid === 'paid',
-      dueDate: hdr.dueDate,
-      total: netTotal,
-      lineCount: lines.length,
-      note: lines.map((l) => l.item).filter(Boolean).join(', '),
-    })
-    for (const l of lines) {
-      const { id: _id, ...rest } = l
-      void _id
-      await insertLine.mutateAsync({
-        ...rest,
-        headerId: h.id,
-        amount: (l.qty || 0) * (l.unitPrice || 0),
+    try {
+      const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
+      const h = await insertHeader.mutateAsync({
+        code: genExpCode(allHeaders),
+        date: hdr.date,
+        vehicleId: hdr.vehicleId,
+        partnerId: hdr.partnerId,
+        odometer: Number(hdr.odometer) || 0,
+        paid: hdr.paid === 'paid',
+        dueDate: hdr.dueDate,
+        total: netTotal,
+        lineCount: lines.length,
+        note: lines.map((l) => l.item).filter(Boolean).join(', '),
       })
-    }
-    // Apply stock deduction for KPS warehouse
-    if (isKPSPartner(hdr.partnerId, partners)) {
-      for (const d of buildStockDeltas(lines, -1, stocks)) {
-        await updateStock.mutateAsync(d)
+      for (const l of lines) {
+        const { id: _id, ...rest } = l
+        void _id
+        await insertLine.mutateAsync({
+          ...rest,
+          headerId: h.id,
+          amount: (l.qty || 0) * (l.unitPrice || 0),
+        })
       }
+      // Apply stock deduction for KPS warehouse
+      if (isKPSPartner(hdr.partnerId, partners)) {
+        for (const d of buildStockDeltas(lines, -1, stocks)) {
+          await updateStock.mutateAsync(d)
+        }
+      }
+      alert('บันทึกเรียบร้อย')
+      setHdr(emptyHeader())
+      setLines([emptyLine()])
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-    alert('บันทึกเรียบร้อย')
-    setHdr(emptyHeader())
-    setLines([emptyLine()])
   }
 
   const handleReset = () => {
@@ -686,54 +701,58 @@ function ExpenseEditModal({
       alert('กรุณาเลือกรถและช่าง/ร้านค้า')
       return
     }
-    const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
+    try {
+      const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
 
-    // Revert old stock impact
-    if (wasKPS) {
-      for (const d of buildStockDeltas(oldLines, +1, stocks)) {
-        await updateStock.mutateAsync(d)
+      // Revert old stock impact
+      if (wasKPS) {
+        for (const d of buildStockDeltas(oldLines, +1, stocks)) {
+          await updateStock.mutateAsync(d)
+        }
       }
-    }
 
-    // Remove old lines
-    for (const l of oldLines) {
-      await deleteLine.mutateAsync(l.id)
-    }
+      // Remove old lines
+      for (const l of oldLines) {
+        await deleteLine.mutateAsync(l.id)
+      }
 
-    // Update header
-    await updateHeader.mutateAsync({
-      id: header.id,
-      patch: {
-        ...hdr,
-        paid: hdr.paid === 'paid',
-        odometer: Number(hdr.odometer) || 0,
-        total: netTotal,
-        lineCount: lines.length,
-        note: lines.map((l) => l.item).filter(Boolean).join(', '),
-      },
-    })
-
-    // Add new lines
-    for (const l of lines) {
-      const { id: _id, ...rest } = l
-      void _id
-      await insertLine.mutateAsync({
-        ...rest,
-        headerId: header.id,
-        amount: (l.qty || 0) * (l.unitPrice || 0),
+      // Update header
+      await updateHeader.mutateAsync({
+        id: header.id,
+        patch: {
+          ...hdr,
+          paid: hdr.paid === 'paid',
+          odometer: Number(hdr.odometer) || 0,
+          total: netTotal,
+          lineCount: lines.length,
+          note: lines.map((l) => l.item).filter(Boolean).join(', '),
+        },
       })
-    }
 
-    // Apply new stock impact
-    if (isKPSPartner(hdr.partnerId, partners)) {
-      for (const d of buildStockDeltas(lines, -1, stocks)) {
-        await updateStock.mutateAsync(d)
+      // Add new lines
+      for (const l of lines) {
+        const { id: _id, ...rest } = l
+        void _id
+        await insertLine.mutateAsync({
+          ...rest,
+          headerId: header.id,
+          amount: (l.qty || 0) * (l.unitPrice || 0),
+        })
       }
-    }
 
-    alert('บันทึกการแก้ไขเรียบร้อย')
-    onSaved()
-    onClose()
+      // Apply new stock impact
+      if (isKPSPartner(hdr.partnerId, partners)) {
+        for (const d of buildStockDeltas(lines, -1, stocks)) {
+          await updateStock.mutateAsync(d)
+        }
+      }
+
+      alert('บันทึกการแก้ไขเรียบร้อย')
+      onSaved()
+      onClose()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   return (
@@ -785,24 +804,53 @@ function ExpenseEditModal({
   )
 }
 
-// ─── Payment Confirmation ────────────────────────────────────────
+// ─── Store Payment (select bills → pay) ──────────────────────────
 
-function PayConfirmModal({
-  header,
+function StorePaymentModal({
   partner,
+  headers,
+  vehicles,
+  today,
   onClose,
-  onPaid,
+  onEdit,
 }: {
-  header: ExpenseHeader
   partner: Partner | undefined
+  headers: ExpenseHeader[]
+  vehicles: Vehicle[]
+  today: Date
   onClose: () => void
-  onPaid: () => void
+  onEdit: (h: ExpenseHeader) => void
 }) {
   const updateHeader = useUpdate<ExpenseHeader>('expense_headers')
+  // Default: every outstanding bill of this store is pre-selected.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(headers.map((h) => h.id)))
+  const [done, setDone] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const allSelected = headers.length > 0 && headers.every((h) => selected.has(h.id))
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(headers.map((h) => h.id)))
+
+  const selectedHeaders = headers.filter((h) => selected.has(h.id))
+  const selectedTotal = selectedHeaders.reduce((s, h) => s + h.total, 0)
+  const paidCount = selectedHeaders.length
+
   const confirm = async () => {
-    await updateHeader.mutateAsync({ id: header.id, patch: { paid: true } })
-    onPaid()
-    onClose()
+    if (selectedHeaders.length === 0) return
+    setSaving(true)
+    for (const h of selectedHeaders) {
+      await updateHeader.mutateAsync({ id: h.id, patch: { paid: true } })
+    }
+    setSaving(false)
+    setDone(true)
   }
 
   return (
@@ -817,46 +865,182 @@ function PayConfirmModal({
         zIndex: 2000,
       }}
     >
-      <div className="card" style={{ width: 600, maxWidth: '96vw', background: '#ffffff' }}>
+      <div
+        className="card"
+        style={{ width: 760, maxWidth: '96vw', maxHeight: '92vh', overflowY: 'auto', background: '#ffffff' }}
+      >
         <div className="row" style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
-          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>ยืนยันการชำระเงิน</h3>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>
+              {done ? 'ชำระเงินเรียบร้อย' : 'รายการค้างชำระของร้านค้า'}
+            </h3>
+            <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+              {partner?.name ?? '—'}
+            </div>
+          </div>
+          <div className="spacer" />
           <button className="btn ghost icon sm" onClick={onClose}>
             <Icon name="close" size={16} />
           </button>
         </div>
-        <div style={{ padding: 24 }}>
-          <p style={{ margin: '0 0 14px', fontSize: 13.5, color: 'var(--text-2)' }}>
-            ตรวจสอบยอดก่อนยืนยัน เมื่อบันทึกแล้วสถานะจะเปลี่ยนเป็น{' '}
-            <strong style={{ color: 'var(--green)' }}>ชำระแล้ว</strong>
-          </p>
-          <div style={{ padding: '18px 20px', background: 'var(--bg, #F8FAFC)', borderRadius: 10 }}>
-            <div className="grid-2" style={{ gap: 10 }}>
-              <Info label="รหัส AP" value={<span className="mono">{header.code}</span>} />
-              <Info label="วันที่" value={db.thaiDate(header.date)} />
-              <Info label="ช่าง / ร้านค้า" value={partner?.name ?? '—'} />
-              <Info label="ธนาคาร" value={partner?.bank ?? '—'} />
-              <Info
-                label="เลขที่บัญชี"
-                value={<span className="mono" style={{ fontWeight: 700 }}>{partner?.account ?? '—'}</span>}
-              />
-              <Info label="ชื่อบัญชี" value={partner?.accountName ?? '—'} />
+
+        {done ? (
+          // ── Success state ──────────────────────────────────────
+          <div style={{ padding: 28, textAlign: 'center' }}>
+            <div
+              style={{
+                width: 64, height: 64, borderRadius: '50%', background: 'var(--green-50, #DCFCE7)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px',
+                color: 'var(--green)',
+              }}
+            >
+              <Icon name="check" size={32} />
             </div>
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>ยอดที่จะชำระ</div>
-              <span className="mono" style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)' }}>
-                {db.thb(header.total)}
-              </span>
+            <h3 style={{ margin: '0 0 6px', fontSize: 18, fontWeight: 700, color: 'var(--green)' }}>
+              ชำระเงินเรียบร้อย
+            </h3>
+            <p style={{ margin: '0 0 4px', fontSize: 14, color: 'var(--text-2)' }}>
+              ชำระให้ <strong>{partner?.name ?? '—'}</strong> จำนวน {paidCount} รายการ
+            </p>
+            <div className="mono" style={{ fontSize: 26, fontWeight: 800, color: 'var(--primary)', marginTop: 8 }}>
+              {db.thb(selectedTotal)}
+            </div>
+            <div className="row" style={{ justifyContent: 'center', marginTop: 22 }}>
+              <button className="btn primary" onClick={onClose}>
+                เสร็จสิ้น
+              </button>
             </div>
           </div>
-        </div>
-        <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
-          <button className="btn" onClick={onClose}>
-            ยกเลิก
-          </button>
-          <button className="btn primary" onClick={confirm}>
-            <Icon name="check" size={14} /> ยืนยันชำระเงิน
-          </button>
-        </div>
+        ) : (
+          <>
+            <div style={{ padding: '18px 20px 8px' }}>
+              <p style={{ margin: '0 0 14px', fontSize: 13.5, color: 'var(--text-2)' }}>
+                เลือกรายการที่ต้องการชำระ ระบบจะสรุปยอดรวมให้ก่อนกดยืนยัน
+              </p>
+
+              {/* Store bank details */}
+              <div style={{ padding: '14px 18px', background: 'var(--bg, #F8FAFC)', borderRadius: 10, marginBottom: 14 }}>
+                <div className="grid-2" style={{ gap: 10 }}>
+                  <Info label="ธนาคาร" value={partner?.bank ?? '—'} />
+                  <Info
+                    label="เลขที่บัญชี"
+                    value={<span className="mono" style={{ fontWeight: 700 }}>{partner?.account ?? '—'}</span>}
+                  />
+                  <Info label="ชื่อบัญชี" value={partner?.accountName ?? '—'} />
+                  <Info label="เบอร์ติดต่อ" value={partner?.phone ?? '—'} />
+                </div>
+              </div>
+
+              {/* Bills list */}
+              <div className="tbl-wrap" style={{ borderRadius: 8 }}>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 38 }}>
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={toggleAll}
+                          style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                        />
+                      </th>
+                      <th>เลขที่เอกสาร</th>
+                      <th>ทะเบียนรถ</th>
+                      <th>วันที่</th>
+                      <th>ครบกำหนด</th>
+                      <th className="right">จำนวนเงิน</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {headers.map((h) => {
+                      const isOverdue = h.dueDate && new Date(h.dueDate) < today
+                      const checked = selected.has(h.id)
+                      return (
+                        <tr
+                          key={h.id}
+                          onClick={() => toggle(h.id)}
+                          style={{ cursor: 'pointer', background: checked ? 'var(--primary-50)' : undefined }}
+                        >
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggle(h.id)}
+                              style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                            />
+                          </td>
+                          <td className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                            {toBeCode(h.code)}
+                          </td>
+                          <td className="mono">
+                            {vehicles.find((v) => v.id === h.vehicleId)?.plate ?? '—'}
+                          </td>
+                          <td className="num muted">{db.thaiDate(h.date)}</td>
+                          <td className="num muted">
+                            {db.thaiDate(h.dueDate)}
+                            {isOverdue && (
+                              <span className="badge red" style={{ marginLeft: 6 }}>เกินกำหนด</span>
+                            )}
+                          </td>
+                          <td className="num right" style={{ fontWeight: 700 }}>
+                            {db.fmt(h.total)} ฿
+                          </td>
+                          <td onClick={(e) => e.stopPropagation()}>
+                            <button
+                              className="btn ghost icon sm"
+                              onClick={() => onEdit(h)}
+                              title="แก้ไขรายการ/ราคา"
+                            >
+                              <Icon name="edit" size={13} />
+                            </button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Selected summary */}
+            <div
+              style={{
+                margin: '8px 20px 0',
+                padding: '16px 20px',
+                background: 'var(--primary-50)',
+                borderRadius: 10,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <div>
+                <div className="muted" style={{ fontSize: 12 }}>ยอดที่เลือกชำระ</div>
+                <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 2 }}>
+                  เลือกไว้ {paidCount} จาก {headers.length} รายการ
+                </div>
+              </div>
+              <div className="spacer" />
+              <span className="mono" style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)' }}>
+                {db.thb(selectedTotal)}
+              </span>
+            </div>
+
+            <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="btn" onClick={onClose}>
+                ยกเลิก
+              </button>
+              <button
+                className="btn primary"
+                disabled={paidCount === 0 || saving}
+                style={paidCount === 0 || saving ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
+                onClick={confirm}
+              >
+                <Icon name="check" size={14} /> {saving ? 'กำลังบันทึก...' : 'ชำระเงินเรียบร้อย'}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )
@@ -871,13 +1055,13 @@ function ExpFinance() {
   const { data: stocks = [] } = useList<StockItem>('stock_items')
   const [editing, setEditing] = useState<ExpenseHeader | null>(null)
 
-  const today = new Date('2026-05-17')
+  const today = (() => { const d = new Date(); d.setHours(0,0,0,0); return d })()
   const unpaidHeaders = headers.filter((h) => !h.paid)
   const overdue = unpaidHeaders.filter((h) => h.dueDate && new Date(h.dueDate) < today)
   const totalUnpaid = unpaidHeaders.reduce((s, h) => s + h.total, 0)
   const totalPaid = headers.filter((h) => h.paid).reduce((s, h) => s + h.total, 0)
   const [filter, setFilter] = useState('all')
-  const [payTarget, setPayTarget] = useState<ExpenseHeader | null>(null)
+  const [storeTarget, setStoreTarget] = useState<string | null>(null)
 
   const list =
     filter === 'overdue'
@@ -885,6 +1069,29 @@ function ExpFinance() {
       : filter === 'due'
         ? unpaidHeaders.filter((h) => !overdue.includes(h))
         : unpaidHeaders
+
+  // Group outstanding bills by store/vendor so the AP list shows one row per
+  // store with its total outstanding amount. Clicking a row drills into the
+  // store's individual bills where the user picks which to pay.
+  const storeGroups = useMemo(() => {
+    const map = new Map<string, ExpenseHeader[]>()
+    for (const h of list) {
+      const arr = map.get(h.partnerId) ?? []
+      arr.push(h)
+      map.set(h.partnerId, arr)
+    }
+    return Array.from(map.entries())
+      .map(([partnerId, hs]) => ({
+        partnerId,
+        partner: partners.find((p) => p.id === partnerId),
+        headers: hs,
+        total: hs.reduce((s, h) => s + h.total, 0),
+        overdueCount: hs.filter((h) => h.dueDate && new Date(h.dueDate) < today).length,
+      }))
+      .sort((a, b) => b.total - a.total)
+  }, [list, partners])
+
+  const targetGroup = storeGroups.find((g) => g.partnerId === storeTarget)
 
   return (
     <div>
@@ -942,73 +1149,63 @@ function ExpFinance() {
           <table className="tbl">
             <thead>
               <tr>
-                <th>รหัส AP</th>
                 <th>ช่าง / ร้านค้า</th>
                 <th>เลขที่บัญชี</th>
-                <th>วันที่สร้าง</th>
-                <th>ครบกำหนด</th>
-                <th className="right">จำนวนเงิน</th>
+                <th className="right">จำนวนรายการ</th>
                 <th>สถานะ</th>
+                <th className="right">ยอดค้างทั้งหมด</th>
                 <th>จัดการ</th>
               </tr>
             </thead>
             <tbody>
-              {list.map((h, i) => {
-                const isOverdue = h.dueDate && new Date(h.dueDate) < today
-                const p = partners.find((x) => x.id === h.partnerId)
-                return (
-                  <tr key={h.id}>
-                    <td className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>
-                      AP-{String(i + 1).padStart(3, '0')}
-                    </td>
-                    <td>{p?.name ?? '—'}</td>
-                    <td className="mono" style={{ fontSize: 12.5 }}>
-                      {p?.account && p.account !== '—' ? (
-                        <>
-                          <div>{p.account}</div>
-                          <div className="muted" style={{ fontSize: 11 }}>{p.bank}</div>
-                        </>
-                      ) : (
-                        <span className="muted">—</span>
-                      )}
-                    </td>
-                    <td className="num muted">{db.thaiDate(h.date)}</td>
-                    <td className="num muted">
-                      {db.thaiDate(h.dueDate)}
-                      {isOverdue && (
-                        <span className="badge red" style={{ marginLeft: 6 }}>
-                          เกินกำหนด
-                        </span>
-                      )}
-                    </td>
-                    <td className="num right" style={{ fontWeight: 700 }}>
-                      {db.fmt(h.total)} ฿
-                    </td>
-                    <td>
+              {storeGroups.map((g) => (
+                <tr
+                  key={g.partnerId}
+                  onClick={() => setStoreTarget(g.partnerId)}
+                  style={{ cursor: 'pointer' }}
+                >
+                  <td style={{ fontWeight: 600 }}>{g.partner?.name ?? '—'}</td>
+                  <td className="mono" style={{ fontSize: 12.5 }}>
+                    {g.partner?.account && g.partner.account !== '—' ? (
+                      <>
+                        <div>{g.partner.account}</div>
+                        <div className="muted" style={{ fontSize: 11 }}>{g.partner.bank}</div>
+                      </>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
+                  <td className="num right">
+                    {g.headers.length} <span className="muted" style={{ fontSize: 12 }}>รายการ</span>
+                  </td>
+                  <td>
+                    {g.overdueCount > 0 ? (
+                      <span className="badge red">
+                        <Icon name="alert" size={11} /> เกินกำหนด {g.overdueCount}
+                      </span>
+                    ) : (
                       <span className="badge amber">
                         <Icon name="alert" size={11} /> ค้างชำระ
                       </span>
-                    </td>
-                    <td>
-                      <div className="row" style={{ gap: 6 }}>
-                        <button className="btn sm" onClick={() => setEditing(h)} title="แก้ไขรายการ/ราคา">
-                          <Icon name="edit" size={12} /> แก้ไข
-                        </button>
-                        <button
-                          className="btn sm"
-                          style={{ background: 'var(--green)', color: '#fff', borderColor: 'var(--green)' }}
-                          onClick={() => setPayTarget(h)}
-                        >
-                          <Icon name="money" size={12} /> บันทึกชำระ
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-              {list.length === 0 && (
+                    )}
+                  </td>
+                  <td className="num right" style={{ fontWeight: 700, color: 'var(--red)' }}>
+                    {db.fmt(g.total)} ฿
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className="btn sm"
+                      style={{ background: 'var(--green)', color: '#fff', borderColor: 'var(--green)' }}
+                      onClick={() => setStoreTarget(g.partnerId)}
+                    >
+                      <Icon name="money" size={12} /> ดูรายการ / ชำระเงิน
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {storeGroups.length === 0 && (
                 <tr>
-                  <td colSpan={8}>
+                  <td colSpan={6}>
                     <div className="empty">ไม่มีรายการ</div>
                   </td>
                 </tr>
@@ -1018,12 +1215,17 @@ function ExpFinance() {
         </div>
       </div>
 
-      {payTarget && (
-        <PayConfirmModal
-          header={payTarget}
-          partner={partners.find((p) => p.id === payTarget.partnerId)}
-          onClose={() => setPayTarget(null)}
-          onPaid={() => {}}
+      {targetGroup && (
+        <StorePaymentModal
+          partner={targetGroup.partner}
+          headers={targetGroup.headers}
+          vehicles={vehicles}
+          today={today}
+          onClose={() => setStoreTarget(null)}
+          onEdit={(h) => {
+            setStoreTarget(null)
+            setEditing(h)
+          }}
         />
       )}
 
@@ -1041,6 +1243,7 @@ function ExpFinance() {
   )
 }
 
+// ─── Tab 3: สต๊อคคลัง KPS ────────────────────────────────────────────────────
 // ─── Tab 3: สต๊อคคลัง KPS ────────────────────────────────────────────────────
 
 function SellPriceCell({ item, onSaved }: { item: StockItem; onSaved: () => void }) {
@@ -1195,73 +1398,77 @@ function ExpStock() {
     const p = parseFloat(form.unitPrice) || 0
     if (q <= 0) { alert('กรุณากรอกจำนวน'); return }
     if (p <= 0) { alert('กรุณากรอกราคาต่อหน่วย'); return }
+    if (isNewPartner && !form.newPartnerName.trim()) { alert('กรุณากรอกชื่อคู่ค้าใหม่'); return }
+    if (isNewItem    && !form.newName.trim())        { alert('กรุณากรอกชื่อสินค้าใหม่'); return }
 
-    // New vendor: create it in the shared partners registry first.
-    let partnerId = form.partnerId
-    if (isNewPartner) {
-      if (!form.newPartnerName.trim()) { alert('กรุณากรอกชื่อคู่ค้าใหม่'); return }
-      const nextNum = allPartners.reduce((max, x) => {
-        const n = parseInt(x.code.replace(/\D/g, ''), 10)
-        return isNaN(n) ? max : Math.max(max, n)
-      }, 0) + 1
-      const createdPartner = await insertPartner.mutateAsync({
-        code: 'VND-' + String(nextNum).padStart(3, '0'),
-        name: form.newPartnerName.trim(),
-        type: form.newPartnerType,
-        status: 'active',
-      })
-      partnerId = createdPartner.id
-    }
+    try {
+      // New vendor: create it in the shared partners registry first.
+      let partnerId = form.partnerId
+      if (isNewPartner) {
+        const nextNum = allPartners.reduce((max, x) => {
+          const n = parseInt(x.code.replace(/\D/g, ''), 10)
+          return isNaN(n) ? max : Math.max(max, n)
+        }, 0) + 1
+        const createdPartner = await insertPartner.mutateAsync({
+          code: 'VND-' + String(nextNum).padStart(3, '0'),
+          name: form.newPartnerName.trim(),
+          type: form.newPartnerType,
+          status: 'active',
+        })
+        partnerId = createdPartner.id
+      }
 
-    // New stock item: create it first, then receive into it.
-    if (isNewItem) {
-      if (!form.newName.trim()) { alert('กรุณากรอกชื่อสินค้าใหม่'); return }
-      const created = await insertStock.mutateAsync({
-        code: 'ST-' + Date.now().toString().slice(-6),
-        name: form.newName.trim(),
-        category: form.newCategory,
-        unit: form.newUnit.trim() || 'ชิ้น',
-        qtyIn: q, qtyOut: 0, qty: q,
-        unitCost: p, reorderAt: 0,
+      // New stock item: create it first, then receive into it.
+      if (isNewItem) {
+        const created = await insertStock.mutateAsync({
+          code: 'ST-' + Date.now().toString().slice(-6),
+          name: form.newName.trim(),
+          category: form.newCategory,
+          unit: form.newUnit.trim() || 'ชิ้น',
+          qtyIn: q, qtyOut: 0, qty: q,
+          unitCost: p, reorderAt: 0,
+        })
+        await insertReceipt.mutateAsync({
+          date: form.date, partnerId, stockItemId: created.id,
+          qty: q, unitPrice: p, total: q * p,
+        })
+        alert('เพิ่มสินค้าใหม่และรับเข้าคลังเรียบร้อย')
+        setForm(emptyReceive)
+        return
+      }
+
+      const s = stock.find((x) => x.id === form.stockItemId)
+      if (!s) return
+
+      // Weighted average cost
+      const oldValue = s.qty * s.unitCost
+      const newValue = q * p
+      const newQty = s.qty + q
+      const newAvgCost = newQty > 0 ? (oldValue + newValue) / newQty : p
+
+      await updateStock.mutateAsync({
+        id: s.id,
+        patch: {
+          qty: newQty,
+          qtyIn: s.qtyIn + q,
+          unitCost: Math.round(newAvgCost * 100) / 100,
+        },
       })
+
       await insertReceipt.mutateAsync({
-        date: form.date, partnerId, stockItemId: created.id,
-        qty: q, unitPrice: p, total: q * p,
+        date: form.date,
+        partnerId,
+        stockItemId: s.id,
+        qty: q,
+        unitPrice: p,
+        total: q * p,
       })
-      alert('เพิ่มสินค้าใหม่และรับเข้าคลังเรียบร้อย')
+
+      alert('รับสินค้าเข้าคลังเรียบร้อย')
       setForm(emptyReceive)
-      return
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-
-    const s = stock.find((x) => x.id === form.stockItemId)
-    if (!s) return
-
-    // Weighted average cost
-    const oldValue = s.qty * s.unitCost
-    const newValue = q * p
-    const newQty = s.qty + q
-    const newAvgCost = newQty > 0 ? (oldValue + newValue) / newQty : p
-
-    await updateStock.mutateAsync({
-      id: s.id,
-      patch: {
-        qty: newQty,
-        qtyIn: s.qtyIn + q,
-        unitCost: Math.round(newAvgCost * 100) / 100,
-      },
-    })
-
-    await insertReceipt.mutateAsync({
-      date: form.date,
-      partnerId,
-      stockItemId: s.id,
-      qty: q,
-      unitPrice: p,
-      total: q * p,
-    })
-
-    alert('รับสินค้าเข้าคลังเรียบร้อย')
-    setForm(emptyReceive)
   }
 
   return (
@@ -1521,6 +1728,7 @@ const PIVOT_MONTHS = [
 
 function PivotTab() {
   const today = new Date()
+  const { print } = usePrint()
   const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: allPartners = [] } = useList<Partner>('partners')
   const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
@@ -1565,9 +1773,15 @@ function PivotTab() {
   const rowTotal  = (vid: string) => Object.values(matrix[vid] ?? {}).reduce((s, v) => s + v, 0)
   const colTotal  = (pid: string) => Object.values(matrix).reduce((s, row) => s + (row[pid] ?? 0), 0)
   const grandTotal = activeVendorIds.reduce((s, pid) => s + colTotal(pid), 0)
-  const fmtMoney  = (n: number) => n > 0
-    ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : '—'
+  const fmtMoney  = (n: number) => {
+    if (n <= 0) return ''
+    const cents = Math.round(n * 100) % 100
+    // .00 → ซ่อนทศนิยม / .99 → ปัดขึ้นเป็นจำนวนเต็ม (Math.round จัดการ .99 → +1 ให้แล้ว)
+    if (cents === 0 || cents === 99) {
+      return Math.round(n).toLocaleString('en-US')
+    }
+    return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  }
 
   const activeVehicles = vehicles.filter(v => matrix[v.id])
 
@@ -1619,47 +1833,52 @@ function PivotTab() {
           </span>
           <span style={{ color: 'var(--text-muted)' }}>
             ยอดรวม <strong style={{ color: 'var(--primary)' }}>
-              ฿{grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ฿{fmtMoney(grandTotal)}
             </strong>
           </span>
         </div>
 
-        <button
-          className="btn"
-          style={{ marginLeft: 'auto' }}
-          onClick={() => window.print()}
-        >
-          <Icon name="download" size={14} /> พิมพ์รายงาน
-        </button>
-      </div>
-
-      {/* ── Print header ── */}
-      <div className="print-only" style={{ padding: '0 0 14px', textAlign: 'center' }}>
-        <div style={{ fontSize: 17, fontWeight: 700 }}>รายงานสรุปค่าใช้จ่ายรายคัน × คู่ค้า</div>
-        <div style={{ fontSize: 12, color: '#555', marginTop: 4 }}>
-          {periodLabel} · KPS Transportation ERP · พิมพ์เมื่อ {db.thaiDate(new Date().toISOString())}
+        <div className="row" style={{ gap: 8, marginLeft: 'auto', alignItems: 'center' }}>
+          <FontScaleControl />
+          <button className="btn" onClick={() => print('landscape')}>
+            <Icon name="download" size={14} /> พิมพ์รายงาน
+          </button>
         </div>
       </div>
 
-      {activeVendors.length === 0 ? (
-        <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
-          <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
-          <div>ไม่มีข้อมูลค่าใช้จ่ายใน{periodLabel}</div>
+      {/* ── Print header (matches P&L รายคัน) ── */}
+      <div className="print-only" style={{ marginBottom: 12 }}>
+        <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>
+          รายงานสรุปค่าใช้จ่ายรายคัน × คู่ค้า — {periodLabel}
         </div>
-      ) : (
-        <div style={{ margin: 16 }}>
-          <div style={{
-            borderRadius: 12, border: '1px solid #E2E8F0',
-            overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-            background: '#ffffff',
-          }}>
+        <div style={{ textAlign: 'center', fontSize: 11, color: '#444', marginTop: 4 }}>
+          KPS Transportation ERP · {activeVehicles.length} คัน · {activeVendors.length} คู่ค้า
+        </div>
+      </div>
+
+      {/* ── Pivot table (shown on both screen and print) ── */}
+      <div style={{ margin: 16 }}>
+        {activeVendors.length === 0 ? (
+          <div className="no-print" style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
+            <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
+            <div>ไม่มีข้อมูลค่าใช้จ่ายใน{periodLabel}</div>
+          </div>
+        ) : (
+          <div className="card print-area" style={{ background: '#ffffff', overflow: 'hidden' }}>
+            <div className="head no-print" style={{ paddingBottom: 0 }}>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Icon name="chart" size={16} />
+                ตารางสรุปค่าใช้จ่ายรายคัน × คู่ค้า
+                <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-muted)' }}>
+                  ({activeVehicles.length} คัน · {activeVendors.length} คู่ค้า)
+                </span>
+              </h3>
+            </div>
             <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-              <table className="tbl">
+              <table className="tbl pivot-tbl">
                 <thead>
                   <tr>
-                    <th style={{ minWidth: 110, position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)', zIndex: 2 }}>
-                      ทะเบียนรถ
-                    </th>
+                    <th style={{ minWidth: 110 }}>ทะเบียนรถ</th>
                     {activeVendors.map(p => (
                       <th key={p.id} className="num right" style={{ minWidth: 120, whiteSpace: 'nowrap' }}>
                         {p.name}
@@ -1673,9 +1892,9 @@ function PivotTab() {
                 <tbody>
                   {activeVehicles.map(v => (
                     <tr key={v.id}>
-                      <td style={{ position: 'sticky', left: 0, background: '#fff', zIndex: 1 }}>
+                      <td>
                         <div className="mono" style={{ fontWeight: 600, color: 'var(--primary)', fontSize: 12 }}>{v.plate}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.type}</div>
+                        <div className="no-print" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{v.type}</div>
                       </td>
                       {activeVendors.map(p => (
                         <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>
@@ -1688,26 +1907,26 @@ function PivotTab() {
                     </tr>
                   ))}
                   <tr style={{ background: 'var(--bg-2, #F1F5F9)', fontWeight: 700 }}>
-                    <td style={{ position: 'sticky', left: 0, background: 'var(--bg-2, #F1F5F9)' }}>รวมต่อคู่ค้า</td>
+                    <td>รวมต่อคู่ค้า</td>
                     {activeVendors.map(p => (
                       <td key={p.id} className="num right mono" style={{ fontSize: 12 }}>
                         {fmtMoney(colTotal(p.id))}
                       </td>
                     ))}
                     <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
-                      {grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {fmtMoney(grandTotal)}
                     </td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* ── Print footer ── */}
-      <div className="print-only" style={{ marginTop: 16, fontSize: 10, color: '#777', textAlign: 'center' }}>
-        * รายงานนี้สร้างจากข้อมูล Real-time · ระบบ KPS Transportation ERP
+      {/* ── Print footer (matches P&L รายคัน) ── */}
+      <div className="print-only" style={{ marginTop: 12, fontSize: 10, color: '#666', textAlign: 'center' }}>
+        * รายงานนี้สร้างจากข้อมูล Real-time · สรุปยอดค่าใช้จ่ายรายคัน × คู่ค้า · ระบบ KPS Transportation ERP
       </div>
     </div>
   )
@@ -1916,7 +2135,7 @@ function typeColor(t: string): string {
   return 'gray'
 }
 
-const PARTNER_TYPES = ['ช่างภายนอก', 'ร้านอะไหล่', 'ร้านค้าทั่วไป', 'คลัง KPS', 'อื่นๆ']
+const PARTNER_TYPES = ['ช่างภายนอก', 'ร้านอะไหล่', 'ร้านค้าทั่วไป', 'คลัง KPS', 'ซัพพลายเออร์น้ำมัน', 'อื่นๆ']
 
 function VendorEditModal({
   partner,
@@ -1958,13 +2177,17 @@ function VendorEditModal({
 
   const save = async () => {
     if (!form.name.trim()) { alert('กรุณากรอกชื่อร้านค้า/ช่าง'); return }
-    if (isNew) {
-      await insertPartner.mutateAsync({ ...form, balance: 0 })
-    } else {
-      await updatePartner.mutateAsync({ id: partner!.id, patch: form })
+    try {
+      if (isNew) {
+        await insertPartner.mutateAsync({ ...form, balance: 0 })
+      } else {
+        await updatePartner.mutateAsync({ id: partner!.id, patch: form })
+      }
+      onSaved()
+      onClose()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-    onSaved()
-    onClose()
   }
 
   return (
@@ -2106,20 +2329,7 @@ function ExpVendors() {
             </div>
           </div>
           <div className="spacer" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="ค้นหา ชื่อ / เบอร์โทร / เลขผู้เสียภาษี..."
-            style={{
-              height: 34,
-              padding: '0 12px',
-              border: '1px solid var(--line)',
-              borderRadius: 8,
-              background: 'var(--bg)',
-              fontSize: 13,
-              width: 280,
-            }}
-          />
+          <SearchInput value={q} onChange={setQ} placeholder="ค้นหา ชื่อ / เบอร์โทร / เลขผู้เสียภาษี..." width={280} />
           <button className="btn primary" onClick={() => setAddNew(true)}>
             <Icon name="plus" size={14} /> เพิ่มใหม่
           </button>
