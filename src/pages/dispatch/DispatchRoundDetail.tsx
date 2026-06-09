@@ -579,7 +579,10 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const [showDeleteRound, setShowDeleteRound] = useState(false)
   const [showReopenConfirm, setShowReopenConfirm] = useState(false)
   const [showRequestEdit, setShowRequestEdit] = useState(false)
-  const subj = subject as { type?: string; id?: string } | null
+  const subj = subject as { type?: string; id?: string; origin?: string } | null
+  // Where to return when leaving this detail page (back link / after delete).
+  // Falls back to the round queue when we don't know the entry point.
+  const backRoute = subj?.origin ?? 'dispatch.open'
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
@@ -608,7 +611,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
     return (
       <div className="empty">
         ไม่พบรอบงาน —{' '}
-        <a onClick={() => setActive('dispatch.open')} style={{ cursor: 'pointer', color: 'var(--primary)' }}>
+        <a onClick={() => setActive(backRoute)} style={{ cursor: 'pointer', color: 'var(--primary)' }}>
           กลับ
         </a>
       </div>
@@ -695,7 +698,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
           <div
             className="row"
             style={{ gap: 6, color: 'var(--text-muted)', fontSize: 12, marginBottom: 4, cursor: 'pointer' }}
-            onClick={() => setActive('dispatch.open')}
+            onClick={() => setActive(backRoute)}
           >
             <span>← รายการรอบงาน</span>
           </div>
@@ -732,7 +735,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             <button
               className="btn primary"
               onClick={() => {
-                setSubject({ type: 'round', id: round.id, origin: 'dispatch.round' })
+                setSubject({ type: 'round', id: round.id, origin: 'dispatch.round', roundOrigin: subj?.origin })
                 setActive('dispatch.close')
               }}
               disabled={legs.length === 0}
@@ -994,7 +997,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                       patch: { roundStatus: 'draft', status: 'in-progress' },
                     })
                     setShowReopenConfirm(false)
-                    setSubject({ type: 'round', id: round.id, origin: 'dispatch.round' })
+                    setSubject({ type: 'round', id: round.id, origin: 'dispatch.round', roundOrigin: subj?.origin })
                     setActive('dispatch.close')
                   } catch (e) {
                     setToast({ kind: 'error', msg: e instanceof Error ? e.message : 'เปิดรอบไม่สำเร็จ' })
@@ -1068,7 +1071,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
               // 3) Delete the round — dispatch_legs cascade automatically.
               await deleteDispatch.mutateAsync(round.id)
               setShowDeleteRound(false)
-              setActive('dispatch.open')
+              setActive(backRoute)
             } catch (e) {
               setToast({ kind: 'error', msg: 'ลบไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)) })
             }

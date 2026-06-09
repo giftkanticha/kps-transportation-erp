@@ -323,7 +323,7 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
                       background: low ? '#FEE2E2' : undefined,
                     }}
                     onClick={() => {
-                      setSubject({ type: 'round', id: r.round.id })
+                      setSubject({ type: 'round', id: r.round.id, origin: 'dispatch.report' })
                       setActive('dispatch.round')
                     }}
                   >
