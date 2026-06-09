@@ -30,6 +30,7 @@ export function CustomerBilling() {
   const [bankAccountId, setBankAccountId] = useState('')
   const [printNote, setPrintNote] = useState<BillingNote | null>(null)
   const [printOrient, setPrintOrient] = useState<'portrait' | 'landscape'>('landscape')
+  const [printFont, setPrintFont] = useState(9)  // ขนาดตัวอักษรใบพิมพ์ (pt)
 
   const { data: locations = [] } = useList<Location>('locations')
   const { data: dispatches = [] } = useDispatches()
@@ -500,12 +501,20 @@ export function CustomerBilling() {
             <div className="card no-print">
               <div className="head">
                 <h3>เอกสารที่ออกแล้วในเดือนนี้ ({customerNotes.length})</h3>
-                <div className="right row" style={{ gap: 6, alignItems: 'center', fontSize: 12.5 }}>
-                  <span className="muted">แนวกระดาษพิมพ์:</span>
-                  <select value={printOrient} onChange={e => setPrintOrient(e.target.value as typeof printOrient)} style={{ fontSize: 12.5 }}>
-                    <option value="landscape">แนวนอน</option>
-                    <option value="portrait">แนวตั้ง</option>
-                  </select>
+                <div className="right row" style={{ gap: 12, alignItems: 'center', fontSize: 12.5 }}>
+                  <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+                    <span className="muted">แนวกระดาษ:</span>
+                    <select value={printOrient} onChange={e => setPrintOrient(e.target.value as typeof printOrient)} style={{ fontSize: 12.5 }}>
+                      <option value="landscape">แนวนอน</option>
+                      <option value="portrait">แนวตั้ง</option>
+                    </select>
+                  </div>
+                  <div className="row" style={{ gap: 4, alignItems: 'center' }}>
+                    <span className="muted">ตัวอักษร:</span>
+                    <button className="btn ghost icon sm" title="เล็กลง" onClick={() => setPrintFont(f => Math.max(7, f - 1))}>−</button>
+                    <span className="mono" style={{ minWidth: 34, textAlign: 'center' }}>{printFont}pt</span>
+                    <button className="btn ghost icon sm" title="ใหญ่ขึ้น" onClick={() => setPrintFont(f => Math.min(16, f + 1))}>+</button>
+                  </div>
                 </div>
               </div>
               <div className="tbl-wrap" style={{ border: 'none' }}>
@@ -538,8 +547,12 @@ export function CustomerBilling() {
 
       {/* เอกสารสำหรับพิมพ์ */}
       {printNote && (
-        <div className="print-only" style={{ fontSize: '8.5pt' }}>
-          <style>{`@page { size: A4 ${printOrient}; margin: 10mm; }`}</style>
+        <div className="print-only" style={{ fontSize: `${printFont}pt` }}>
+          <style>{`
+            @page { size: A4 ${printOrient}; margin: 8mm; }
+            .print-only .tbl { font-size: ${printFont}pt; }
+            .print-only .tbl th, .print-only .tbl td { padding: 2px 6px; line-height: 1.2; }
+          `}</style>
           <div className="kps-print-header">
             <p className="co">KPS TRANSPORTATION</p>
             <p className="ttl">{docTypeLabel(printNote.docType)}</p>
