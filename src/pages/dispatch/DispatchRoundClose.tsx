@@ -45,6 +45,7 @@ interface LegCloseState {
   deliveredWeight: string
   perDiem: string
   notes: string
+  price: string   // ราคา/เรท (฿/ตัน, ฿/กก. หรือยอดเหมา) — แก้ค่าบรรทุกที่ตั้งตอนเปิดขาได้
 }
 
 const MAX_WEIGHT_LOSS_KG = 100
@@ -326,6 +327,7 @@ function CloseForm({
           deliveredWeight: tonToDwInput(l.deliveredWeight ?? null, l.priceMode),
           perDiem: l.perDiem != null ? String(l.perDiem) : '',
           notes: l.notes || '',
+          price: l.price != null ? String(l.price) : '',
         })),
       )
     }
@@ -369,12 +371,19 @@ function CloseForm({
   const updateExpense = (id: string, patch: Partial<OtherExpense>) =>
     setOtherExp(es => es.map(e => (e.id === id ? { ...e, ...patch } : e)))
 
+  // ใช้ราคา/เรทที่แก้บนหน้าปิดงาน (ถ้ามี) แทนค่าที่ตั้งตอนเปิดขา
+  const effLeg = (l: DispatchLeg, ls?: LegCloseState): DispatchLeg => {
+    if (!ls || ls.price === '' || ls.price == null) return l
+    const p = Number(ls.price)
+    return isNaN(p) ? l : { ...l, price: p }
+  }
+
   // Live calc: revenue uses ADJUSTED amount based on deliveredWeight + priceMode.
   // legState.deliveredWeight is in user-unit (กก. for per_kg, ตัน otherwise) → convert to ตัน.
   const adjustedLegAmounts = legs.map((l, i) => {
     const ls = legStates[i]
     const dwTon = ls?.deliveredWeight ? dwInputToTon(ls.deliveredWeight, l.priceMode) : null
-    return adjustedAmount(l, dwTon)
+    return adjustedAmount(effLeg(l, ls), dwTon)
   })
   const revenue = adjustedLegAmounts.reduce((s, a) => s + a, 0)
   const perDiemTotal = legStates.reduce((s, ls) => s + (Number(ls.perDiem) || 0), 0)
@@ -408,10 +417,11 @@ function CloseForm({
       const ls = legStates[i]
       const dwTon = ls?.deliveredWeight ? dwInputToTon(ls.deliveredWeight, l.priceMode) : null
       const pd = ls?.perDiem ? Number(ls.perDiem) : 0
+      const el = effLeg(l, ls)
       return {
-        ...l,
+        ...el,
         deliveredWeight: dwTon,
-        amount: adjustedAmount(l, dwTon),
+        amount: adjustedAmount(el, dwTon),
         perDiem: pd,
         notes: ls?.notes || l.notes,
         closed: markClosed && (l.legType === 'return' || dwTon != null),
@@ -564,6 +574,7 @@ function CloseForm({
             id: l.id as string,
             patch: {
               deliveredWeight: l.deliveredWeight,
+              price: l.price,
               amount: l.amount,
               perDiem: l.perDiem,
               notes: l.notes,
@@ -780,6 +791,20 @@ function CloseForm({
                     ใส่ 0 ถ้าไม่มี
                   </div>
                 </Field>
+                {isManager && !isReturn && (
+                  <Field label={isLump ? 'ค่าเหมา (฿)' : isPerKg ? 'ราคา (฿/กก.)' : 'ราคา (฿/ตัน)'}>
+                    <input
+                      type="number"
+                      value={ls.price}
+                      onChange={e => updateLegState(i, { price: e.target.value })}
+                      placeholder="0"
+                      disabled={isClosed}
+                    />
+                    <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                      แก้ค่าบรรทุก/เรทที่ตั้งตอนเปิดขา
+                    </div>
+                  </Field>
+                )}
               </div>
 
               {/* Weight loss + adjusted amount */}
