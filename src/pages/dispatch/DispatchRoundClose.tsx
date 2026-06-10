@@ -160,20 +160,22 @@ function DraftRoundsList({
 }
 
 export function DispatchRoundClose({ setActive, setSubject, subject }: Props) {
-  const subj = subject as { type?: string; id?: string } | null
+  const subj = subject as { type?: string; id?: string; origin?: string; roundOrigin?: string } | null
 
   if (!subj?.id) {
     return <DraftRoundsList setSubject={setSubject} />
   }
 
-  return <CloseForm roundId={subj.id} setActive={setActive} setSubject={setSubject} />
+  return <CloseForm roundId={subj.id} origin={subj.origin} roundOrigin={subj.roundOrigin} setActive={setActive} setSubject={setSubject} />
 }
 
 function CloseForm({
   roundId,
+  origin,
+  roundOrigin,
   setActive,
   setSubject,
-}: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
+}: { roundId: string; origin?: string; roundOrigin?: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
   const { isManager, isAdmin } = useAuth()
   const { data: dispatches = [] } = useDispatches()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -608,8 +610,12 @@ function CloseForm({
       if (mode === 'close') {
         setToast({ kind: 'success', msg: `✅ ปิดรอบ ${round.code} เรียบร้อย${finalKmPerL ? ` · KM/L = ${finalKmPerL.toFixed(2)}` : ''}` })
         setTimeout(() => {
-          setSubject(null)
-          setActive('dispatch.open')
+          // Return to whichever page opened the close form (summary report,
+          // history, round detail…) instead of always the queue. When going
+          // back to the round detail we restore its round subject — and carry
+          // its own origin so the detail page still knows where to go back to.
+          setSubject(origin === 'dispatch.round' ? { type: 'round', id: roundId, origin: roundOrigin } : null)
+          setActive(origin ?? 'dispatch.open')
         }, 1400)
       } else {
         setToast({ kind: 'success', msg: '✅ บันทึกร่างเรียบร้อย' })
