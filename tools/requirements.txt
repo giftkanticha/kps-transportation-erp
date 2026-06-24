@@ -1,0 +1,10 @@
+# WAT tool dependencies. Add packages here as tools need them.
+# Pin versions when a tool depends on specific behavior.
+
+# Common starters (uncomment as needed):
+# requests>=2.31
+# python-dotenv>=1.0
+# google-api-python-client>=2.0
+# google-auth-oauthlib>=1.0
+# gspread>=6.0
+# supabase>=2.0
