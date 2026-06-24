@@ -8,3 +8,12 @@ dist
 # SQLite dev database (auto-generated, not committed)
 server/prisma/dev.db
 server/prisma/dev.db-journal
+
+# WAT framework
+.tmp/*
+!.tmp/.gitkeep
+credentials.json
+token.json
+.venv
+__pycache__/
+*.pyc
