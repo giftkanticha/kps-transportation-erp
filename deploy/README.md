@@ -79,9 +79,24 @@ docker compose exec api sh -c '
 
 - ใช้ **service-role key** เพื่อให้ RLS ไม่บังข้อมูล
 - สคริปต์ *อ่านอย่างเดียว* จาก Supabase แล้ว insert เข้า MySQL (idempotent — รันซ้ำได้)
-- **รหัสผ่านผู้ใช้ย้ายไม่ได้** (Supabase Auth ไม่เปิดให้ export hash) → ผู้ใช้สมัครใหม่/รีเซตรหัสในระบบใหม่ บัญชี `admin` ที่ seed ไว้ใช้อนุมัติผู้ใช้ใหม่ได้
 
 ตรวจสอบ: เทียบจำนวนแถวแต่ละตารางระหว่าง Supabase กับ MySQL
+
+### ย้ายผู้ใช้ + รหัสผ่านเดิม (ไม่ต้องให้ผู้ใช้ตั้งรหัสใหม่)
+
+รหัสผ่านใน Supabase Auth เก็บเป็น **bcrypt hash** เหมือนระบบนี้ → คัดลอก hash มาได้ตรงๆ **ผู้ใช้ใช้รหัสเดิม login ได้ทันที** แต่ hash อยู่ในตาราง `auth.users` ที่ REST API มองไม่เห็น จึงต้องต่อ **Postgres ตรง**:
+
+1. เอา connection string จาก Supabase: **Project Settings → Database → Connection string (URI)** (ต้องมีรหัส DB)
+2. รัน:
+```bash
+docker compose exec api sh -c '
+  SUPABASE_DB_URL="postgresql://postgres:[DB-PASSWORD]@db.xxxx.supabase.co:5432/postgres" \
+  npm run migrate:users
+'
+```
+- คง UUID ของผู้ใช้เดิมไว้ (อ้างอิงข้อมูลอื่นไม่พัง), คัดลอก bcrypt hash → ใช้รหัสเดิมได้เลย
+- ผู้ใช้ที่สมัครผ่าน OAuth (Google ฯลฯ) ไม่มีรหัสผ่าน → ใช้ "ลืมรหัสผ่าน" ตั้งใหม่
+- รันซ้ำได้ (upsert ตาม id)
 
 ---
 
