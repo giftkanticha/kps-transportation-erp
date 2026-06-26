@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { ACTIVE_BACKEND } from '../../lib/backends'
+import { resetPasswordWithToken } from '../../lib/authActions'
 import { useAuth } from '../../context/AuthContext'
 import { Icon } from '../../components/ui'
 import {
@@ -10,7 +12,7 @@ import {
 // Shown when supabase fires PASSWORD_RECOVERY — i.e. the user arrived via
 // a password-reset email link and holds a temporary recovery session.
 export function ResetPasswordScreen() {
-  const { exitRecovery, logout } = useAuth()
+  const { exitRecovery, logout, resetToken } = useAuth()
   const [pw, setPw]     = useState('')
   const [pw2, setPw2]   = useState('')
   const [busy, setBusy] = useState(false)
@@ -23,8 +25,13 @@ export function ResetPasswordScreen() {
     if (pw !== pw2)    { setErr('รหัสผ่านยืนยันไม่ตรงกัน'); return }
     setErr(''); setBusy(true)
     try {
-      const { error } = await supabase.auth.updateUser({ password: pw })
-      if (error) throw new Error(error.message)
+      if (ACTIVE_BACKEND === 'mysql') {
+        if (!resetToken) throw new Error('ลิงก์รีเซตไม่ถูกต้องหรือหมดอายุ')
+        await resetPasswordWithToken(resetToken, pw)
+      } else {
+        const { error } = await supabase.auth.updateUser({ password: pw })
+        if (error) throw new Error(error.message)
+      }
       setDone(true)
     } catch (ex) {
       setErr((ex as Error).message)

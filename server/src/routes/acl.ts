@@ -1,11 +1,28 @@
 import { Router } from 'express'
 import { AclService } from '../services/AclService'
+import { AuthService } from '../services/AuthService'
 import { requireAuth, requireRole, AuthRequest } from '../middleware/auth'
 
 const router = Router()
 const aclService = new AclService()
+const authService = new AuthService()
 
 router.use(requireAuth)
+
+router.post('/users/:userId/profile', requireRole('SUPER_ADMIN', 'ADMIN'), async (req: AuthRequest, res, next) => {
+  try {
+    const { displayName, username, phone } = req.body
+    await aclService.updateProfile(req.params.userId, { displayName, username, phone })
+    res.json({ success: true })
+  } catch (err) { next(err) }
+})
+
+router.post('/users/:userId/set-password', requireRole('SUPER_ADMIN', 'ADMIN'), async (req: AuthRequest, res, next) => {
+  try {
+    await authService.setPassword(req.params.userId, req.body.newPassword)
+    res.json({ success: true })
+  } catch (err) { next(err) }
+})
 
 router.get('/users', async (req: AuthRequest, res, next) => {
   try {

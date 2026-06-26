@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { ACTIVE_BACKEND } from '../../lib/backends'
 import { api } from '../../lib/backends/mysql/api'
+import { requestPasswordReset } from '../../lib/authActions'
 import { callRpc } from '../../lib/crud'
 import { Icon } from '../../components/ui'
 
@@ -126,17 +127,17 @@ export function SettingsUsers() {
   const sendReset = async (id: string, email: string | null, name: string) => {
     if (!email) { alert('ผู้ใช้นี้ไม่มีอีเมลในระบบ ส่งลิงก์รีเซตไม่ได้'); return }
     if (!confirm(`ส่งลิงก์รีเซตรหัสผ่านให้ ${name} (${email})?`)) return
-    if (ACTIVE_BACKEND === 'mysql') {
-      alert('ระบบนี้ยังไม่รองรับการส่งลิงก์รีเซตรหัสผ่านทางอีเมล — ให้ผู้ดูแลตั้งรหัสผ่านใหม่ให้แทน')
-      return
-    }
     setBusy(id)
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin,
-      })
-      if (error) throw new Error(error.message)
-      alert(`ส่งลิงก์ไปที่ ${email} แล้ว — แจ้งให้ตรวจอีเมลและคลิกลิงก์เพื่อตั้งรหัสผ่านใหม่`)
+      const r = await requestPasswordReset(email)
+      // If SMTP isn't configured the server returns the raw token so the admin
+      // can still hand the user a working link.
+      if (r.token) {
+        const link = `${window.location.origin}/?reset_token=${r.token}`
+        alert(`ยังไม่ได้ตั้งค่าอีเมล (SMTP) — ส่งลิงก์นี้ให้ผู้ใช้เอง:\n\n${link}`)
+      } else {
+        alert(`ส่งลิงก์ไปที่ ${email} แล้ว — แจ้งให้ตรวจอีเมลและคลิกลิงก์เพื่อตั้งรหัสผ่านใหม่`)
+      }
     } catch (e) {
       alert(e instanceof Error ? e.message : 'ส่งลิงก์ไม่สำเร็จ')
     } finally {
@@ -332,10 +333,11 @@ function EditProfileModal({ user, isSelf, onClose }: {
       }
       // Profile fields: always save the current form values (cheap; rows are
       // pre-filled with the existing values so no real damage if unchanged).
-      // mysql mode has no profile-field update endpoint (displayName/username/
-      // phone live on the User table with no REST mutation), so it is skipped
-      // there — only email + self-password changes are supported.
-      if (ACTIVE_BACKEND !== 'mysql') {
+      if (ACTIVE_BACKEND === 'mysql') {
+        await api(`/api/acl/users/${user.id}/profile`, {
+          method: 'POST', body: { displayName: dn, username: u || null, phone: ph },
+        })
+      } else {
         await updateProfile.mutateAsync({
           id: user.id,
           patch: {
@@ -347,7 +349,8 @@ function EditProfileModal({ user, isSelf, onClose }: {
       }
       if (pwChanged) {
         if (ACTIVE_BACKEND === 'mysql') {
-          await api('/api/auth/set-password', { method: 'POST', body: { newPassword: pw } })
+          // Admin sets the *target* user's password (not the admin's own).
+          await api(`/api/acl/users/${user.id}/set-password`, { method: 'POST', body: { newPassword: pw } })
         } else {
           const { error } = await supabase.auth.updateUser({ password: pw })
           if (error) throw new Error(error.message)

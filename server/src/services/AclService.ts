@@ -90,6 +90,23 @@ export class AclService {
     await prisma.auditLog.create({ data: { userId, action: 'USER_ACTIVATED' } })
   }
 
+  // Admin edit of a user's profile fields (display name / username / phone).
+  async updateProfile(userId: string, fields: { displayName?: string; username?: string | null; phone?: string }) {
+    const data: any = {}
+    if (fields.displayName !== undefined) data.displayName = fields.displayName
+    if (fields.phone !== undefined) data.phone = fields.phone
+    if (fields.username !== undefined) {
+      const u = fields.username ? fields.username.trim().toLowerCase() : null
+      if (u) {
+        const clash = await prisma.user.findFirst({ where: { username: u, NOT: { id: userId } } })
+        if (clash) throw new Error('ชื่อผู้ใช้นี้ถูกใช้แล้ว')
+      }
+      data.username = u
+    }
+    await prisma.user.update({ where: { id: userId }, data })
+    await prisma.auditLog.create({ data: { userId, action: 'PROFILE_UPDATED' } })
+  }
+
   async listUsers(status?: string) {
     return prisma.user.findMany({
       where: status ? { status } : undefined,

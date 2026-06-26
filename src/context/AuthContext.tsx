@@ -42,6 +42,7 @@ interface AuthContextValue {
   legacyUser: User | null
   loading:    boolean
   recoveryMode: boolean
+  resetToken: string | null
   login:      (email: string, password: string) => Promise<void>
   logout:     () => Promise<void>
   exitRecovery: () => void
@@ -174,7 +175,7 @@ function SupabaseAuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      session, profile, legacyUser, loading, recoveryMode, login, logout, exitRecovery,
+      session, profile, legacyUser, loading, recoveryMode, resetToken: null, login, logout, exitRecovery,
       ...roleFlags(BYPASS_AUTH ? BYPASS_PROFILE : profile),
     }}>
       {children}
@@ -209,13 +210,22 @@ function synthSession(me: MeResponse): Session {
   return { user: { id: me.id, email: me.email ?? '' } } as unknown as Session
 }
 
+// Read a ?reset_token=... param from the URL (set by the password-reset email
+// link) so we can route the user to the reset screen on load.
+function readResetToken(): string | null {
+  try { return new URLSearchParams(window.location.search).get('reset_token') } catch { return null }
+}
+
 function MysqlAuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
+  const [resetToken, setResetToken] = useState<string | null>(() => readResetToken())
 
   useEffect(() => {
     let mounted = true
+    // Arrived via a reset link — don't auto-load a session; show the reset screen.
+    if (resetToken) { setLoading(false); return }
     if (!tokenStore.access) { setLoading(false); return }
     api<MeResponse>('/api/auth/me')
       .then((me) => {
@@ -227,7 +237,7 @@ function MysqlAuthProvider({ children }: { children: ReactNode }) {
       .catch(() => { tokenStore.clear() })
       .finally(() => { if (mounted) setLoading(false) })
     return () => { mounted = false }
-  }, [])
+  }, [resetToken])
 
   const login = useCallback(async (identifier: string, password: string) => {
     const data = await api<{ accessToken: string; refreshToken: string; user: MeResponse }>(
@@ -248,7 +258,15 @@ function MysqlAuthProvider({ children }: { children: ReactNode }) {
     setProfile(null)
   }, [])
 
-  const exitRecovery = useCallback(() => {}, [])
+  const exitRecovery = useCallback(() => {
+    // Drop the token + strip ?reset_token from the URL so a refresh returns to login.
+    setResetToken(null)
+    try {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('reset_token')
+      window.history.replaceState({}, '', url.pathname + url.search)
+    } catch { /* ignore */ }
+  }, [])
 
   const legacyUser = session && profile && profile.status === 'ACTIVE'
     ? toLegacy(profile, session.user.email ?? '')
@@ -256,7 +274,7 @@ function MysqlAuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      session, profile, legacyUser, loading, recoveryMode: false, login, logout, exitRecovery,
+      session, profile, legacyUser, loading, recoveryMode: !!resetToken, resetToken, login, logout, exitRecovery,
       ...roleFlags(profile),
     }}>
       {children}

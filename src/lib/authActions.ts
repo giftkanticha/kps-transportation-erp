@@ -59,6 +59,26 @@ export async function changeOwnPassword(newPassword: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+// Request a password-reset email for the given address.
+// Returns a user-facing message. (MySQL: server emails a reset link; if SMTP
+// isn't configured it returns the raw token so the admin can complete it.)
+export async function requestPasswordReset(email: string): Promise<{ message: string; token?: string | null }> {
+  if (ACTIVE_BACKEND === 'mysql') {
+    const r = await api<{ message: string; token: string | null; emailed: boolean }>(
+      '/api/auth/forgot-password', { method: 'POST', auth: false, body: { email } },
+    )
+    return { message: r.message, token: r.token }
+  }
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin })
+  if (error) throw new Error(error.message)
+  return { message: `ส่งลิงก์ไปที่ ${email} แล้ว — กรุณาตรวจอีเมล` }
+}
+
+// Complete a token-based password reset (MySQL flow, from the email link).
+export async function resetPasswordWithToken(token: string, newPassword: string): Promise<void> {
+  await api('/api/auth/reset-password', { method: 'POST', auth: false, body: { token, newPassword } })
+}
+
 // Clear the local session ("clear session" button / hard logout).
 export async function signOutEverywhere(): Promise<void> {
   if (ACTIVE_BACKEND === 'mysql') {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
-import { signOutEverywhere } from '../../lib/authActions'
+import { signOutEverywhere, requestPasswordReset } from '../../lib/authActions'
 import { Icon } from '../../components/ui'
 import { RegisterPage } from './RegisterPage'
 import {
@@ -25,6 +25,23 @@ export function LoginScreen() {
     setErr('')
     try { await login(identifier, password) }
     catch (ex) { setErr((ex as Error).message) }
+  }
+
+  const forgot = async () => {
+    const email = window.prompt('กรอกอีเมลที่ใช้สมัคร เพื่อรับลิงก์รีเซตรหัสผ่าน:')
+    if (!email) return
+    try {
+      const r = await requestPasswordReset(email.trim())
+      if (r.token) {
+        // No SMTP configured — show the link so the user can proceed.
+        window.prompt('ยังไม่ได้ตั้งค่าอีเมล (SMTP) — คัดลอกลิงก์นี้เพื่อตั้งรหัสผ่านใหม่:',
+          `${window.location.origin}/?reset_token=${r.token}`)
+      } else {
+        alert(r.message)
+      }
+    } catch (ex) {
+      alert(ex instanceof Error ? ex.message : 'ส่งลิงก์ไม่สำเร็จ')
+    }
   }
 
   const clearSession = async () => {
@@ -91,6 +108,13 @@ export function LoginScreen() {
               cursor: loading ? 'default' : 'pointer',
             }}>
               {loading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}
+            </button>
+
+            <button type="button" onClick={forgot} style={{
+              background: 'none', border: 'none', color: '#0ea371',
+              fontSize: 12.5, cursor: 'pointer', marginTop: -6,
+            }}>
+              ลืมรหัสผ่าน?
             </button>
 
             <button type="button" onClick={clearSession} style={outlineBtnStyle}>

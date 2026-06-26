@@ -36,6 +36,14 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-this-access-secret}
       REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-change-this-refresh-secret}
       PORT: "3001"
+      # Password-reset email links + optional SMTP (blank SMTP_HOST = email off)
+      APP_BASE_URL: ${APP_BASE_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-KPS ERP <no-reply@kps.local>}
     ports:
       - "${APP_PORT:-3001}:3001"
 
