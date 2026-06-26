@@ -64,6 +64,59 @@ SMTP_FROM=KPS ERP <you@gmail.com>
 
 ---
 
+## Backup อัตโนมัติ (cloud เป็น backup)
+
+มี service `backup` ที่ **dump ฐานข้อมูลเป็นไฟล์ `.sql` ทุกวันอัตโนมัติ** (เริ่มทำงานเองเมื่อ `docker compose up`) เก็บย้อนหลัง 14 วัน แล้วลบของเก่าให้
+
+**ให้ backup ขึ้น cloud อัตโนมัติ** — ชี้ที่เก็บไปโฟลเดอร์ที่ sync cloud อยู่แล้ว ใน `.env`:
+```
+# Windows + OneDrive (มากับ Windows) — ไฟล์จะขึ้น cloud เองผ่าน OneDrive
+BACKUP_DIR=C:/Users/YOU/OneDrive/kps-backups
+# หรือ Google Drive Desktop
+# BACKUP_DIR=C:/Users/YOU/My Drive/kps-backups
+```
+ถ้าไม่ตั้ง `BACKUP_DIR` จะเก็บไว้ที่ `deploy/backups/` ในเครื่อง (ไม่ขึ้น cloud)
+
+ปรับความถี่/จำนวนวันที่เก็บได้:
+```
+BACKUP_INTERVAL=86400     # ทุกกี่วินาที (86400 = วันละครั้ง)
+BACKUP_KEEP_DAYS=14
+```
+
+**ตรวจสอบ:** หลัง `docker compose up` สักครู่ จะมีไฟล์ `kps_erp-<วันเวลา>.sql` โผล่ในโฟลเดอร์ (backup รอบแรกทำทันที)
+
+**กู้คืน (restore)** จากไฟล์ backup:
+```powershell
+docker compose exec -T mysql sh -c 'exec mysql -uroot -p"$MYSQL_ROOT_PASSWORD" kps_erp' < backups/kps_erp-20260626-020000.sql
+```
+
+---
+
+## เข้าระบบจากนอกออฟฟิศ (Cloudflare Tunnel)
+
+เปิดระบบ LAN ออกอินเทอร์เน็ตแบบปลอดภัย (HTTPS ฟรี, ไม่ต้องเปิด port ที่ router, ไม่เปิด MySQL ออกเน็ต) — **ระบบเดียว ใช้ได้ทั้งในและนอกออฟฟิศ ข้อมูลตรงกันเสมอ**
+
+ขั้นตอน (ทำครั้งเดียว):
+1. สมัคร **Cloudflare** ฟรี + เพิ่ม domain ของคุณเข้า Cloudflare (ต้องมี domain)
+2. ไป **Zero Trust → Networks → Tunnels → Create a tunnel** (เลือกชนิด *Cloudflared*)
+3. ตั้งชื่อ → หน้าถัดไปจะมี **token** (สตริงยาวขึ้นต้น `eyJ...`) → copy มาใส่ `.env`:
+   ```
+   TUNNEL_TOKEN=eyJ...ทั้งอัน
+   ```
+4. ในหน้า tunnel เพิ่ม **Public Hostname**:
+   - Subdomain/Domain: เช่น `erp.yourdomain.com`
+   - Service: **`http://api:3001`** (ชื่อ service ใน compose)
+5. เปิด tunnel:
+   ```powershell
+   docker compose --profile tunnel up -d
+   ```
+เสร็จ → เข้าจากที่ไหนก็ได้ที่ `https://erp.yourdomain.com`
+
+> ทดสอบเร็วๆ โดยไม่มี domain: ใช้ quick tunnel ได้ (`cloudflared tunnel --url http://localhost:3001`) แต่ URL จะเปลี่ยนทุกครั้ง — ใช้ชั่วคราวเท่านั้น
+> อัปเดต `APP_BASE_URL` ใน `.env` เป็น domain นี้ด้วย (สำหรับลิงก์อีเมลรีเซต)
+
+---
+
 ## 2) ย้ายข้อมูลเดิมจาก Supabase → MySQL (ทำครั้งเดียว, ไม่บังคับ)
 
 ถ้าจะยกข้อมูลที่มีอยู่บน Supabase มาใส่ MySQL (คง UUID เดิมครบ ไม่ลบของบน Supabase):

@@ -47,5 +47,36 @@ services:
     ports:
       - "${APP_PORT:-3001}:3001"
 
+  # Automated database backups. Writes timestamped .sql dumps to BACKUP_DIR on a
+  # schedule and prunes old ones. Set BACKUP_DIR to a cloud-synced folder
+  # (OneDrive / Google Drive) for an off-site copy. Runs by default.
+  backup:
+    image: mysql:8.0
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-kps_erp}
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-86400}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+      - ./backup.sh:/backup.sh:ro
+    entrypoint: ["sh", "/backup.sh"]
+
+  # Remote access from outside the office (HTTPS, no port-forwarding). Only runs
+  # when explicitly enabled: docker compose --profile tunnel up -d
+  # Requires TUNNEL_TOKEN (Cloudflare Zero Trust → Tunnels) and the tunnel's
+  # Public Hostname routed to http://api:3001. See deploy/README.md.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    depends_on:
+      - api
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN:-}
+
 volumes:
   mysql_data:

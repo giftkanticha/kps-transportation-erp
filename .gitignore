@@ -8,3 +8,6 @@ dist
 # SQLite dev database (auto-generated, not committed)
 server/prisma/dev.db
 server/prisma/dev.db-journal
+
+# Database backup dumps (generated at runtime)
+deploy/backups/
