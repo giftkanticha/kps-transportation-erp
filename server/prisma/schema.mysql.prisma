@@ -169,7 +169,7 @@ model Customer {
   status      String   @default("active")
   industry    String   @default("")
   since       String   @default("")
-  address     String   @default("") @db.Text
+  address     String   @default("") @db.VarChar(1000)
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("customers")
@@ -198,7 +198,7 @@ model Partner {
   type        String   @default("")
   contact     String   @default("")
   phone       String   @default("")
-  address     String   @default("") @db.Text
+  address     String   @default("") @db.VarChar(1000)
   bank        String   @default("")
   account     String   @default("")
   accountName String   @default("") @map("account_name")
@@ -228,7 +228,7 @@ model Dispatch {
   liters             Decimal? @db.Decimal(18, 2)
   kmPerL             Decimal? @map("km_per_l") @db.Decimal(18, 2)
   perDiem            Decimal? @map("per_diem") @db.Decimal(18, 2)
-  notes              String   @default("") @db.Text
+  notes              String   @default("") @db.VarChar(1000)
   totalAmount        Decimal  @default(0) @map("total_amount") @db.Decimal(18, 2)
   revenue            Decimal  @default(0) @db.Decimal(18, 2)
   cost               Decimal  @default(0) @db.Decimal(18, 2)
@@ -322,7 +322,7 @@ model TireEvent {
   odometer  Decimal  @default(0) @db.Decimal(18, 2)
   fromPos   String?  @map("from_pos")
   toPos     String?  @map("to_pos")
-  note      String   @default("") @db.Text
+  note      String   @default("") @db.VarChar(1000)
   userId    String   @map("user_id") @db.VarChar(36)
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -415,7 +415,7 @@ model FuelDailyPrice {
   date      DateTime @db.Date
   source    String
   pricePerL Decimal  @map("price_per_l") @db.Decimal(18, 2)
-  notes     String   @default("") @db.Text
+  notes     String   @default("") @db.VarChar(1000)
   setBy     String?  @map("set_by") @db.VarChar(36)
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -429,7 +429,7 @@ model Expense {
   code      String   @unique
   vehicleId String?  @map("vehicle_id") @db.VarChar(36)
   category  String   @default("")
-  note      String   @default("") @db.Text
+  note      String   @default("") @db.VarChar(1000)
   amount    Decimal  @default(0) @db.Decimal(18, 2)
   paidBy    String   @default("") @map("paid_by")
   date      String
@@ -452,7 +452,7 @@ model ExpenseHeader {
   dueDate   String   @default("") @map("due_date")
   total     Decimal  @default(0) @db.Decimal(18, 2)
   lineCount Int      @default(0) @map("line_count")
-  note      String   @default("") @db.Text
+  note      String   @default("") @db.VarChar(1000)
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("expense_headers")
@@ -467,7 +467,7 @@ model ExpenseLine {
   qty         Decimal  @default(1) @db.Decimal(18, 2)
   unitPrice   Decimal  @default(0) @map("unit_price") @db.Decimal(18, 2)
   amount      Decimal  @default(0) @db.Decimal(18, 2)
-  note        String   @default("") @db.Text
+  note        String   @default("") @db.VarChar(1000)
   stockItemId String?  @map("stock_item_id") @db.VarChar(36)
   createdAt   DateTime @default(now()) @map("created_at")
 
@@ -572,7 +572,7 @@ model ActivityLog {
   id        String   @id @default(uuid()) @db.VarChar(36)
   at        String
   who       String   @default("")
-  text      String   @default("") @db.Text
+  text      String   @default("") @db.VarChar(1000)
   type      String   @default("")
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -589,7 +589,7 @@ model TaskCompletion {
   nextDate            String   @default("") @map("next_date")
   nextMileage         Decimal? @map("next_mileage") @db.Decimal(18, 2)
   nextMaintenanceDate String   @default("") @map("next_maintenance_date")
-  note                String   @default("") @db.Text
+  note                String   @default("") @db.VarChar(1000)
   createdAt           DateTime @default(now()) @map("created_at")
 
   @@map("task_completions")
@@ -602,7 +602,7 @@ model EditApproval {
   requesterRole String    @map("requester_role")
   vehicleId     String?   @map("vehicle_id") @db.VarChar(36)
   vehiclePlate  String    @default("") @map("vehicle_plate")
-  reason        String    @default("") @db.Text
+  reason        String    @default("") @db.VarChar(1000)
   changes       Json      @db.Json
   changeFields  Json      @map("change_fields") @db.Json
   requestedAt   DateTime  @default(now()) @map("requested_at")
@@ -610,7 +610,7 @@ model EditApproval {
   reviewerId    String?   @map("reviewer_id") @db.VarChar(36)
   reviewerName  String?   @map("reviewer_name")
   reviewedAt    DateTime? @map("reviewed_at")
-  reviewNote    String    @default("") @map("review_note") @db.Text
+  reviewNote    String    @default("") @map("review_note") @db.VarChar(1000)
   createdAt     DateTime  @default(now()) @map("created_at")
 
   @@map("edit_approvals")
@@ -637,8 +637,8 @@ model Location {
   name       String   @unique
   category   String   @default("")
   province   String   @default("")
-  address    String   @default("") @db.Text
-  notes      String   @default("") @db.Text
+  address    String   @default("") @db.VarChar(1000)
+  notes      String   @default("") @db.VarChar(1000)
   active     Boolean  @default(true)
   isCustomer Boolean  @default(false) @map("is_customer")
   credit     Int      @default(30)
@@ -661,7 +661,7 @@ model AccountingPeriod {
   reopenedAt   DateTime? @map("reopened_at")
   reopenedBy   String?   @map("reopened_by") @db.VarChar(36)
   reopenReason String?   @map("reopen_reason") @db.Text
-  notes        String    @default("") @db.Text
+  notes        String    @default("") @db.VarChar(1000)
   createdAt    DateTime  @default(now()) @map("created_at")
 
   @@unique([year, month])
@@ -707,7 +707,7 @@ model CompanySetting {
   taxId     String   @default("") @map("tax_id")
   phone     String   @default("")
   email     String   @default("")
-  address   String   @default("") @db.Text
+  address   String   @default("") @db.VarChar(1000)
   updatedAt DateTime @updatedAt @map("updated_at")
   updatedBy String?  @map("updated_by") @db.VarChar(36)
 
@@ -743,7 +743,7 @@ model BillingNote {
   status           String   @default("issued")
   issuedAt         DateTime @default(now()) @map("issued_at")
   paidAt           String?  @map("paid_at")
-  notes            String   @default("") @db.Text
+  notes            String   @default("") @db.VarChar(1000)
   createdAt        DateTime @default(now()) @map("created_at")
   legIds           Json     @map("leg_ids") @db.Json
   billToLocationId String?  @map("bill_to_location_id") @db.VarChar(36)
