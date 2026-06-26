@@ -41,7 +41,7 @@ export class AclService {
     const overrides = await prisma.rolePermission.findMany({ where: { userId } })
     const map = new Map<string, any>()
     defaults.forEach(p => map.set(`${p.category}:${p.actionLevel}`, p))
-    overrides.forEach(p => map.set(`${p.category}:${p.actionLevel}`, { ...p, source: 'custom' }))
+    overrides.forEach((p: any) => map.set(`${p.category}:${p.actionLevel}`, { ...p, source: 'custom' }))
     return Array.from(map.values())
   }
 
