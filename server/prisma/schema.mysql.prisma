@@ -739,7 +739,7 @@ model BillingNote {
   gross            Decimal  @default(0) @db.Decimal(18, 2)
   whtAmount        Decimal  @default(0) @map("wht_amount") @db.Decimal(18, 2)
   net              Decimal  @default(0) @db.Decimal(18, 2)
-  dispatchIds      Json     @map("dispatch_ids") @db.Json
+  dispatchIds      Json?    @map("dispatch_ids") @db.Json
   status           String   @default("issued")
   issuedAt         DateTime @default(now()) @map("issued_at")
   paidAt           String?  @map("paid_at")
