@@ -17,10 +17,12 @@ function assertAdmin(req: AuthRequest) {
 }
 
 // Resolve a Prisma delegate for an operational table by its snake_case name.
-function del(table: string): any {
+// Pass the transaction client (tx) when inside $transaction so the work runs
+// in that transaction rather than on the global connection.
+function del(table: string, client: any = prisma): any {
   const cfg = getTableConfig(table)
   if (!cfg) { const e: any = new Error(`Unknown table ${table}`); e.status = 500; throw e }
-  return (prisma as any)[cfg.delegate]
+  return client[cfg.delegate]
 }
 
 // email_for_username — resolve a login email from a username (used by the
@@ -65,10 +67,10 @@ router.post('/admin_reset_data', async (req: AuthRequest, res, next) => {
     assertAdmin(req)
     const { p_expenses, p_trips, p_fuel, p_tires, p_stock, p_masters } = req.body
     const result = { expenses: 0, trips: 0, fuel: 0, tires: 0, stock: 0, masters: 0 }
-    const count = (t: string) => del(t).count()
-    const wipe = (t: string) => del(t).deleteMany({})
 
-    await prisma.$transaction(async () => {
+    await prisma.$transaction(async (tx) => {
+      const count = (t: string) => del(t, tx).count()
+      const wipe = (t: string) => del(t, tx).deleteMany({})
       if (p_masters) {
         result.masters = (await count('employees')) + (await count('vehicles')) + (await count('customers'))
                        + (await count('partners')) + (await count('subcontractors')) + (await count('sub_drivers'))
@@ -107,10 +109,10 @@ router.post('/admin_reset_data', async (req: AuthRequest, res, next) => {
       }
 
       const detail = Object.entries(result).filter(([, v]) => v > 0).map(([k, v]) => `${k}:${v}`).join(', ')
-      await prisma.dataResetLog.create({
+      await tx.dataResetLog.create({
         data: { resetBy: req.user!.userId, details: detail, status: 'COMPLETED', completedAt: new Date() },
       })
-    })
+    }, { timeout: 60000 })
 
     // Notify clients of the affected tables.
     for (const t of ['dispatch', 'expenses', 'fuel_records', 'tires', 'stock_items', 'vehicles', 'employees']) emitChange(t)
@@ -138,11 +140,11 @@ router.post('/complete_renewal', async (req: AuthRequest, res, next) => {
       if (p_next_maintenance) vehiclePatch.nextService = p_next_maintenance
     }
 
-    await prisma.$transaction(async () => {
+    await prisma.$transaction(async (tx) => {
       if (Object.keys(vehiclePatch).length && p_vehicle_id) {
-        await del('vehicles').update({ where: { id: p_vehicle_id }, data: vehiclePatch })
+        await del('vehicles', tx).update({ where: { id: p_vehicle_id }, data: vehiclePatch })
       }
-      await del('task_completions').create({
+      await del('task_completions', tx).create({
         data: {
           alertKind: p_kind,
           vehicleId: p_vehicle_id || null,

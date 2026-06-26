@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { ACTIVE_BACKEND } from '../../lib/backends'
+import { api } from '../../lib/backends/mysql/api'
+import { callRpc, listAll } from '../../lib/crud'
 import { useAuth } from '../../context/AuthContext'
 import { Icon } from '../../components/ui'
 
@@ -39,6 +42,14 @@ export function ResetDataPage({ setActive }: { setActive: (id: string) => void }
   const [done, setDone]         = useState<{ expenses: number; trips: number; fuel: number; tires: number; stock: number; masters: number } | null>(null)
 
   useEffect(() => {
+    if (ACTIVE_BACKEND === 'mysql') {
+      api<Array<{ id: string; details?: string; status: string; createdAt: string }>>('/api/reset/history')
+        .then(rows => setHistory(rows.slice(0, 10).map(r => ({
+          id: r.id, details: r.details, status: r.status, created_at: r.createdAt,
+        }))))
+        .catch(() => setHistory([]))
+      return
+    }
     supabase.from('data_reset_log').select('*').order('created_at', { ascending: false }).limit(10)
       .then(({ data }) => setHistory((data || []) as ResetEntry[]))
   }, [done])
@@ -63,12 +74,22 @@ export function ResetDataPage({ setActive }: { setActive: (id: string) => void }
       }
       let total = 0
       for (const table of BACKUP_TABLES) {
-        const { data, error } = await supabase.from(table).select('*')
-        if (error) {
-          result[table] = { _error: error.message }
+        if (ACTIVE_BACKEND === 'mysql') {
+          try {
+            const rows = await listAll<Record<string, unknown>>(table)
+            result[table] = rows
+            total += rows.length
+          } catch (err) {
+            result[table] = { _error: err instanceof Error ? err.message : String(err) }
+          }
         } else {
-          result[table] = data ?? []
-          total += (data ?? []).length
+          const { data, error } = await supabase.from(table).select('*')
+          if (error) {
+            result[table] = { _error: error.message }
+          } else {
+            result[table] = data ?? []
+            total += (data ?? []).length
+          }
         }
       }
       (result._meta as Record<string, unknown>).total_rows = total
@@ -96,7 +117,7 @@ export function ResetDataPage({ setActive }: { setActive: (id: string) => void }
     if (confirm !== CONFIRM_WORD) return
     setLoading(true)
     try {
-      const { data, error } = await supabase.rpc('admin_reset_data', {
+      const data = await callRpc('admin_reset_data', {
         p_expenses: opts.expenses,
         p_trips:    opts.trips,
         p_fuel:     opts.fuel,
@@ -104,7 +125,6 @@ export function ResetDataPage({ setActive }: { setActive: (id: string) => void }
         p_stock:    opts.stock,
         p_masters:  opts.masters,
       })
-      if (error) throw new Error(error.message)
       const result = (data ?? { expenses: 0, trips: 0, fuel: 0, tires: 0, stock: 0, masters: 0 }) as {
         expenses: number; trips: number; fuel: number; tires: number; stock: number; masters: number
       }
@@ -127,9 +147,16 @@ export function ResetDataPage({ setActive }: { setActive: (id: string) => void }
       setOpts({ expenses: false, trips: false, fuel: false, tires: false, stock: false, masters: false, all: false })
     } catch (e) {
       const msg = (e as Error).message
-      await supabase.from('data_reset_log').insert({
-        reset_by: profile!.id, details: `error: ${msg}`, status: 'FAILED',
-      })
+      // The failed-reset log row has no REST equivalent in mysql mode (the
+      // reset route only logs successful resets), so skip the manual insert
+      // there and just surface the error.
+      if (ACTIVE_BACKEND === 'mysql') {
+        console.error('[admin_reset_data] failed:', msg)
+      } else {
+        await supabase.from('data_reset_log').insert({
+          reset_by: profile!.id, details: `error: ${msg}`, status: 'FAILED',
+        })
+      }
       alert('เกิดข้อผิดพลาด: ' + msg)
     } finally {
       setLoading(false)

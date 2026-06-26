@@ -97,6 +97,16 @@ export class AuthService {
     return { message: 'เปลี่ยน password สำเร็จ' }
   }
 
+  // Set a new password for the already-authenticated user (no old password
+  // required) — the REST equivalent of Supabase's updateUser({ password }),
+  // which likewise relies on the active session rather than the old password.
+  async setPassword(userId: string, newPassword: string) {
+    if (!newPassword || newPassword.length < 6) throw new Error('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร')
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+    await prisma.user.update({ where: { id: userId }, data: { passwordHash } })
+    return { message: 'เปลี่ยน password สำเร็จ' }
+  }
+
   verifyToken(token: string): { userId: string; role: string } {
     return jwt.verify(token, JWT_SECRET) as { userId: string; role: string }
   }

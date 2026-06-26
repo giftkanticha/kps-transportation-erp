@@ -1,8 +1,11 @@
 import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useList, useUpdate } from '../../hooks/useTable'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
+import { ACTIVE_BACKEND } from '../../lib/backends'
+import { api } from '../../lib/backends/mysql/api'
+import { callRpc } from '../../lib/crud'
 import { Icon } from '../../components/ui'
 
 interface Profile {
@@ -63,15 +66,45 @@ const rolePillStyle = (role: string, disabled: boolean) => {
 
 export function SettingsUsers() {
   const { profile, isAdmin } = useAuth()
-  const { data: users = [], isLoading } = useList<Profile>('user_profiles')
+  // Supabase mode reads `user_profiles`; mysql mode reads the ACL REST endpoint
+  // (users live in the `User` table). Both resolve to the camelCase `Profile`
+  // shape and share the `['user_profiles', ...]` query-key prefix so the
+  // existing invalidations keep working.
+  const supabaseList = useList<Profile>('user_profiles')
+  const mysqlList = useQuery({
+    queryKey: ['user_profiles', 'acl-list'],
+    queryFn: () => api<Profile[]>('/api/acl/users'),
+    enabled: ACTIVE_BACKEND === 'mysql',
+  })
+  const { data: users = [], isLoading } =
+    ACTIVE_BACKEND === 'mysql' ? mysqlList : supabaseList
   const updateProfile = useUpdate<Profile>('user_profiles')
   const qc = useQueryClient()
   const [busy, setBusy] = useState<string | null>(null)
   const [editing, setEditing] = useState<Profile | null>(null)
 
+  // Translate a `user_profiles` patch into the matching ACL REST action(s).
+  const applyAclPatch = async (id: string, patch: Partial<Profile>) => {
+    if ('role' in patch && patch.role) {
+      await api(`/api/acl/users/${id}/role`, { method: 'POST', body: { role: patch.role } })
+    }
+    if ('status' in patch && patch.status) {
+      const ep = patch.status === 'ACTIVE' ? 'activate'
+        : patch.status === 'INACTIVE' ? 'deactivate' : null
+      if (ep) await api(`/api/acl/users/${id}/${ep}`, { method: 'POST' })
+    }
+  }
+
   const act = async (id: string, patch: Partial<Profile>) => {
     setBusy(id)
-    try { await updateProfile.mutateAsync({ id, patch }) }
+    try {
+      if (ACTIVE_BACKEND === 'mysql') {
+        await applyAclPatch(id, patch)
+        qc.invalidateQueries({ queryKey: ['user_profiles'] })
+      } else {
+        await updateProfile.mutateAsync({ id, patch })
+      }
+    }
     catch (e) { alert(e instanceof Error ? e.message : 'ดำเนินการไม่สำเร็จ') }
     finally { setBusy(null) }
   }
@@ -80,8 +113,7 @@ export function SettingsUsers() {
     if (!confirm(`ลบผู้ใช้ "${name}" ออกจากระบบถาวร?\n(บัญชีและข้อมูลโปรไฟล์ทั้งหมดจะถูกลบ — กู้คืนไม่ได้)`)) return
     setBusy(id)
     try {
-      const { error } = await supabase.rpc('admin_delete_user', { p_user_id: id })
-      if (error) throw new Error(error.message)
+      await callRpc('admin_delete_user', { p_user_id: id })
       // Refresh the user list now that the row is gone.
       qc.invalidateQueries({ queryKey: ['user_profiles'] })
     } catch (e) {
@@ -94,6 +126,10 @@ export function SettingsUsers() {
   const sendReset = async (id: string, email: string | null, name: string) => {
     if (!email) { alert('ผู้ใช้นี้ไม่มีอีเมลในระบบ ส่งลิงก์รีเซตไม่ได้'); return }
     if (!confirm(`ส่งลิงก์รีเซตรหัสผ่านให้ ${name} (${email})?`)) return
+    if (ACTIVE_BACKEND === 'mysql') {
+      alert('ระบบนี้ยังไม่รองรับการส่งลิงก์รีเซตรหัสผ่านทางอีเมล — ให้ผู้ดูแลตั้งรหัสผ่านใหม่ให้แทน')
+      return
+    }
     setBusy(id)
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -286,27 +322,36 @@ function EditProfileModal({ user, isSelf, onClose }: {
 
     setBusy(true)
     try {
-      // Email lives on auth.users — must go through the admin RPC.
+      // Email lives on auth.users (supabase) / the User table (mysql) — must go
+      // through the admin RPC, which is backend-aware via callRpc.
       if (emailChanged) {
-        const { error } = await supabase.rpc('admin_set_user_email', {
+        await callRpc('admin_set_user_email', {
           p_user_id: user.id,
           p_email:   e,
         })
-        if (error) throw new Error(error.message)
       }
       // Profile fields: always save the current form values (cheap; rows are
       // pre-filled with the existing values so no real damage if unchanged).
-      await updateProfile.mutateAsync({
-        id: user.id,
-        patch: {
-          displayName: dn,
-          username: u || null,
-          phone: ph,
-        } as Partial<Profile>,
-      })
+      // mysql mode has no profile-field update endpoint (displayName/username/
+      // phone live on the User table with no REST mutation), so it is skipped
+      // there — only email + self-password changes are supported.
+      if (ACTIVE_BACKEND !== 'mysql') {
+        await updateProfile.mutateAsync({
+          id: user.id,
+          patch: {
+            displayName: dn,
+            username: u || null,
+            phone: ph,
+          } as Partial<Profile>,
+        })
+      }
       if (pwChanged) {
-        const { error } = await supabase.auth.updateUser({ password: pw })
-        if (error) throw new Error(error.message)
+        if (ACTIVE_BACKEND === 'mysql') {
+          await api('/api/auth/set-password', { method: 'POST', body: { newPassword: pw } })
+        } else {
+          const { error } = await supabase.auth.updateUser({ password: pw })
+          if (error) throw new Error(error.message)
+        }
       }
       onClose()
     } catch (e) {

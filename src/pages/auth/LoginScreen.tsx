@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
-import { supabase } from '../../lib/supabase'
+import { signOutEverywhere } from '../../lib/authActions'
 import { Icon } from '../../components/ui'
 import { RegisterPage } from './RegisterPage'
 import {
@@ -28,7 +28,7 @@ export function LoginScreen() {
   }
 
   const clearSession = async () => {
-    try { await supabase.auth.signOut() } catch { /* ignore */ }
+    await signOutEverywhere()
     try { localStorage.clear() } catch { /* ignore */ }
     window.location.reload()
   }

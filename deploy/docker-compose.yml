@@ -1,0 +1,43 @@
+# Self-hosted KPS ERP stack: MySQL + API (which also serves the frontend).
+# Run from this folder:  docker compose up -d --build
+# Then open  http://<server-ip>:3001  from any machine on the LAN.
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpass}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-kps_erp}
+      MYSQL_USER: ${MYSQL_USER:-kps}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-kpspass}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-rootpass}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # Expose only if you need direct DB access from the host; not required.
+    # ports: ["3306:3306"]
+
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        # Same-origin: the API serves the frontend, so leave this empty.
+        VITE_API_URL: ""
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "mysql://${MYSQL_USER:-kps}:${MYSQL_PASSWORD:-kpspass}@mysql:3306/${MYSQL_DATABASE:-kps_erp}"
+      JWT_SECRET: ${JWT_SECRET:-change-this-access-secret}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:-change-this-refresh-secret}
+      PORT: "3001"
+    ports:
+      - "${APP_PORT:-3001}:3001"
+
+volumes:
+  mysql_data:

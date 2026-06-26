@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { changeOwnPassword } from '../../lib/authActions'
 
 interface Props {
   onClose: () => void
@@ -18,8 +18,7 @@ export function ChangePasswordModal({ onClose }: Props) {
     if (pw !== pw2) return setErr('รหัสผ่านยืนยันไม่ตรงกัน')
     setBusy(true)
     try {
-      const { error } = await supabase.auth.updateUser({ password: pw })
-      if (error) throw new Error(error.message)
+      await changeOwnPassword(pw)
       setDone(true)
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'เปลี่ยนรหัสผ่านไม่สำเร็จ')

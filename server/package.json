@@ -11,7 +11,8 @@
     "db:studio": "prisma studio",
     "db:generate:mysql": "prisma generate --schema prisma/schema.mysql.prisma",
     "db:push:mysql": "prisma db push --schema prisma/schema.mysql.prisma",
-    "db:seed:mysql": "tsx src/seed.ts"
+    "db:seed:mysql": "tsx src/seed.ts",
+    "migrate:supabase": "tsx src/migrate-from-supabase.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",

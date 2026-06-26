@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { ACTIVE_BACKEND } from '../../lib/backends'
+import { api } from '../../lib/backends/mysql/api'
+import { loadAclUsers } from '../../lib/aclUsers'
 import { Icon } from '../../components/ui'
 
 interface ResetEntry {
@@ -19,6 +22,22 @@ export function ResetHistoryPage({ setActive }: { setActive: (id: string) => voi
 
   useEffect(() => {
     (async () => {
+      if (ACTIVE_BACKEND === 'mysql') {
+        const data = await api<Array<{ id: string; resetBy: string | null; details: string | null; status: string; createdAt: string }>>('/api/reset/history')
+        const list: ResetEntry[] = (data ?? []).map(r => ({
+          id: r.id, reset_by: r.resetBy, details: r.details, status: r.status, created_at: r.createdAt,
+        }))
+        setRows(list)
+        const ids = new Set(list.map(r => r.reset_by).filter((x): x is string => !!x))
+        if (ids.size) {
+          const users = await loadAclUsers()
+          const map: ActorMap = {}
+          for (const u of users) if (ids.has(u.id)) map[u.id] = u.display_name ?? '—'
+          setActors(map)
+        }
+        setLoading(false)
+        return
+      }
       const { data } = await supabase
         .from('data_reset_log')
         .select('*')

@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase, type UserProfile, type UserRole } from '../../lib/supabase'
+import { ACTIVE_BACKEND } from '../../lib/backends'
+import { api } from '../../lib/backends/mysql/api'
+import { loadAclUsers } from '../../lib/aclUsers'
 import { useAuth } from '../../context/AuthContext'
 import { Icon } from '../../components/ui'
 
@@ -37,25 +40,41 @@ export function UserManagementPage() {
   const showToast = (m: string) => { setToast(m); setTimeout(() => setToast(''), 3000) }
 
   const log = async (action: string, targetId: string, details?: string) => {
+    // In mysql mode, every ACL action logs its own audit entry server-side, so
+    // there is no client-side audit write to perform.
+    if (ACTIVE_BACKEND === 'mysql') return
     const { error } = await supabase.from('acl_audit_log').insert({ actor_id: myProfile?.id, target_id: targetId, action, details })
     if (error) console.warn('[acl_audit_log] write failed:', error.message)
   }
 
   const load = useCallback(async () => {
     setLoading(true)
-    const { data } = await supabase.from('user_profiles').select('*').order('created_at', { ascending: false })
-    const all = (data || []) as UserProfile[]
+    const all = (await loadAclUsers()) as unknown as UserProfile[]
     setUsers(all)
     setPending(all.filter(u => u.status === 'PENDING_APPROVAL'))
     setLoading(false)
   }, [])
 
   const loadAudit = useCallback(async () => {
+    if (ACTIVE_BACKEND === 'mysql') {
+      const result = await api<{ logs: Array<{ id: string; action: string; category?: string; details?: string; createdAt: string; userId?: string }> }>('/api/acl/audit-log')
+      setAudit(result.logs.map(l => ({
+        id: l.id, action: l.action, category: l.category,
+        details: l.details, created_at: l.createdAt, actor_id: l.userId,
+      })))
+      return
+    }
     const { data } = await supabase.from('acl_audit_log').select('*').order('created_at', { ascending: false }).limit(100)
     setAudit((data || []) as AuditRow[])
   }, [])
 
   const loadPerms = useCallback(async (userId: string) => {
+    if (ACTIVE_BACKEND === 'mysql') {
+      const data = await api<Array<{ category: string; actionLevel: string }>>(`/api/acl/users/${userId}/permissions`)
+      // The page reads perms via `p.action_level`; map camelCase → snake_case.
+      setPerms((data || []).map(p => ({ category: p.category, action_level: p.actionLevel })))
+      return
+    }
     const { data } = await supabase.from('user_permissions').select('*').eq('user_id', userId)
     setPerms(data || [])
   }, [])
@@ -70,7 +89,11 @@ export function UserManagementPage() {
 
   const approve = async (u: UserProfile) => {
     try {
-      await update(u.id, { status: 'ACTIVE', approved_by: myProfile?.id, approved_at: new Date().toISOString() })
+      if (ACTIVE_BACKEND === 'mysql') {
+        await api(`/api/acl/users/${u.id}/approve`, { method: 'POST' })
+      } else {
+        await update(u.id, { status: 'ACTIVE', approved_by: myProfile?.id, approved_at: new Date().toISOString() })
+      }
       await log('USER_APPROVED', u.id)
       showToast('✅ อนุมัติสำเร็จ'); load()
     } catch (e) { showToast('❌ ' + (e as Error).message) }
@@ -79,7 +102,11 @@ export function UserManagementPage() {
   const reject = async (u: UserProfile) => {
     if (!confirm('ปฏิเสธ? บัญชีจะถูกปิด')) return
     try {
-      await update(u.id, { status: 'INACTIVE' })
+      if (ACTIVE_BACKEND === 'mysql') {
+        await api(`/api/acl/users/${u.id}/reject`, { method: 'POST', body: { reason: '' } })
+      } else {
+        await update(u.id, { status: 'INACTIVE' })
+      }
       await log('USER_REJECTED', u.id)
       showToast('✅ ปฏิเสธแล้ว'); load()
     } catch (e) { showToast('❌ ' + (e as Error).message) }
@@ -88,7 +115,11 @@ export function UserManagementPage() {
   const toggleStatus = async (u: UserProfile) => {
     const next = u.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE'
     try {
-      await update(u.id, { status: next })
+      if (ACTIVE_BACKEND === 'mysql') {
+        await api(`/api/acl/users/${u.id}/${next === 'ACTIVE' ? 'activate' : 'deactivate'}`, { method: 'POST' })
+      } else {
+        await update(u.id, { status: next })
+      }
       await log(next === 'ACTIVE' ? 'USER_ACTIVATED' : 'USER_DEACTIVATED', u.id)
       showToast('✅ อัปเดตแล้ว')
       if (sel?.id === u.id) setSel({ ...sel, status: next })
@@ -98,7 +129,11 @@ export function UserManagementPage() {
 
   const changeRole = async (u: UserProfile, role: UserRole) => {
     try {
-      await update(u.id, { role })
+      if (ACTIVE_BACKEND === 'mysql') {
+        await api(`/api/acl/users/${u.id}/role`, { method: 'POST', body: { role } })
+      } else {
+        await update(u.id, { role })
+      }
       await log('ROLE_CHANGED', u.id, `${u.role} → ${role}`)
       showToast('✅ เปลี่ยน role แล้ว')
       if (sel?.id === u.id) setSel({ ...sel, role })
@@ -107,6 +142,16 @@ export function UserManagementPage() {
   }
 
   const togglePerm = async (userId: string, cat: string, level: string, has: boolean) => {
+    if (ACTIVE_BACKEND === 'mysql') {
+      if (has) {
+        await api(`/api/acl/users/${userId}/revoke`, { method: 'POST', body: { category: cat, actionLevel: level } })
+      } else {
+        await api(`/api/acl/users/${userId}/grant`, { method: 'POST', body: { category: cat, actionLevel: level, remark: '' } })
+      }
+      // grant/revoke log their own audit entry server-side.
+      loadPerms(userId)
+      return
+    }
     if (has) {
       await supabase.from('user_permissions').delete().eq('user_id', userId).eq('category', cat).eq('action_level', level)
       await log('PERMISSION_REVOKED', userId, `${cat}:${level}`)

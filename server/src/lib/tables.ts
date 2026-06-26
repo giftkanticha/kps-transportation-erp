@@ -61,6 +61,11 @@ export function getTableConfig(table: string): TableConfig | null {
   return registry.get(table) ?? null
 }
 
+// All whitelisted operational tables (used by the data migration script).
+export function listTables(): TableConfig[] {
+  return Array.from(registry.values())
+}
+
 // Convert a snake_case row coming from the client into Prisma input keyed by
 // field name, keeping only writable columns (mass-assignment guard). JSON
 // column values are passed through untouched (no nested key transform).
