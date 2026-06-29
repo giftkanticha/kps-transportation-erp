@@ -214,6 +214,7 @@ export function CustomerBilling() {
         gross, whtAmount, net,
         legIds: selectedLegs.map(b => b.leg.id!),
         status: docType === 'receipt' ? 'paid' : 'issued',
+        paidAt: docType === 'receipt' ? new Date().toISOString() : null,
         notes: '',
       })
       setSelected(new Set())
@@ -224,8 +225,12 @@ export function CustomerBilling() {
   }
 
   const markNotePaid = async (n: BillingNote) => {
-    if (!confirm(`บันทึกว่าได้รับเงินตาม ${docTypeLabel(n.docType)} ${n.code} แล้ว?`)) return
-    await updateNote.mutateAsync({ id: n.id, patch: { status: 'paid', paidAt: new Date().toISOString() } })
+    const today = new Date().toISOString().slice(0, 10)
+    const input = prompt(`บันทึกรับเงินตาม ${docTypeLabel(n.docType)} ${n.code}\nระบุวันที่ได้รับเงินจริง (ปปปป-ดด-วว) เพื่อเช็คกับ bank statement:`, today)
+    if (input == null) return
+    const date = input.trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(new Date(date).getTime())) { alert('รูปแบบวันที่ไม่ถูกต้อง (ตัวอย่าง 2026-06-29)'); return }
+    await updateNote.mutateAsync({ id: n.id, patch: { status: 'paid', paidAt: new Date(`${date}T00:00:00`).toISOString() } })
   }
   const voidNote = async (n: BillingNote) => {
     if (!confirm(`ยกเลิก ${docTypeLabel(n.docType)} ${n.code}? ขาในบิลจะกลับมาเลือกวางบิลใหม่ได้`)) return
@@ -525,7 +530,7 @@ export function CustomerBilling() {
               </div>
               <div className="tbl-wrap" style={{ border: 'none' }}>
                 <table className="tbl">
-                  <thead><tr><th>เลขที่</th><th>ประเภท</th><th className="num right">ยอดสุทธิ</th><th>สถานะ</th><th></th></tr></thead>
+                  <thead><tr><th>เลขที่</th><th>ประเภท</th><th className="num right">ยอดสุทธิ</th><th>สถานะ</th><th>วันที่รับเงิน</th><th></th></tr></thead>
                   <tbody>
                     {customerNotes.map(n => (
                       <tr key={n.id} style={{ opacity: n.status === 'void' ? 0.5 : 1 }}>
@@ -533,6 +538,7 @@ export function CustomerBilling() {
                         <td>{docTypeLabel(n.docType)}</td>
                         <td className="num right">{db.thb2(n.net)}</td>
                         <td><span className={`badge ${n.status === 'paid' ? 'green' : n.status === 'void' ? 'red' : 'amber'}`} style={{ fontSize: 11 }}>{n.status === 'paid' ? 'รับเงินแล้ว' : n.status === 'void' ? 'ยกเลิก' : 'รอชำระ'}</span></td>
+                        <td className={n.status === 'paid' && n.paidAt ? 'mono' : 'muted'} style={{ fontSize: 12.5 }}>{n.status === 'paid' && n.paidAt ? db.thaiDate(n.paidAt) : '—'}</td>
                         <td>
                           <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
                             <button className="btn ghost sm" onClick={() => setPrintNote(n)}><Icon name="download" size={13} /> พิมพ์</button>
