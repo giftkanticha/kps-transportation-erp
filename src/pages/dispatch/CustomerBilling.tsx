@@ -4,7 +4,7 @@ import { db } from '../../lib/db'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { Icon, Field } from '../../components/ui'
-import type { CompanyBankAccount, BillingNote, Dispatch, DispatchLeg, Location } from '../../types'
+import type { CompanyBankAccount, BillingNote, Dispatch, DispatchLeg, Location, Vehicle } from '../../types'
 
 const docTypeLabel = (t: BillingNote['docType']) => (t === 'receipt' ? 'ใบเสร็จรับเงิน' : 'ใบวางบิล')
 
@@ -33,6 +33,7 @@ export function CustomerBilling() {
   const [printFont, setPrintFont] = useState(9)  // ขนาดตัวอักษรใบพิมพ์ (pt)
 
   const { data: locations = [] } = useList<Location>('locations')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: dispatches = [] } = useDispatches()
   const { data: bankAccounts = [] } = useList<CompanyBankAccount>('company_bank_accounts')
   const { data: notes = [] } = useList<BillingNote>('billing_notes')
@@ -47,6 +48,9 @@ export function CustomerBilling() {
     [locations],
   )
   const locById = useMemo(() => new Map(locations.map(l => [l.id, l])), [locations])
+  const vehicleById = useMemo(() => new Map(vehicles.map(v => [v.id, v])), [vehicles])
+  // ทะเบียนรถของรอบนั้น (— ถ้ายังไม่ผูกรถ)
+  const plateOf = (d: Dispatch) => (d.vehicleId ? vehicleById.get(d.vehicleId)?.plate ?? '—' : '—')
   const custByName = useMemo(() => {
     const m = new Map<string, Location>()
     for (const l of customerLocs) m.set(l.name, l)
@@ -210,6 +214,7 @@ export function CustomerBilling() {
         gross, whtAmount, net,
         legIds: selectedLegs.map(b => b.leg.id!),
         status: docType === 'receipt' ? 'paid' : 'issued',
+        paidAt: docType === 'receipt' ? new Date().toISOString() : null,
         notes: '',
       })
       setSelected(new Set())
@@ -220,8 +225,12 @@ export function CustomerBilling() {
   }
 
   const markNotePaid = async (n: BillingNote) => {
-    if (!confirm(`บันทึกว่าได้รับเงินตาม ${docTypeLabel(n.docType)} ${n.code} แล้ว?`)) return
-    await updateNote.mutateAsync({ id: n.id, patch: { status: 'paid', paidAt: new Date().toISOString() } })
+    const today = new Date().toISOString().slice(0, 10)
+    const input = prompt(`บันทึกรับเงินตาม ${docTypeLabel(n.docType)} ${n.code}\nระบุวันที่ได้รับเงินจริง (ปปปป-ดด-วว) เพื่อเช็คกับ bank statement:`, today)
+    if (input == null) return
+    const date = input.trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(new Date(date).getTime())) { alert('รูปแบบวันที่ไม่ถูกต้อง (ตัวอย่าง 2026-06-29)'); return }
+    await updateNote.mutateAsync({ id: n.id, patch: { status: 'paid', paidAt: new Date(`${date}T00:00:00`).toISOString() } })
   }
   const voidNote = async (n: BillingNote) => {
     if (!confirm(`ยกเลิก ${docTypeLabel(n.docType)} ${n.code}? ขาในบิลจะกลับมาเลือกวางบิลใหม่ได้`)) return
@@ -426,7 +435,7 @@ export function CustomerBilling() {
                   <thead>
                     <tr>
                       <th style={{ width: 36 }}><input type="checkbox" checked={selected.size === eligible.length && eligible.length > 0} onChange={toggleAll} style={{ accentColor: 'var(--primary)' }} /></th>
-                      <th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th>
+                      <th>รหัสรอบ</th><th>ทะเบียน</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th>
                       <th className="num right">ยอดเต็ม</th><th className="num right">หัก 1%</th><th className="num right">สุทธิ</th>
                       <th>แก้ผู้รับบิล</th>
                     </tr>
@@ -436,6 +445,7 @@ export function CustomerBilling() {
                       <tr key={b.leg.id} onClick={() => toggle(b.leg.id!)} style={{ cursor: 'pointer', background: selected.has(b.leg.id!) ? 'var(--primary-50)' : undefined }}>
                         <td><input type="checkbox" checked={selected.has(b.leg.id!)} onChange={() => toggle(b.leg.id!)} onClick={e => e.stopPropagation()} style={{ accentColor: 'var(--primary)' }} /></td>
                         <td className="mono">{b.round.code}</td>
+                        <td className="mono" style={{ fontSize: 12.5 }}>{plateOf(b.round)}</td>
                         <td>{db.thaiDate(b.round.date)}</td>
                         <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
                         <td style={{ fontSize: 12.5 }}>{b.leg.cargoType || '—'}</td>
@@ -520,7 +530,7 @@ export function CustomerBilling() {
               </div>
               <div className="tbl-wrap" style={{ border: 'none' }}>
                 <table className="tbl">
-                  <thead><tr><th>เลขที่</th><th>ประเภท</th><th className="num right">ยอดสุทธิ</th><th>สถานะ</th><th></th></tr></thead>
+                  <thead><tr><th>เลขที่</th><th>ประเภท</th><th className="num right">ยอดสุทธิ</th><th>สถานะ</th><th>วันที่รับเงิน</th><th></th></tr></thead>
                   <tbody>
                     {customerNotes.map(n => (
                       <tr key={n.id} style={{ opacity: n.status === 'void' ? 0.5 : 1 }}>
@@ -528,6 +538,7 @@ export function CustomerBilling() {
                         <td>{docTypeLabel(n.docType)}</td>
                         <td className="num right">{db.thb2(n.net)}</td>
                         <td><span className={`badge ${n.status === 'paid' ? 'green' : n.status === 'void' ? 'red' : 'amber'}`} style={{ fontSize: 11 }}>{n.status === 'paid' ? 'รับเงินแล้ว' : n.status === 'void' ? 'ยกเลิก' : 'รอชำระ'}</span></td>
+                        <td className={n.status === 'paid' && n.paidAt ? 'mono' : 'muted'} style={{ fontSize: 12.5 }}>{n.status === 'paid' && n.paidAt ? db.thaiDate(n.paidAt) : '—'}</td>
                         <td>
                           <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
                             <button className="btn ghost sm" onClick={() => setPrintNote(n)}><Icon name="download" size={13} /> พิมพ์</button>
