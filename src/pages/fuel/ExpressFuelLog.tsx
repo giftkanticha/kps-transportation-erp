@@ -132,8 +132,9 @@ async function persistRow(
   const total = totalOverride != null ? totalOverride : liters * pricePerL
   const txId = uid('ftx')
   const fuelRecId = uid('f')
-  // เลขไมล์ ณ ตอนเติม (ถ้ากรอก) — เก็บไว้ทั้ง tx และ rec เพื่อให้หน้าปิดงานนำไปแนะนำ
-  const odometer = row.odometer ? Number(row.odometer) : null
+  // เลขไมล์ ณ ตอนเติม (ถ้ากรอก) — เก็บไว้บน fuel_records (คอลัมน์ที่มีอยู่แล้ว);
+  // หน้าปิดงานจะนำไปแนะนำไมล์ปิดรอบ
+  const odometer = row.odometer ? Number(row.odometer) : 0
 
   await insertFuelTx.mutateAsync({
     id: txId,
@@ -150,7 +151,6 @@ async function persistRow(
     createdAt: new Date().toISOString(),
     reversedAt: null,
     reversalOf: null,
-    odometer,
   })
 
   await insertFuelRec.mutateAsync({
@@ -162,7 +162,7 @@ async function persistRow(
     liters,
     pricePerL,
     total,
-    odometer: odometer ?? 0,
+    odometer,
     date: row.date,
     type: 'diesel',
   })
@@ -350,18 +350,25 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     }
 
     if (updated.committed) {
-      const { txId, fuelRecId } = await persistRow(updated, vehicles, insertFuelTx, insertFuelRec, totalOverride)
-      updated.txId = txId
-      updated.fuelRecId = fuelRecId
-      if (updated.status === 'FLOATING') {
-        setToast({
-          message: `🟡 รถ ${row.plateTerm} — บันทึกแล้ว (น้ำมันลอย)`,
-          vehicleId: row.vehicleId,
-          date: row.date,
-          floatingTxId: txId,
-          plateTerm: row.plateTerm,
-        })
-        setTimeout(() => setToast(null), 8000)
+      try {
+        const { txId, fuelRecId } = await persistRow(updated, vehicles, insertFuelTx, insertFuelRec, totalOverride)
+        updated.txId = txId
+        updated.fuelRecId = fuelRecId
+        if (updated.status === 'FLOATING') {
+          setToast({
+            message: `🟡 รถ ${row.plateTerm} — บันทึกแล้ว (น้ำมันลอย)`,
+            vehicleId: row.vehicleId,
+            date: row.date,
+            floatingTxId: txId,
+            plateTerm: row.plateTerm,
+          })
+          setTimeout(() => setToast(null), 8000)
+        }
+      } catch (e) {
+        // อย่าให้ insert ล้มแบบเงียบ — โชว์สาเหตุที่แถวนั้น
+        const msg = e instanceof Error ? e.message : String(e)
+        patchRow(i, { status: 'ERROR', statusLabel: '❌ บันทึกไม่สำเร็จ', error: msg, committed: false })
+        return
       }
     }
 
@@ -419,7 +426,8 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
       const liters = parseFloat(editDraft.liters)
       const pricePerL = parseFloat(editDraft.pricePerL) || 35
       const total = liters * pricePerL
-      const odometer = editDraft.odometer.trim() !== '' ? Number(editDraft.odometer) : null
+      // เลขไมล์เก็บบน fuel_records เท่านั้น (คอลัมน์ที่มีอยู่แล้ว)
+      const odometer = editDraft.odometer.trim() !== '' ? Number(editDraft.odometer) : 0
 
       const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
 
@@ -436,7 +444,6 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
             source: editDraft.source,
             tripId: result.tripId,
             status: result.status as FuelTransaction['status'],
-            odometer,
           },
         })
       }
@@ -452,7 +459,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
             pricePerL,
             total,
             station: editDraft.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
-            odometer: odometer ?? 0,
+            odometer,
           },
         })
       }

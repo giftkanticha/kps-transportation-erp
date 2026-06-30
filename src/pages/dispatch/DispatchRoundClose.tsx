@@ -249,17 +249,29 @@ function CloseForm({
       .sort((a, b) => a.dayDelta - b.dayDelta)
   }, [allFuelTxs, round?.vehicleId, round?.date])
 
-  // แนะนำไมล์ปิดรอบจากเลขไมล์ที่คีย์ไว้ในรายการน้ำมัน (คีย์ด่วน) ของรถคันนี้ —
-  // เก็บแบบหลวม ๆ ตอนคีย์ แล้วมาเสนอให้กดใช้ตรงนี้ (ผู้ใช้แก้ได้)
-  // ลำดับ: (1) น้ำมันที่ผูกรอบนี้แล้วและมีเลขไมล์ (2) น้ำมันลอยของรถ เรียงตามวันใกล้รอบ
+  // แนะนำไมล์ปิดรอบจากเลขไมล์ที่คีย์ไว้ในรายการน้ำมัน (fuel_records) ของรถคันนี้ —
+  // เก็บแบบหลวม ๆ ตอนคีย์ด่วน แล้วมาเสนอให้กดใช้ตรงนี้ (ผู้ใช้แก้ได้). เลือกรายการที่
+  // มี odometer > 0 และวันที่ใกล้วันรอบที่สุด
   const suggestedMileage = useMemo<number | null>(() => {
-    const linked = linkedFuelTxs
-      .filter(t => (t.odometer ?? 0) > 0)
-      .sort((a, b) => (b.odometer ?? 0) - (a.odometer ?? 0))
-    if (linked.length > 0) return linked[0].odometer ?? null
-    const floating = floatingForVehicle.find(f => (f.tx.odometer ?? 0) > 0)
-    return floating ? (floating.tx.odometer ?? null) : null
-  }, [linkedFuelTxs, floatingForVehicle])
+    if (!round?.vehicleId) return null
+    const roundDateMs = round.date ? new Date(round.date).getTime() : 0
+    const cands = allFuelRecs
+      .filter(r => r.vehicleId === round.vehicleId && (r.odometer ?? 0) > 0)
+      .map(r => ({ r, delta: Math.abs(new Date(r.date).getTime() - roundDateMs) }))
+      .sort((a, b) => a.delta - b.delta)
+    return cands.length > 0 ? (cands[0].r.odometer ?? null) : null
+  }, [allFuelRecs, round?.vehicleId, round?.date])
+
+  // หา odometer ของ tx (น้ำมันลอย) แบบ best-effort จาก fuel_records ที่ตรงกัน
+  // (vehicleId + date + liters) — ใช้โชว์ป้ายเลขไมล์ในวิดเจ็ตน้ำมันลอย
+  const odoForTx = (t: FuelTransaction): number => {
+    const rec = allFuelRecs.find(r =>
+      r.vehicleId === t.vehicleId &&
+      r.date?.slice(0, 10) === t.date?.slice(0, 10) &&
+      Math.abs((r.liters || 0) - (t.liters || 0)) < 0.01,
+    )
+    return rec?.odometer ?? 0
+  }
 
   const attachFloating = async (txId: string) => {
     try {
@@ -1073,10 +1085,10 @@ function CloseForm({
                       <span style={{ marginLeft: 10, fontSize: 11 }}>
                         {t.source === 'FACTORY_TANK' ? '🏭 ถังโรงงาน' : '⛽ ปั๊มภายนอก'}
                       </span>
-                      {(t.odometer ?? 0) > 0 && (
+                      {odoForTx(t) > 0 && (
                         <>
                           <span className="muted" style={{ marginLeft: 10 }}>·</span>
-                          <span style={{ marginLeft: 10, fontSize: 11 }}>📍 ไมล์ {db.fmt(t.odometer as number)}</span>
+                          <span style={{ marginLeft: 10, fontSize: 11 }}>📍 ไมล์ {db.fmt(odoForTx(t))}</span>
                         </>
                       )}
                       {isNear && (
