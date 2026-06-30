@@ -10,7 +10,6 @@ import { priceForDate } from './FuelDailyPricesPage'
 
 type InsertFuelTx = ReturnType<typeof useInsert<FuelTransaction>>
 type InsertFuelRec = ReturnType<typeof useInsert<FuelRecord>>
-type UpdateDispatchFn = ReturnType<typeof useUpdate<DispatchJob>>
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -24,15 +23,12 @@ interface GridRow {
   vehicleId: string
   liters: string
   pricePerL: string
-  // เลขไมล์ปลายรอบ — กรอกเมื่อปิดรอบ (เติม+จดไมล์ที่โรงงานพร้อมกัน). ว่าง = แถวน้ำมันปกติ
+  // เลขไมล์ ณ ตอนเติม — เก็บไว้เฉย ๆ (ไม่ผูกปิดรอบ); หน้าปิดงานนำไป "แนะนำไมล์ปิดรอบ"
   odometer: string
   source: FuelSource
   status: RowStatus
   statusLabel: string
   tripId: string | null
-  // 'TRIP_CLOSING' เมื่อแถวนี้เป็นน้ำมันปิดรอบ (ผูกกับรอบ draft), ปกติ 'NORMAL'
-  tripFuelRole: 'NORMAL' | 'TRIP_CLOSING'
-  closingRoundId: string | null
   error: string
   committed: boolean
   txId: string
@@ -58,8 +54,6 @@ function makeRow(source: FuelSource = 'FACTORY_TANK'): GridRow {
     status: 'PENDING',
     statusLabel: '— รอคีย์',
     tripId: null,
-    tripFuelRole: 'NORMAL',
-    closingRoundId: null,
     error: '',
     committed: false,
     txId: '',
@@ -125,39 +119,11 @@ function autoRoute(
   return { status: 'FLOATING', statusLabel: '🟡 น้ำมันลอย — ยังไม่มีรอบงาน', tripId: null, error: '' }
 }
 
-// หา "รอบที่เปิดค้างรอปิด" ของรถคันนี้เพื่อผูกน้ำมันปิดรอบ + เลขไมล์ปลาย.
-// สัญญาณรอบเปิดค้างของระบบคือ roundStatus === 'draft' (เหมือนหน้าปิดงาน) — ไม่ใช่
-// status เพราะรอบ draft อาจยังเป็น 'scheduled' อยู่. รอบมักเปิดคนละวันกับวันปิด
-// (ทริปหลายวัน) จึงใช้ logic นี้แยกจาก autoRoute ที่ผูกแบบ same-date.
-function findOpenRoundForClosing(
-  vehicleId: string,
-  closingDate: string,
-  dispatches: DispatchJob[],
-): { round: DispatchJob | null; ambiguous: DispatchJob[] } {
-  const drafts = dispatches.filter(
-    d => d.vehicleId === vehicleId && d.roundStatus === 'draft' && d.locked !== true,
-  )
-  if (drafts.length === 0) return { round: null, ambiguous: [] }
-
-  // ทริปจะปิดในวันเดียวกันหรือหลังวันเปิด → เลือกรอบที่เปิด <= วันปิด เรียงใหม่→เก่า.
-  // ถ้าไม่มี (วันปิดถูก backdate ก่อนวันเปิด) ให้ fallback เป็น draft ล่าสุด.
-  const onOrBefore = drafts
-    .filter(d => (d.date?.slice(0, 10) ?? '') <= closingDate)
-    .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
-  const pool = onOrBefore.length > 0
-    ? onOrBefore
-    : [...drafts].sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''))
-
-  return { round: pool[0], ambiguous: pool.length > 1 ? pool : [] }
-}
-
 async function persistRow(
   row: GridRow,
   vehicles: Vehicle[],
   insertFuelTx: InsertFuelTx,
   insertFuelRec: InsertFuelRec,
-  updateDispatch: UpdateDispatchFn,
-  closingRound: DispatchJob | null,
   totalOverride?: number,
 ): Promise<{ txId: string; fuelRecId: string }> {
   const vehicle = vehicles.find(v => v.id === row.vehicleId)
@@ -166,8 +132,8 @@ async function persistRow(
   const total = totalOverride != null ? totalOverride : liters * pricePerL
   const txId = uid('ftx')
   const fuelRecId = uid('f')
-  const isClosing = row.tripFuelRole === 'TRIP_CLOSING'
-  const odometer = row.odometer ? Number(row.odometer) : 0
+  // เลขไมล์ ณ ตอนเติม (ถ้ากรอก) — เก็บไว้ทั้ง tx และ rec เพื่อให้หน้าปิดงานนำไปแนะนำ
+  const odometer = row.odometer ? Number(row.odometer) : null
 
   await insertFuelTx.mutateAsync({
     id: txId,
@@ -179,14 +145,12 @@ async function persistRow(
     source: row.source,
     tripId: row.tripId,
     status: row.status as 'INTERNAL_DEDUCTED' | 'TRIP_LINKED' | 'FLOATING',
-    // น้ำมันปิดรอบจากคีย์ด่วน → TRIP_CLOSING + entryMethod 'EXPRESS_GRID' (ตัวที่
-    // หน้าปิดงานใช้ตรวจ hasExternalClosing แล้วข้ามการสร้างซ้ำ)
-    tripFuelRole: row.tripFuelRole,
+    tripFuelRole: 'NORMAL',
     entryMethod: 'EXPRESS_GRID',
     createdAt: new Date().toISOString(),
     reversedAt: null,
     reversalOf: null,
-    ...(isClosing ? { note: `น้ำมันปิดรอบ (คีย์ด่วน) สำหรับรอบ ${closingRound?.code ?? ''}` } : {}),
+    odometer,
   })
 
   await insertFuelRec.mutateAsync({
@@ -198,26 +162,10 @@ async function persistRow(
     liters,
     pricePerL,
     total,
-    odometer,
+    odometer: odometer ?? 0,
     date: row.date,
     type: 'diesel',
-    // น้ำมันปิดรอบ: ให้ค่าใช้จ่ายตกเดือนของรอบ (วันเปิดรอบ) ไม่ใช่วันเติมจริงที่
-    // อาจข้ามเดือน — ตรงกับพฤติกรรมหน้าปิดงาน
-    ...(isClosing && closingRound?.date ? { accountingDate: closingRound.date } : {}),
   })
-
-  // ผูกเลขไมล์ปลาย + น้ำมันปิดรอบเข้ากับรอบ แต่ยังคงเป็น draft — ผู้ใช้ไปกรอก
-  // น้ำหนัก/เบี้ยเลี้ยง/เวลาถึงในหน้าปิดงานเพื่อปิดจริงทีหลัง
-  if (isClosing && closingRound) {
-    await updateDispatch.mutateAsync({
-      id: closingRound.id,
-      patch: {
-        endOdometer: odometer,
-        closingFuelLiters: liters,
-        closingFuelPrice: pricePerL,
-      },
-    })
-  }
 
   return { txId, fuelRecId }
 }
@@ -346,7 +294,6 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
   const insertFuelRec = useInsert<FuelRecord>('fuel_records')
   const updateFuelRec = useUpdate<FuelRecord>('fuel_records')
   const deleteFuelRec = useDelete('fuel_records')
-  const updateDispatch = useUpdate<DispatchJob>('dispatch')
   const balance = useMemo(() => getFactoryBalance(fuelStock, fuelRecords), [fuelStock, fuelRecords])
   const floatingCount = allFuelTxs.filter(t => t.status === 'FLOATING').length
 
@@ -358,27 +305,18 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     patchRow(i, { plateTerm: val, vehicleId: found?.id ?? '' })
   }
 
-  // ปุ่มสลับแหล่งน้ำมันแบบรวม — apply กับแถวที่ยังไม่บันทึก/ไม่ยกเลิก และ "ไม่ใช่แถว
-  // ปิดรอบ" (แถวปิดรอบล็อกเป็นคลังโรงงานเสมอ). ราคา sync เหมือน select รายแถว.
+  // ปุ่มสลับแหล่งน้ำมันแบบรวม — apply กับแถวที่ยังไม่บันทึก/ไม่ยกเลิก. ราคา sync
+  // เหมือน select รายแถว.
   const applyGlobalSource = (s: FuelSource) => {
     setGlobalSource(s)
     setRows(prev => prev.map(r => {
-      if (r.committed || r.reversed || r.odometer.trim() !== '') return r
+      if (r.committed || r.reversed) return r
       if (s === 'FACTORY_TANK') {
         const auto = priceForDate(dailyPrices, 'FACTORY_TANK', r.date)
         return auto != null ? { ...r, source: s, pricePerL: String(auto) } : { ...r, source: s }
       }
       return { ...r, source: s, pricePerL: '' }
     }))
-  }
-
-  // ป้ายบอกใบ้ใต้ช่องเลขไมล์: รอบ draft ที่จะถูกผูกเมื่อบันทึก (หรือเตือนถ้าไม่พบ)
-  const closingHint = (r: GridRow) => {
-    if (!r.vehicleId || r.odometer.trim() === '') return null
-    const { round } = findOpenRoundForClosing(r.vehicleId, r.date, dispatches)
-    return round
-      ? <div style={{ fontSize: 10, color: '#1D4ED8', marginTop: 2 }}>🔵 ปิดรอบ {round.code}</div>
-      : <div style={{ fontSize: 10, color: '#DC2626', marginTop: 2 }}>ไม่พบรอบเปิดค้าง</div>
   }
 
   const commitAndAdvance = async (i: number) => {
@@ -393,78 +331,26 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     }
 
     const liters = parseFloat(row.liters)
-    let updated: GridRow
+    // เลขไมล์ที่กรอกถูกเก็บไว้เฉย ๆ (ไม่ผูกปิดรอบ) — ทุกแถวเดินผ่าน autoRoute ปกติ
+    const result = autoRoute(row.vehicleId, row.date, row.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
+    const updated: GridRow = { ...row, ...result, committed: result.status !== 'ERROR' }
+
+    // External-pump receipts are usually paid as a whole baht — the
+    // liters×price often lands on a .xx fraction (e.g. 1,999.55). Offer to
+    // round up to the next baht so the AP figure matches the receipt.
     let totalOverride: number | undefined
-    let closingRound: DispatchJob | null = null
-
-    if (row.odometer.trim() !== '') {
-      // ── แถวปิดรอบ: กรอกเลขไมล์ → ผูกเป็นน้ำมันปิดรอบ (TRIP_CLOSING) ของรอบที่
-      //    เปิดค้างของรถคันนี้ + เขียน endOdometer ลงรอบ (รอบยังเป็น draft)
-      const { round, ambiguous } = findOpenRoundForClosing(row.vehicleId, row.date, dispatches)
-      if (!round) {
-        patchRow(i, { status: 'ERROR', statusLabel: '❌ ไม่พบรอบเปิดค้างของรถคันนี้', error: 'ไม่พบรอบเปิดค้าง', committed: false })
-        return
-      }
-      const odo = Number(row.odometer)
-      if (isNaN(odo)) {
-        patchRow(i, { status: 'ERROR', statusLabel: '❌ เลขไมล์ไม่ถูกต้อง', error: 'เลขไมล์ไม่ถูกต้อง', committed: false })
-        return
-      }
-      if (round.startOdometer != null && odo <= round.startOdometer) {
-        patchRow(i, { status: 'ERROR', statusLabel: '❌ เลขไมล์ปลายต้องมากกว่าต้นรอบ', error: 'เลขไมล์ปลายต้องมากกว่าต้นรอบ', committed: false })
-        return
-      }
-      if (liters <= 0) {
-        patchRow(i, { status: 'ERROR', statusLabel: '❌ กรุณาระบุปริมาณน้ำมัน', error: 'ปริมาณต้องมากกว่า 0', committed: false })
-        return
-      }
-      // น้ำมันปิดรอบ = คลังโรงงานเสมอ → ต้องไม่เกินยอดคงเหลือในคลัง
-      const fbal = getFactoryBalance(fuelStock, fuelRecords)
-      if (liters > fbal) {
-        patchRow(i, { status: 'ERROR', statusLabel: `❌ สต็อคไม่พอ (คงเหลือ ${fbal.toFixed(0)} ล.)`, error: `สต็อคคลังไม่เพียงพอ — คงเหลือ ${fbal.toFixed(2)} ลิตร`, committed: false })
-        return
-      }
-      // กันคีย์ซ้ำ: รอบนี้มีน้ำมันปิดรอบอยู่แล้ว
-      const existingClosing = allFuelTxs.find(
-        t => t.tripId === round.id && t.tripFuelRole === 'TRIP_CLOSING' && t.status !== 'REVERSED',
-      )
-      if (existingClosing && !confirm(`รอบ ${round.code} มีน้ำมันปิดรอบอยู่แล้ว\n\nต้องการเพิ่มอีกรายการหรือไม่?`)) return
-      // มีหลายรอบเปิดค้าง → ยืนยันก่อนผูกกับรอบล่าสุด (ไม่เงียบ ๆ เลือกเอง)
-      if (ambiguous.length > 1 && !confirm(`รถคันนี้มีรอบเปิดค้าง ${ambiguous.length} รอบ\nจะผูกน้ำมันปิดรอบกับรอบล่าสุด: ${round.code}\n\nตกลงหรือไม่?`)) return
-
-      closingRound = round
-      updated = {
-        ...row,
-        source: 'FACTORY_TANK',
-        status: 'TRIP_LINKED',
-        statusLabel: `🔵 ปิดรอบ ${round.code} (ไมล์ปลาย ${odo.toLocaleString()})`,
-        tripId: round.id,
-        closingRoundId: round.id,
-        tripFuelRole: 'TRIP_CLOSING',
-        error: '',
-        committed: true,
-      }
-    } else {
-      // ── แถวน้ำมันปกติ: ผูกรอบแบบ same-date เดิม
-      const result = autoRoute(row.vehicleId, row.date, row.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
-      updated = { ...row, ...result, tripFuelRole: 'NORMAL', closingRoundId: null, committed: result.status !== 'ERROR' }
-
-      // External-pump receipts are usually paid as a whole baht — the
-      // liters×price often lands on a .xx fraction (e.g. 1,999.55). Offer to
-      // round up to the next baht so the AP figure matches the receipt.
-      if (updated.committed && row.source === 'EXTERNAL_PUMP') {
-        const raw = liters * (parseFloat(row.pricePerL) || 35)
-        const ceil = Math.ceil(raw)
-        if (raw > 0 && Math.abs(ceil - raw) > 0.001) {
-          if (confirm(`ยอดปั๊มภายนอก = ${raw.toFixed(2)} บาท\n\nตกลง = ปัดขึ้นเป็น ${ceil.toLocaleString()} บาท\nยกเลิก = ใช้ยอดตามจริง ${raw.toFixed(2)} บาท`)) {
-            totalOverride = ceil
-          }
+    if (updated.committed && row.source === 'EXTERNAL_PUMP') {
+      const raw = liters * (parseFloat(row.pricePerL) || 35)
+      const ceil = Math.ceil(raw)
+      if (raw > 0 && Math.abs(ceil - raw) > 0.001) {
+        if (confirm(`ยอดปั๊มภายนอก = ${raw.toFixed(2)} บาท\n\nตกลง = ปัดขึ้นเป็น ${ceil.toLocaleString()} บาท\nยกเลิก = ใช้ยอดตามจริง ${raw.toFixed(2)} บาท`)) {
+          totalOverride = ceil
         }
       }
     }
 
     if (updated.committed) {
-      const { txId, fuelRecId } = await persistRow(updated, vehicles, insertFuelTx, insertFuelRec, updateDispatch, closingRound, totalOverride)
+      const { txId, fuelRecId } = await persistRow(updated, vehicles, insertFuelTx, insertFuelRec, totalOverride)
       updated.txId = txId
       updated.fuelRecId = fuelRecId
       if (updated.status === 'FLOATING') {
@@ -533,34 +419,9 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
       const liters = parseFloat(editDraft.liters)
       const pricePerL = parseFloat(editDraft.pricePerL) || 35
       const total = liters * pricePerL
+      const odometer = editDraft.odometer.trim() !== '' ? Number(editDraft.odometer) : null
 
-      const wantClosing = editDraft.odometer.trim() !== ''
-      let nextStatus: RowStatus
-      let nextLabel: string
-      let nextTripId: string | null
-      let nextRole: 'NORMAL' | 'TRIP_CLOSING'
-      let nextSource: FuelSource = editDraft.source
-      let closingRound: DispatchJob | null = null
-
-      if (wantClosing) {
-        const { round } = findOpenRoundForClosing(vehicleId, editDraft.date, dispatches)
-        if (!round) { alert('ไม่พบรอบเปิดค้างของรถคันนี้'); return }
-        const odo = Number(editDraft.odometer)
-        if (isNaN(odo)) { alert('เลขไมล์ไม่ถูกต้อง'); return }
-        if (round.startOdometer != null && odo <= round.startOdometer) { alert('เลขไมล์ปลายต้องมากกว่าต้นรอบ'); return }
-        closingRound = round
-        nextStatus = 'TRIP_LINKED'
-        nextLabel = `🔵 ปิดรอบ ${round.code} (ไมล์ปลาย ${odo.toLocaleString()})`
-        nextTripId = round.id
-        nextRole = 'TRIP_CLOSING'
-        nextSource = 'FACTORY_TANK'
-      } else {
-        const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
-        nextStatus = result.status
-        nextLabel = result.statusLabel
-        nextTripId = result.tripId
-        nextRole = 'NORMAL'
-      }
+      const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
 
       // Update FuelTransaction
       if (row.txId) {
@@ -572,10 +433,10 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
             liters,
             pricePerL,
             total,
-            source: nextSource,
-            tripId: nextTripId,
-            status: nextStatus as FuelTransaction['status'],
-            tripFuelRole: nextRole,
+            source: editDraft.source,
+            tripId: result.tripId,
+            status: result.status as FuelTransaction['status'],
+            odometer,
           },
         })
       }
@@ -590,23 +451,9 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
             liters,
             pricePerL,
             total,
-            station: nextSource === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
-            odometer: wantClosing ? Number(editDraft.odometer) : 0,
-            ...(wantClosing && closingRound?.date ? { accountingDate: closingRound.date } : {}),
+            station: editDraft.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
+            odometer: odometer ?? 0,
           },
-        })
-      }
-
-      // Sync รอบ: เขียน endOdometer เมื่อเป็นปิดรอบ, เคลียร์เมื่อถูกลดเป็นน้ำมันปกติ
-      if (wantClosing && closingRound) {
-        await updateDispatch.mutateAsync({
-          id: closingRound.id,
-          patch: { endOdometer: Number(editDraft.odometer), closingFuelLiters: liters, closingFuelPrice: pricePerL },
-        })
-      } else if (!wantClosing && row.tripFuelRole === 'TRIP_CLOSING' && row.closingRoundId) {
-        await updateDispatch.mutateAsync({
-          id: row.closingRoundId,
-          patch: { endOdometer: null, closingFuelLiters: null, closingFuelPrice: null },
         })
       }
 
@@ -617,12 +464,10 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
         liters: editDraft.liters,
         pricePerL: editDraft.pricePerL,
         odometer: editDraft.odometer,
-        source: nextSource,
-        status: nextStatus,
-        statusLabel: nextLabel,
-        tripId: nextTripId,
-        tripFuelRole: nextRole,
-        closingRoundId: wantClosing ? (closingRound?.id ?? null) : null,
+        source: editDraft.source,
+        status: result.status,
+        statusLabel: result.statusLabel,
+        tripId: result.tripId,
       })
 
       setEditingKey(null)
@@ -646,17 +491,6 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
       // Remove FuelRecord so factory balance is restored
       if (row.fuelRecId) {
         try { await deleteFuelRec.mutateAsync(row.fuelRecId) } catch { /* already deleted */ }
-      }
-
-      // แถวปิดรอบเขียน endOdometer + น้ำมันปิดรอบลงรอบไว้ → ต้องเคลียร์ออก ไม่งั้น
-      // รอบจะค้างเลขไมล์ปลายโดยไม่มีน้ำมันปิดรอบ ทำให้ KM/L ในหน้าปิดงานเพี้ยน
-      if (row.tripFuelRole === 'TRIP_CLOSING' && row.closingRoundId) {
-        try {
-          await updateDispatch.mutateAsync({
-            id: row.closingRoundId,
-            patch: { endOdometer: null, closingFuelLiters: null, closingFuelPrice: null },
-          })
-        } catch { /* รอบอาจถูกปิด/ลบไปแล้ว */ }
       }
 
       setRows(prev => prev.map(r =>
@@ -683,7 +517,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
         <div>
           <h1 className="page-title">⚡ คีย์ด่วนน้ำมัน (Express Fuel Log)</h1>
           <div className="page-sub">
-            กด <kbd style={{ background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: 4, padding: '1px 6px', fontSize: 11 }}>Enter</kbd> เพื่อบันทึกแถวและขึ้นบรรทัดใหม่ · รองรับ Keyboard-only · กรอก <strong>เลขไมล์ปลายรอบ</strong> เพื่อปิดน้ำมัน+ไมล์เข้ารอบที่เปิดค้างพร้อมกัน
+            กด <kbd style={{ background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: 4, padding: '1px 6px', fontSize: 11 }}>Enter</kbd> เพื่อบันทึกแถวและขึ้นบรรทัดใหม่ · รองรับ Keyboard-only · กรอก <strong>เลขไมล์</strong> ไว้ได้ ระบบจะแนะนำเป็นไมล์ปิดรอบให้ตอนปิดงาน
           </div>
         </div>
         <div className="actions">
@@ -840,7 +674,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#F8FAFC', borderBottom: '2px solid #E2E8F0' }}>
-                {(['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'เลขไมล์ปลายรอบ', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ']
+                {(['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'เลขไมล์ (ตอนเติม)', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ']
                 ).map((h, hi) => (
                   <th key={hi} style={{
                     padding: '9px 12px',
@@ -997,8 +831,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                       )}
                     </td>
 
-                    {/* เลขไมล์ปลายรอบ — กรอกเมื่อปิดรอบ (เติม+จดไมล์ที่โรงงานพร้อมกัน).
-                        เว้นว่าง = น้ำมันปกติ; กรอก = ผูกเป็นน้ำมันปิดรอบของรอบ draft */}
+                    {/* เลขไมล์ (ตอนเติม) — เก็บไว้เฉย ๆ; หน้าปิดงานจะนำไปแนะนำเป็นไมล์ปิดรอบ */}
                     <td style={{ padding: '5px 7px', verticalAlign: 'top' }}>
                       {isEditing ? (
                         <input
@@ -1007,7 +840,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                           step="1"
                           value={editDraft.odometer}
                           onChange={e => setEditDraft(d => ({ ...d, odometer: e.target.value }))}
-                          placeholder="ไมล์ปลาย"
+                          placeholder="เลขไมล์"
                           style={{ ...cellInput, textAlign: 'right' }}
                         />
                       ) : (
@@ -1021,21 +854,21 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                             disabled={locked || row.reversed}
                             onChange={e => patchRow(i, { odometer: e.target.value })}
                             onKeyDown={onKeyDown(i, false)}
-                            placeholder="— (ปิดรอบ)"
+                            placeholder="— (ถ้ามี)"
                             style={{ ...cellInput, textAlign: 'right', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
                           />
-                          {!locked && closingHint(row)}
+                          {!locked && row.odometer.trim() !== '' && (
+                            <div style={{ fontSize: 10, color: '#64748B', marginTop: 2 }}>ใช้แนะนำตอนปิดรอบ</div>
+                          )}
                         </>
                       )}
                     </td>
 
-                    {/* แหล่ง — แถวปิดรอบ (มีเลขไมล์) ล็อกเป็นคลังโรงงานเสมอ */}
+                    {/* แหล่ง */}
                     <td style={{ padding: '5px 7px', verticalAlign: 'top' }}>
                       {isEditing ? (
                         <select
-                          value={editDraft.odometer.trim() !== '' ? 'FACTORY_TANK' : editDraft.source}
-                          disabled={editDraft.odometer.trim() !== ''}
-                          title={editDraft.odometer.trim() !== '' ? 'น้ำมันปิดรอบ = คลังโรงงานเสมอ' : undefined}
+                          value={editDraft.source}
                           onChange={e => setEditDraft(d => ({ ...d, source: e.target.value as FuelSource }))}
                           style={cellInput}
                         >
@@ -1045,9 +878,8 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                       ) : (
                         <select
                           id={`cell-${i}-5`}
-                          value={row.odometer.trim() !== '' ? 'FACTORY_TANK' : row.source}
-                          disabled={locked || row.reversed || row.odometer.trim() !== ''}
-                          title={row.odometer.trim() !== '' ? 'น้ำมันปิดรอบ = คลังโรงงานเสมอ' : undefined}
+                          value={row.source}
+                          disabled={locked || row.reversed}
                           onChange={e => {
                             const s = e.target.value as FuelSource
                             // Swapping to factory tank → pull the daily price.
@@ -1060,7 +892,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                             }
                           }}
                           onKeyDown={onKeyDown(i, true)}
-                          style={{ ...cellInput, cursor: (locked || row.reversed || row.odometer.trim() !== '') ? 'default' : 'pointer', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
+                          style={{ ...cellInput, cursor: (locked || row.reversed) ? 'default' : 'pointer', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
                         >
                           <option value="FACTORY_TANK">🏭 ถังโรงงาน</option>
                           <option value="EXTERNAL_PUMP">⛽ ปั๊มนอก</option>

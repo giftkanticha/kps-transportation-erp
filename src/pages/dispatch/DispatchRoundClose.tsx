@@ -249,6 +249,18 @@ function CloseForm({
       .sort((a, b) => a.dayDelta - b.dayDelta)
   }, [allFuelTxs, round?.vehicleId, round?.date])
 
+  // แนะนำไมล์ปิดรอบจากเลขไมล์ที่คีย์ไว้ในรายการน้ำมัน (คีย์ด่วน) ของรถคันนี้ —
+  // เก็บแบบหลวม ๆ ตอนคีย์ แล้วมาเสนอให้กดใช้ตรงนี้ (ผู้ใช้แก้ได้)
+  // ลำดับ: (1) น้ำมันที่ผูกรอบนี้แล้วและมีเลขไมล์ (2) น้ำมันลอยของรถ เรียงตามวันใกล้รอบ
+  const suggestedMileage = useMemo<number | null>(() => {
+    const linked = linkedFuelTxs
+      .filter(t => (t.odometer ?? 0) > 0)
+      .sort((a, b) => (b.odometer ?? 0) - (a.odometer ?? 0))
+    if (linked.length > 0) return linked[0].odometer ?? null
+    const floating = floatingForVehicle.find(f => (f.tx.odometer ?? 0) > 0)
+    return floating ? (floating.tx.odometer ?? null) : null
+  }, [linkedFuelTxs, floatingForVehicle])
+
   const attachFloating = async (txId: string) => {
     try {
       await updateFuelTx.mutateAsync({
@@ -883,9 +895,21 @@ function CloseForm({
               type="number"
               value={endMileage}
               onChange={e => setEndMileage(e.target.value)}
-              placeholder="เช่น 248410"
+              placeholder={suggestedMileage != null ? String(suggestedMileage) : 'เช่น 248410'}
               disabled={isClosed}
             />
+            {!isClosed && !endMileage && suggestedMileage != null && (
+              <div style={{ fontSize: 11, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span className="muted">💡 แนะนำจากที่คีย์ไว้: <strong>{db.fmt(suggestedMileage)}</strong> km</span>
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => setEndMileage(String(suggestedMileage))}
+                >
+                  ใช้เลขไมล์นี้
+                </button>
+              </div>
+            )}
             {distance > 0 && (
               <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
                 ระยะทาง: {db.fmt(distance)} km
@@ -1049,6 +1073,12 @@ function CloseForm({
                       <span style={{ marginLeft: 10, fontSize: 11 }}>
                         {t.source === 'FACTORY_TANK' ? '🏭 ถังโรงงาน' : '⛽ ปั๊มภายนอก'}
                       </span>
+                      {(t.odometer ?? 0) > 0 && (
+                        <>
+                          <span className="muted" style={{ marginLeft: 10 }}>·</span>
+                          <span style={{ marginLeft: 10, fontSize: 11 }}>📍 ไมล์ {db.fmt(t.odometer as number)}</span>
+                        </>
+                      )}
                       {isNear && (
                         <span style={{ marginLeft: 10, fontSize: 10.5, fontWeight: 700, color: '#92400E' }}>
                           ⭐ ใกล้วันเปิดรอบ

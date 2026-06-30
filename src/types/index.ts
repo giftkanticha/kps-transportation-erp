@@ -362,6 +362,8 @@ export interface FuelTransaction {
   reversedAt?: string | null
   reversalOf?: string | null
   note?: string
+  /** เลขไมล์ ณ ตอนเติม (คีย์ด่วน) — ใช้แนะนำไมล์ปิดรอบในหน้าปิดงาน */
+  odometer?: number | null
 }
 
 export interface FuelRound {
