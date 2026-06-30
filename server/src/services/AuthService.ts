@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
 import crypto from 'crypto'
 import { prisma } from '../lib/prisma'
+import { sendPasswordResetEmail } from '../lib/mailer'
 
 const JWT_SECRET = process.env.JWT_SECRET || 'kps-erp-secret'
 const REFRESH_SECRET = process.env.REFRESH_TOKEN_SECRET || 'kps-refresh-secret'
@@ -69,11 +70,26 @@ export class AuthService {
 
   async forgotPassword(email: string) {
     const user = await prisma.user.findFirst({ where: { email } })
-    if (!user) return { message: 'ถ้า email มีในระบบ link จะถูกส่ง', token: null }
+    // Don't reveal whether the email exists (anti-enumeration).
+    if (!user) return { message: 'ถ้า email มีในระบบ ลิงก์รีเซตจะถูกส่งไป', token: null, emailed: false }
     await prisma.passwordReset.deleteMany({ where: { userId: user.id } })
     const token = crypto.randomBytes(32).toString('hex')
     await prisma.passwordReset.create({ data: { userId: user.id, token, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) } })
-    return { message: 'สร้าง reset token แล้ว', token }
+
+    let emailed = false
+    try {
+      emailed = await sendPasswordResetEmail(email, token, user.displayName)
+    } catch (e) {
+      console.error('[forgotPassword] email send failed:', (e as Error).message)
+    }
+    // Only return the raw token when email could NOT be sent (no SMTP) so a
+    // dev/admin can still complete the reset. With SMTP configured the token
+    // travels only via email.
+    return {
+      message: emailed ? 'ส่งลิงก์รีเซตไปที่อีเมลแล้ว' : 'สร้างลิงก์รีเซตแล้ว (ยังไม่ได้ตั้งค่าอีเมล)',
+      token: emailed ? null : token,
+      emailed,
+    }
   }
 
   async resetPassword(token: string, newPassword: string) {
@@ -92,6 +108,16 @@ export class AuthService {
     if (!user) throw new Error('User not found')
     const valid = await bcrypt.compare(oldPassword, user.passwordHash)
     if (!valid) throw new Error('Password เดิมไม่ถูกต้อง')
+    const passwordHash = await bcrypt.hash(newPassword, 10)
+    await prisma.user.update({ where: { id: userId }, data: { passwordHash } })
+    return { message: 'เปลี่ยน password สำเร็จ' }
+  }
+
+  // Set a new password for the already-authenticated user (no old password
+  // required) — the REST equivalent of Supabase's updateUser({ password }),
+  // which likewise relies on the active session rather than the old password.
+  async setPassword(userId: string, newPassword: string) {
+    if (!newPassword || newPassword.length < 6) throw new Error('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร')
     const passwordHash = await bcrypt.hash(newPassword, 10)
     await prisma.user.update({ where: { id: userId }, data: { passwordHash } })
     return { message: 'เปลี่ยน password สำเร็จ' }

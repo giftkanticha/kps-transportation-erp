@@ -1,0 +1,807 @@
+// KPS Transportation ERP — MySQL Prisma schema.
+// Translated from the PostgreSQL Supabase migrations
+// (supabase/migrations/0001..0040). The 6 AUTH models at the top are copied
+// verbatim from schema.prisma (provider-agnostic, no changes for MySQL).
+//
+// DESIGN NOTE on relations: all foreign-key columns from the operational
+// tables are kept as PLAIN String fields WITHOUT Prisma `@relation` wiring.
+// The application performs its own joins (it was written against Supabase's
+// client, not Prisma's relation loader), and several tables have ambiguous /
+// circular references (employees.vehicle_id <-> vehicles.driver_id,
+// dispatch.split_parent_id self-ref, etc.). Per the task guidance we prefer
+// preserving the raw FK columns over guessing relation wiring. The FK columns
+// are typed `String? @db.VarChar(36)` to match the UUID PKs.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTH models (copied verbatim from schema.prisma — provider-agnostic)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id               String    @id @default(cuid())
+  username         String    @unique
+  email            String?   @unique
+  displayName      String
+  phone            String?
+  passwordHash     String
+  status           String    @default("PENDING_APPROVAL")
+  role             String    @default("EMPLOYEE")
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+  lastLoginAt      DateTime?
+  approvedBy       String?
+  approvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  loginHistories    LoginHistory[]
+  passwordResets    PasswordReset[]
+  customPermissions RolePermission[]
+  auditLogs         AuditLog[]
+}
+
+model LoginHistory {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ipAddress     String?
+  success       Boolean
+  failureReason String?
+  loginAt       DateTime @default(now())
+}
+
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model RolePermission {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    String
+  actionLevel String
+  grantedBy   String?
+  remark      String?
+  isOverride  Boolean  @default(false)
+  grantedAt   DateTime @default(now())
+
+  @@unique([userId, category, actionLevel])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action      String
+  category    String?
+  actionLevel String?
+  oldValue    String?
+  newValue    String?
+  details     String?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+}
+
+model DataResetLog {
+  id          String    @id @default(cuid())
+  resetBy     String
+  resetType   String    @default("MANUAL")
+  details     String?
+  status      String
+  errorMsg    String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Operational tables (translated from Supabase migrations)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Vehicle {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  plate          String   @unique
+  type           String   @default("")
+  brand          String   @default("")
+  year           Int      @default(2000)
+  status         String   @default("available")
+  driverId       String?  @map("driver_id") @db.VarChar(36)
+  odometer       Decimal  @default(0) @db.Decimal(18, 2)
+  nextServiceKm  Decimal  @default(0) @map("next_service_km") @db.Decimal(18, 2)
+  fuel           Decimal  @default(0) @db.Decimal(18, 2)
+  lastService    String   @default("") @map("last_service")
+  nextService    String   @default("") @map("next_service")
+  purchaseDate   String   @default("") @map("purchase_date")
+  tax            String   @default("")
+  insurance      String   @default("")
+  dispatchPermit String   @default("") @map("dispatch_permit")
+  groupKind      String?  @map("group_kind")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("vehicles")
+}
+
+model Employee {
+  id            String   @id @default(uuid()) @db.VarChar(36)
+  code          String   @unique
+  name          String
+  position      String   @default("")
+  license       String   @default("")
+  licenseStatus String   @default("ok") @map("license_status")
+  licenseExpire String   @default("") @map("license_expire")
+  lineId        String   @default("") @map("line_id")
+  phone         String   @default("")
+  idCard        String   @default("") @map("id_card")
+  accountBank   String   @default("") @map("account_bank")
+  accountNo     String   @default("") @map("account_no")
+  joined        String   @default("")
+  salary        Decimal  @default(0) @db.Decimal(18, 2)
+  vehicleId     String?  @map("vehicle_id") @db.VarChar(36)
+  status        String   @default("active")
+  address       String?  @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("employees")
+}
+
+model Customer {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  code        String   @unique
+  name        String
+  contact     String   @default("")
+  phone       String   @default("")
+  credit      Int      @default(30)
+  totalJobs   Int      @default(0) @map("total_jobs")
+  openInvoice Decimal  @default(0) @map("open_invoice") @db.Decimal(18, 2)
+  status      String   @default("active")
+  industry    String   @default("")
+  since       String   @default("")
+  address     String   @default("") @db.VarChar(1000)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("customers")
+}
+
+model Subcontractor {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  code      String   @unique
+  name      String
+  contact   String   @default("")
+  phone     String   @default("")
+  vehicles  Int      @default(0)
+  rating    Decimal  @default(0) @db.Decimal(18, 2)
+  openJobs  Int      @default(0) @map("open_jobs")
+  totalPaid Decimal  @default(0) @map("total_paid") @db.Decimal(18, 2)
+  status    String   @default("active")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("subcontractors")
+}
+
+model Partner {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  code        String   @unique
+  name        String
+  type        String   @default("")
+  contact     String   @default("")
+  phone       String   @default("")
+  address     String   @default("") @db.VarChar(1000)
+  bank        String   @default("")
+  account     String   @default("")
+  accountName String   @default("") @map("account_name")
+  taxId       String   @default("") @map("tax_id")
+  balance     Decimal  @default(0) @db.Decimal(18, 2)
+  status      String   @default("active")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("partners")
+}
+
+model Dispatch {
+  id                 String   @id @default(uuid()) @db.VarChar(36)
+  code               String   @unique
+  customerId         String?  @map("customer_id") @db.VarChar(36)
+  driverId           String?  @map("driver_id") @db.VarChar(36)
+  vehicleId          String?  @map("vehicle_id") @db.VarChar(36)
+  subcontractorId    String?  @map("subcontractor_id") @db.VarChar(36)
+  date               String
+  depart             String   @default("")
+  eta                String   @default("")
+  status             String   @default("scheduled")
+  progress           Int      @default(0)
+  startOdometer      Decimal? @map("start_odometer") @db.Decimal(18, 2)
+  endOdometer        Decimal? @map("end_odometer") @db.Decimal(18, 2)
+  distance           Decimal? @db.Decimal(18, 2)
+  liters             Decimal? @db.Decimal(18, 2)
+  kmPerL             Decimal? @map("km_per_l") @db.Decimal(18, 2)
+  perDiem            Decimal? @map("per_diem") @db.Decimal(18, 2)
+  notes              String   @default("") @db.VarChar(1000)
+  totalAmount        Decimal  @default(0) @map("total_amount") @db.Decimal(18, 2)
+  revenue            Decimal  @default(0) @db.Decimal(18, 2)
+  cost               Decimal  @default(0) @db.Decimal(18, 2)
+  roundStatus        String?  @map("round_status")
+  returnAt           String?  @map("return_at")
+  otherExpenses      Json?    @map("other_expenses") @db.Json
+  closingFuelLiters  Decimal? @map("closing_fuel_liters") @db.Decimal(18, 2)
+  closingFuelPrice   Decimal? @map("closing_fuel_price") @db.Decimal(18, 2)
+  accountingPeriodId String?  @map("accounting_period_id") @db.VarChar(36)
+  carryForwardFrom   String?  @map("carry_forward_from") @db.VarChar(36)
+  splitParentId      String?  @map("split_parent_id") @db.VarChar(36)
+  locked             Boolean  @default(false)
+  paymentStatus      String   @default("unpaid") @map("payment_status")
+  amountPaid         Decimal  @default(0) @map("amount_paid") @db.Decimal(18, 2)
+  paidAt             String?  @map("paid_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@index([accountingPeriodId])
+  @@index([locked])
+  @@index([paymentStatus])
+  @@map("dispatch")
+}
+
+model DispatchLeg {
+  id               String   @id @default(uuid()) @db.VarChar(36)
+  dispatchId       String   @map("dispatch_id") @db.VarChar(36)
+  sortOrder        Int      @default(0) @map("sort_order")
+  customerId       String?  @map("customer_id") @db.VarChar(36)
+  legType          String?  @map("leg_type")
+  origin           String   @default("")
+  destination      String   @default("")
+  cargo            String   @default("")
+  cargoType        String   @default("") @map("cargo_type")
+  priceMode        String   @default("lump") @map("price_mode")
+  weight           Decimal  @default(0) @db.Decimal(18, 2)
+  deliveredWeight  Decimal? @map("delivered_weight") @db.Decimal(18, 2)
+  price            Decimal  @default(0) @db.Decimal(18, 2)
+  amount           Decimal  @default(0) @db.Decimal(18, 2)
+  perDiem          Decimal? @map("per_diem") @db.Decimal(18, 2)
+  notes            String?  @db.Text
+  closed           Boolean?
+  createdAt        DateTime @default(now()) @map("created_at")
+  wht              Boolean  @default(false)
+  billToLocationId String?  @map("bill_to_location_id") @db.VarChar(36)
+  noBill           Boolean  @default(false) @map("no_bill")
+
+  @@map("dispatch_legs")
+}
+
+model Maintenance {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  code      String   @unique
+  vehicleId String   @map("vehicle_id") @db.VarChar(36)
+  type      String   @default("")
+  workshop  String   @default("")
+  partnerId String?  @map("partner_id") @db.VarChar(36)
+  status    String   @default("scheduled")
+  cost      Decimal  @default(0) @db.Decimal(18, 2)
+  startDate String   @default("") @map("start_date")
+  endDate   String?  @map("end_date")
+  odometer  Decimal  @default(0) @db.Decimal(18, 2)
+  items     Json?    @db.Json // was text[]
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("maintenance")
+}
+
+model Tire {
+  id                String   @id @default(uuid()) @db.VarChar(36)
+  serial            String   @unique
+  brand             String   @default("")
+  model             String   @default("")
+  size              String   @default("")
+  vehicleId         String?  @map("vehicle_id") @db.VarChar(36)
+  position          String?
+  installedDate     String   @default("") @map("installed_date")
+  installedOdometer Decimal  @default(0) @map("installed_odometer") @db.Decimal(18, 2)
+  accumulatedKm     Decimal  @default(0) @map("accumulated_km") @db.Decimal(18, 2)
+  status            String   @default("stock")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@map("tires")
+}
+
+model TireEvent {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  tireId    String   @map("tire_id") @db.VarChar(36)
+  vehicleId String?  @map("vehicle_id") @db.VarChar(36)
+  eventType String   @map("event_type")
+  date      String
+  odometer  Decimal  @default(0) @db.Decimal(18, 2)
+  fromPos   String?  @map("from_pos")
+  toPos     String?  @map("to_pos")
+  note      String   @default("") @db.VarChar(1000)
+  userId    String   @map("user_id") @db.VarChar(36)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("tire_events")
+}
+
+model TireScrapSale {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  tireId    String   @map("tire_id") @db.VarChar(36)
+  serial    String   @default("")
+  buyer     String   @default("")
+  price     Decimal  @default(0) @db.Decimal(18, 2)
+  date      String
+  userId    String   @map("user_id") @db.VarChar(36)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("tire_scrap_sales")
+}
+
+model FuelRecord {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  code           String   @unique
+  vehicleId      String?  @map("vehicle_id") @db.VarChar(36)
+  driverId       String?  @map("driver_id") @db.VarChar(36)
+  station        String   @default("")
+  liters         Decimal  @default(0) @db.Decimal(18, 2)
+  pricePerL      Decimal  @default(0) @map("price_per_l") @db.Decimal(18, 2)
+  total          Decimal  @default(0) @db.Decimal(18, 2)
+  odometer       Decimal  @default(0) @db.Decimal(18, 2)
+  date           String
+  type           String   @default("diesel")
+  accountingDate String?  @map("accounting_date")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("fuel_records")
+}
+
+model FuelStock {
+  id              String    @id @default(uuid()) @db.VarChar(36)
+  date            String
+  recordedAt      DateTime? @map("recorded_at")
+  supplier        String    @default("")
+  liters          Decimal   @default(0) @db.Decimal(18, 2)
+  pricePerL       Decimal   @default(0) @map("price_per_l") @db.Decimal(18, 2)
+  invoiceNo       String    @default("") @map("invoice_no")
+  total           Decimal   @default(0) @db.Decimal(18, 2)
+  expenseHeaderId String?   @map("expense_header_id") @db.VarChar(36)
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([expenseHeaderId])
+  @@map("fuel_stock")
+}
+
+model FuelRound {
+  id              String   @id @default(uuid()) @db.VarChar(36)
+  code            String   @unique
+  vehicleId       String?  @map("vehicle_id") @db.VarChar(36)
+  dispatchRoundId String?  @map("dispatch_round_id") @db.VarChar(36)
+  tankCapacity    Decimal  @default(500) @map("tank_capacity") @db.Decimal(18, 2)
+  status          String   @default("open")
+  refills         Json     @db.Json
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("fuel_rounds")
+}
+
+model FuelTransaction {
+  id           String    @id @default(uuid()) @db.VarChar(36)
+  date         String
+  vehicleId    String?   @map("vehicle_id") @db.VarChar(36)
+  liters       Decimal   @default(0) @db.Decimal(18, 2)
+  pricePerL    Decimal   @default(0) @map("price_per_l") @db.Decimal(18, 2)
+  total        Decimal   @default(0) @db.Decimal(18, 2)
+  source       String
+  tripId       String?   @map("trip_id") @db.VarChar(36)
+  status       String
+  tripFuelRole String    @map("trip_fuel_role")
+  entryMethod  String    @map("entry_method")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  reversedAt   DateTime? @map("reversed_at")
+  reversalOf   String?   @map("reversal_of") @db.VarChar(36)
+  note         String?   @db.Text
+
+  @@map("fuel_transactions")
+}
+
+model FuelDailyPrice {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  date      DateTime @db.Date
+  source    String
+  pricePerL Decimal  @map("price_per_l") @db.Decimal(18, 2)
+  notes     String   @default("") @db.VarChar(1000)
+  setBy     String?  @map("set_by") @db.VarChar(36)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([date, source])
+  @@index([source, date])
+  @@map("fuel_daily_prices")
+}
+
+model Expense {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  code      String   @unique
+  vehicleId String?  @map("vehicle_id") @db.VarChar(36)
+  category  String   @default("")
+  note      String   @default("") @db.VarChar(1000)
+  amount    Decimal  @default(0) @db.Decimal(18, 2)
+  paidBy    String   @default("") @map("paid_by")
+  date      String
+  driverId  String?  @map("driver_id") @db.VarChar(36)
+  status    String   @default("pending")
+  partnerId String?  @map("partner_id") @db.VarChar(36)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("expenses")
+}
+
+model ExpenseHeader {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  code      String   @unique
+  date      String
+  vehicleId String?  @map("vehicle_id") @db.VarChar(36)
+  partnerId String?  @map("partner_id") @db.VarChar(36)
+  odometer  Decimal  @default(0) @db.Decimal(18, 2)
+  paid      Boolean  @default(false)
+  dueDate   String   @default("") @map("due_date")
+  total     Decimal  @default(0) @db.Decimal(18, 2)
+  lineCount Int      @default(0) @map("line_count")
+  note      String   @default("") @db.VarChar(1000)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("expense_headers")
+}
+
+model ExpenseLine {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  headerId    String   @map("header_id") @db.VarChar(36)
+  invoiceNo   String   @default("") @map("invoice_no")
+  item        String   @default("")
+  category    String   @default("")
+  qty         Decimal  @default(1) @db.Decimal(18, 2)
+  unitPrice   Decimal  @default(0) @map("unit_price") @db.Decimal(18, 2)
+  amount      Decimal  @default(0) @db.Decimal(18, 2)
+  note        String   @default("") @db.VarChar(1000)
+  stockItemId String?  @map("stock_item_id") @db.VarChar(36)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("expense_lines")
+}
+
+model StockItem {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  code      String   @unique
+  name      String
+  category  String   @default("")
+  qtyIn     Decimal  @default(0) @map("qty_in") @db.Decimal(18, 2)
+  qtyOut    Decimal  @default(0) @map("qty_out") @db.Decimal(18, 2)
+  qty       Decimal  @default(0) @db.Decimal(18, 2)
+  unit      String   @default("")
+  unitCost  Decimal  @default(0) @map("unit_cost") @db.Decimal(18, 2)
+  sellPrice Decimal? @map("sell_price") @db.Decimal(18, 2)
+  reorderAt Decimal  @default(0) @map("reorder_at") @db.Decimal(18, 2)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("stock_items")
+}
+
+model StockReceipt {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  date        String
+  partnerId   String?  @map("partner_id") @db.VarChar(36)
+  stockItemId String?  @map("stock_item_id") @db.VarChar(36)
+  qty         Decimal  @default(0) @db.Decimal(18, 2)
+  unitPrice   Decimal  @default(0) @map("unit_price") @db.Decimal(18, 2)
+  total       Decimal  @default(0) @db.Decimal(18, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("stock_receipts")
+}
+
+model FixedCost {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  name      String
+  category  String   @default("")
+  monthly   Decimal  @default(0) @db.Decimal(18, 2)
+  paid      Boolean  @default(false)
+  vehicleId String?  @map("vehicle_id") @db.VarChar(36)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("fixed_costs")
+}
+
+model SubDriver {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  code           String   @unique
+  name           String
+  plate          String   @default("")
+  phone          String   @default("")
+  idCard         String   @default("") @map("id_card")
+  license        String   @default("")
+  licenseExpire  String   @default("") @map("license_expire")
+  licenseStatus  String   @default("ok") @map("license_status")
+  accountBank    String   @default("") @map("account_bank")
+  accountNo      String   @default("") @map("account_no")
+  status         String   @default("active")
+  subId          String?  @map("sub_id") @db.VarChar(36)
+  address        String?  @db.Text
+  vehicleTypes   Json?    @map("vehicle_types") @db.Json // was text[]
+  truckDump      String?  @map("truck_dump")
+  cpAccess       String?  @map("cp_access")
+  province       String?
+  followerName   String?  @map("follower_name")
+  followerIdCard String?  @map("follower_id_card")
+  accountName    String?  @map("account_name")
+  vehicleOwner   String?  @map("vehicle_owner")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("sub_drivers")
+}
+
+model SubJob {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  code        String   @unique
+  date        String
+  subId       String?  @map("sub_id") @db.VarChar(36)
+  driverId    String?  @map("driver_id") @db.VarChar(36)
+  plate       String   @default("")
+  driverName  String   @default("") @map("driver_name")
+  category    String   @default("")
+  destination String   @default("")
+  origin      String   @default("")
+  weight      Decimal  @default(0) @db.Decimal(18, 2)
+  finalWeight Decimal  @default(0) @map("final_weight") @db.Decimal(18, 2)
+  mode        String   @default("lump")
+  price       Decimal  @default(0) @db.Decimal(18, 2)
+  total       Decimal  @default(0) @db.Decimal(18, 2)
+  status      String   @default("open")
+  bank        String   @default("")
+  wht         Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("sub_jobs")
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  at        String
+  who       String   @default("")
+  text      String   @default("") @db.VarChar(1000)
+  type      String   @default("")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("activity_logs")
+}
+
+model TaskCompletion {
+  id                  String   @id @default(uuid()) @db.VarChar(36)
+  alertKind           String   @map("alert_kind")
+  vehicleId           String?  @map("vehicle_id") @db.VarChar(36)
+  vehiclePlate        String   @default("") @map("vehicle_plate")
+  completedAt         DateTime @default(now()) @map("completed_at")
+  userId              String   @map("user_id") @db.VarChar(36)
+  nextDate            String   @default("") @map("next_date")
+  nextMileage         Decimal? @map("next_mileage") @db.Decimal(18, 2)
+  nextMaintenanceDate String   @default("") @map("next_maintenance_date")
+  note                String   @default("") @db.VarChar(1000)
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@map("task_completions")
+}
+
+model EditApproval {
+  id            String    @id @default(uuid()) @db.VarChar(36)
+  requesterId   String    @map("requester_id") @db.VarChar(36)
+  requesterName String    @default("") @map("requester_name")
+  requesterRole String    @map("requester_role")
+  vehicleId     String?   @map("vehicle_id") @db.VarChar(36)
+  vehiclePlate  String    @default("") @map("vehicle_plate")
+  reason        String    @default("") @db.VarChar(1000)
+  changes       Json      @db.Json
+  changeFields  Json      @map("change_fields") @db.Json
+  requestedAt   DateTime  @default(now()) @map("requested_at")
+  status        String    @default("pending")
+  reviewerId    String?   @map("reviewer_id") @db.VarChar(36)
+  reviewerName  String?   @map("reviewer_name")
+  reviewedAt    DateTime? @map("reviewed_at")
+  reviewNote    String    @default("") @map("review_note") @db.VarChar(1000)
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@map("edit_approvals")
+}
+
+model VehicleRegistration {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  data      Json     @db.Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("vehicle_registrations")
+}
+
+model RequestApproval {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  data      Json     @db.Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("request_approvals")
+}
+
+model Location {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  name       String   @unique
+  category   String   @default("")
+  province   String   @default("")
+  address    String   @default("") @db.VarChar(1000)
+  notes      String   @default("") @db.VarChar(1000)
+  active     Boolean  @default(true)
+  isCustomer Boolean  @default(false) @map("is_customer")
+  credit     Int      @default(30)
+  taxId      String   @default("") @map("tax_id")
+  phone      String   @default("")
+  contact    String   @default("")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("locations")
+}
+
+model AccountingPeriod {
+  id           String    @id @default(uuid()) @db.VarChar(36)
+  year         Int
+  month        Int
+  status       String    @default("OPEN")
+  closedAt     DateTime? @map("closed_at")
+  closedBy     String?   @map("closed_by") @db.VarChar(36)
+  closedByName String?   @map("closed_by_name")
+  reopenedAt   DateTime? @map("reopened_at")
+  reopenedBy   String?   @map("reopened_by") @db.VarChar(36)
+  reopenReason String?   @map("reopen_reason") @db.Text
+  notes        String    @default("") @db.VarChar(1000)
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@unique([year, month])
+  @@index([year, month])
+  @@index([status])
+  @@map("accounting_periods")
+}
+
+model AccountingPeriodSnapshot {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  periodId  String   @map("period_id") @db.VarChar(36)
+  vehicleId String?  @map("vehicle_id") @db.VarChar(36)
+  plate     String
+  data      Json     @db.Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([periodId, vehicleId])
+  @@index([periodId])
+  @@map("accounting_period_snapshots")
+}
+
+model PeriodUnlockRequest {
+  id            String    @id @default(uuid()) @db.VarChar(36)
+  periodId      String    @map("period_id") @db.VarChar(36)
+  requesterId   String?   @map("requester_id") @db.VarChar(36)
+  requesterName String    @default("") @map("requester_name")
+  reason        String    @db.Text
+  status        String    @default("pending")
+  reviewerId    String?   @map("reviewer_id") @db.VarChar(36)
+  reviewerName  String?   @map("reviewer_name")
+  reviewedAt    DateTime? @map("reviewed_at")
+  reviewNote    String?   @map("review_note") @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([periodId])
+  @@index([status])
+  @@map("period_unlock_requests")
+}
+
+model CompanySetting {
+  id        Int      @id @default(1)
+  name      String   @default("")
+  taxId     String   @default("") @map("tax_id")
+  phone     String   @default("")
+  email     String   @default("")
+  address   String   @default("") @db.VarChar(1000)
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by") @db.VarChar(36)
+
+  @@map("company_settings")
+}
+
+model CompanyBankAccount {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  bankName    String   @map("bank_name")
+  accountNo   String   @map("account_no")
+  accountName String   @map("account_name")
+  branch      String   @default("")
+  isDefault   Boolean  @default(false) @map("is_default")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("company_bank_accounts")
+}
+
+model BillingNote {
+  id               String   @id @default(uuid()) @db.VarChar(36)
+  code             String   @unique
+  docType          String   @default("billing_note") @map("doc_type")
+  customerId       String?  @map("customer_id") @db.VarChar(36)
+  customerName     String   @default("") @map("customer_name")
+  year             Int
+  month            Int
+  bankAccountId    String?  @map("bank_account_id") @db.VarChar(36)
+  gross            Decimal  @default(0) @db.Decimal(18, 2)
+  whtAmount        Decimal  @default(0) @map("wht_amount") @db.Decimal(18, 2)
+  net              Decimal  @default(0) @db.Decimal(18, 2)
+  dispatchIds      Json?    @map("dispatch_ids") @db.Json
+  status           String   @default("issued")
+  issuedAt         DateTime @default(now()) @map("issued_at")
+  paidAt           String?  @map("paid_at")
+  notes            String   @default("") @db.VarChar(1000)
+  createdAt        DateTime @default(now()) @map("created_at")
+  legIds           Json     @map("leg_ids") @db.Json
+  billToLocationId String?  @map("bill_to_location_id") @db.VarChar(36)
+
+  @@index([customerId])
+  @@index([year, month])
+  @@map("billing_notes")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Supabase-auth view tables (referenced by name from admin pages).
+// In Postgres these PKs referenced auth.users(id); here they are plain UUIDs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model UserProfile {
+  id          String    @id @db.VarChar(36)
+  displayName String    @default("") @map("display_name")
+  phone       String    @default("")
+  role        String    @default("EMPLOYEE")
+  status      String    @default("PENDING_APPROVAL")
+  approvedBy  String?   @map("approved_by") @db.VarChar(36)
+  approvedAt  DateTime? @map("approved_at")
+  employeeId  String?   @map("employee_id") @db.VarChar(36)
+  email       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([role])
+  @@index([status])
+  @@index([employeeId])
+  @@map("user_profiles")
+}
+
+model UserPermission {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  userId      String   @map("user_id") @db.VarChar(36)
+  category    String
+  actionLevel String   @map("action_level")
+  grantedBy   String?  @map("granted_by") @db.VarChar(36)
+  remark      String?  @db.Text
+  grantedAt   DateTime @default(now()) @map("granted_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([userId, category, actionLevel])
+  @@map("user_permissions")
+}
+
+model AclAuditLog {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  actorId     String?  @map("actor_id") @db.VarChar(36)
+  targetId    String?  @map("target_id") @db.VarChar(36)
+  action      String
+  category    String?
+  actionLevel String?  @map("action_level")
+  oldValue    String?  @map("old_value") @db.Text
+  newValue    String?  @map("new_value") @db.Text
+  details     String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("acl_audit_log")
+}

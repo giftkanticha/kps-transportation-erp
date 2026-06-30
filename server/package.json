@@ -8,7 +8,12 @@
     "start": "node dist/index.js",
     "db:push": "prisma db push",
     "db:seed": "tsx src/seed.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "db:generate:mysql": "prisma generate --schema prisma/schema.mysql.prisma",
+    "db:push:mysql": "prisma db push --schema prisma/schema.mysql.prisma",
+    "db:seed:mysql": "tsx src/seed.ts",
+    "migrate:supabase": "tsx src/migrate-from-supabase.ts",
+    "migrate:users": "tsx src/migrate-users-from-supabase.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
@@ -16,7 +21,10 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
-    "jsonwebtoken": "^9.0.2"
+    "jsonwebtoken": "^9.0.2",
+    "nodemailer": "^6.10.1",
+    "pg": "^8.22.0",
+    "socket.io": "^4.8.1"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
@@ -24,6 +32,8 @@
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.17.10",
+    "@types/nodemailer": "^6.4.24",
+    "@types/pg": "^8.20.0",
     "prisma": "^5.22.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"

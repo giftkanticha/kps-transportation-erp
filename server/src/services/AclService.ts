@@ -41,7 +41,7 @@ export class AclService {
     const overrides = await prisma.rolePermission.findMany({ where: { userId } })
     const map = new Map<string, any>()
     defaults.forEach(p => map.set(`${p.category}:${p.actionLevel}`, p))
-    overrides.forEach(p => map.set(`${p.category}:${p.actionLevel}`, { ...p, source: 'custom' }))
+    overrides.forEach((p: any) => map.set(`${p.category}:${p.actionLevel}`, { ...p, source: 'custom' }))
     return Array.from(map.values())
   }
 
@@ -88,6 +88,23 @@ export class AclService {
   async activateUser(userId: string) {
     await prisma.user.update({ where: { id: userId }, data: { status: 'ACTIVE', failedLoginCount: 0, lockedUntil: null } })
     await prisma.auditLog.create({ data: { userId, action: 'USER_ACTIVATED' } })
+  }
+
+  // Admin edit of a user's profile fields (display name / username / phone).
+  async updateProfile(userId: string, fields: { displayName?: string; username?: string | null; phone?: string }) {
+    const data: any = {}
+    if (fields.displayName !== undefined) data.displayName = fields.displayName
+    if (fields.phone !== undefined) data.phone = fields.phone
+    if (fields.username !== undefined) {
+      const u = fields.username ? fields.username.trim().toLowerCase() : null
+      if (u) {
+        const clash = await prisma.user.findFirst({ where: { username: u, NOT: { id: userId } } })
+        if (clash) throw new Error('ชื่อผู้ใช้นี้ถูกใช้แล้ว')
+      }
+      data.username = u
+    }
+    await prisma.user.update({ where: { id: userId }, data })
+    await prisma.auditLog.create({ data: { userId, action: 'PROFILE_UPDATED' } })
   }
 
   async listUsers(status?: string) {

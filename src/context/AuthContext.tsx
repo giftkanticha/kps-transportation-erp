@@ -2,6 +2,9 @@ import { createContext, useContext, useState, useEffect, useCallback, type React
 import type { Session } from '@supabase/supabase-js'
 import { supabase, type UserProfile, type UserRole } from '../lib/supabase'
 import type { User, KPSRole } from '../types'
+import { ACTIVE_BACKEND } from '../lib/backends'
+import { api, tokenStore } from '../lib/backends/mysql/api'
+import { resetSocket } from '../lib/backends/mysql/realtime'
 
 // ─── DEV BYPASS ─────────────────────────────────────────────────────────────
 // When true, skip Supabase auth entirely and use a hardcoded admin user.
@@ -39,6 +42,7 @@ interface AuthContextValue {
   legacyUser: User | null
   loading:    boolean
   recoveryMode: boolean
+  resetToken: string | null
   login:      (email: string, password: string) => Promise<void>
   logout:     () => Promise<void>
   exitRecovery: () => void
@@ -73,6 +77,15 @@ function toLegacy(profile: UserProfile, email: string): User {
   }
 }
 
+function roleFlags(profile: UserProfile | null) {
+  return {
+    isAdmin:      profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN',
+    isManager:    profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN' || profile?.role === 'MANAGER',
+    isSuperAdmin: profile?.role === 'SUPER_ADMIN',
+  }
+}
+
+// ─── Supabase provider (original behaviour, unchanged) ───────────────────────
 async function fetchProfile(userId: string): Promise<UserProfile | null> {
   const { data } = await supabase
     .from('user_profiles')
@@ -82,7 +95,7 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
   return data as UserProfile | null
 }
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+function SupabaseAuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession]       = useState<Session | null>(null)
   const [profile, setProfile]       = useState<UserProfile | null>(BYPASS_AUTH ? BYPASS_PROFILE : null)
   const [loading, setLoading]       = useState(!BYPASS_AUTH)
@@ -162,14 +175,120 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      session, profile, legacyUser, loading, recoveryMode, login, logout, exitRecovery,
-      isAdmin:      BYPASS_AUTH || profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN',
-      isManager:    BYPASS_AUTH || profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN' || profile?.role === 'MANAGER',
-      isSuperAdmin: BYPASS_AUTH || profile?.role === 'SUPER_ADMIN',
+      session, profile, legacyUser, loading, recoveryMode, resetToken: null, login, logout, exitRecovery,
+      ...roleFlags(BYPASS_AUTH ? BYPASS_PROFILE : profile),
     }}>
       {children}
     </AuthContext.Provider>
   )
+}
+
+// ─── MySQL provider (self-hosted REST backend) ───────────────────────────────
+interface MeResponse {
+  id: string; username: string | null; email: string | null
+  displayName: string; phone: string | null; role: UserRole; status: UserProfile['status']
+}
+
+function profileFromMe(me: MeResponse): UserProfile {
+  return {
+    id: me.id,
+    display_name: me.displayName,
+    phone: me.phone ?? '',
+    role: me.role,
+    status: me.status,
+    approved_by: null,
+    approved_at: null,
+    created_at: '',
+    updated_at: '',
+    email: me.email ?? null,
+    username: me.username ?? null,
+  }
+}
+
+// Synthesize the minimal Session shape the rest of the app reads (user.id/email).
+function synthSession(me: MeResponse): Session {
+  return { user: { id: me.id, email: me.email ?? '' } } as unknown as Session
+}
+
+// Read a ?reset_token=... param from the URL (set by the password-reset email
+// link) so we can route the user to the reset screen on load.
+function readResetToken(): string | null {
+  try { return new URLSearchParams(window.location.search).get('reset_token') } catch { return null }
+}
+
+function MysqlAuthProvider({ children }: { children: ReactNode }) {
+  const [session, setSession] = useState<Session | null>(null)
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [resetToken, setResetToken] = useState<string | null>(() => readResetToken())
+
+  useEffect(() => {
+    let mounted = true
+    // Arrived via a reset link — don't auto-load a session; show the reset screen.
+    if (resetToken) { setLoading(false); return }
+    if (!tokenStore.access) { setLoading(false); return }
+    api<MeResponse>('/api/auth/me')
+      .then((me) => {
+        if (!mounted) return
+        if (me.status !== 'ACTIVE') { tokenStore.clear(); return }
+        setSession(synthSession(me))
+        setProfile(profileFromMe(me))
+      })
+      .catch(() => { tokenStore.clear() })
+      .finally(() => { if (mounted) setLoading(false) })
+    return () => { mounted = false }
+  }, [resetToken])
+
+  const login = useCallback(async (identifier: string, password: string) => {
+    const data = await api<{ accessToken: string; refreshToken: string; user: MeResponse }>(
+      '/api/auth/login', { method: 'POST', auth: false, body: { username: identifier.trim(), password } },
+    )
+    tokenStore.set(data.accessToken, data.refreshToken)
+    // login already rejects non-active accounts server-side; fetch full profile.
+    const me = await api<MeResponse>('/api/auth/me')
+    await resetSocket()
+    setSession(synthSession(me))
+    setProfile(profileFromMe(me))
+  }, [])
+
+  const logout = useCallback(async () => {
+    tokenStore.clear()
+    await resetSocket()
+    setSession(null)
+    setProfile(null)
+  }, [])
+
+  const exitRecovery = useCallback(() => {
+    // Drop the token + strip ?reset_token from the URL so a refresh returns to login.
+    setResetToken(null)
+    try {
+      const url = new URL(window.location.href)
+      url.searchParams.delete('reset_token')
+      window.history.replaceState({}, '', url.pathname + url.search)
+    } catch { /* ignore */ }
+  }, [])
+
+  const legacyUser = session && profile && profile.status === 'ACTIVE'
+    ? toLegacy(profile, session.user.email ?? '')
+    : null
+
+  return (
+    <AuthContext.Provider value={{
+      session, profile, legacyUser, loading, recoveryMode: !!resetToken, resetToken, login, logout, exitRecovery,
+      ...roleFlags(profile),
+    }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+// Build-time selection: the Supabase path is unchanged; 'mysql' uses the
+// self-hosted REST auth. Each provider unconditionally calls its own hooks, so
+// rules-of-hooks are satisfied (ACTIVE_BACKEND is a build constant).
+export function AuthProvider({ children }: { children: ReactNode }) {
+  return ACTIVE_BACKEND === 'mysql'
+    ? <MysqlAuthProvider>{children}</MysqlAuthProvider>
+    : <SupabaseAuthProvider>{children}</SupabaseAuthProvider>
 }
 
 export function useAuth() {

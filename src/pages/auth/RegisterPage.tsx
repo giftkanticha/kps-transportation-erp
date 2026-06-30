@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { signUp } from '../../lib/authActions'
 import { Icon } from '../../components/ui'
 import {
   pageStyle, logoStyle, cardStyle,
@@ -29,27 +29,13 @@ export function RegisterPage({ onBack }: { onBack: () => void }) {
     if (form.password.length < 6) { setErr('รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร'); return }
     setLoading(true)
     try {
-      const { data, error } = await supabase.auth.signUp({
-        email: form.email.trim(),
+      await signUp({
+        username: form.username,
+        email: form.email,
         password: form.password,
-        options: {
-          data: {
-            display_name: form.displayName.trim(),
-            phone: form.phone.trim(),
-            username: form.username.trim().toLowerCase(),
-          },
-        },
+        displayName: form.displayName,
+        phone: form.phone,
       })
-      if (error) throw new Error(error.message)
-      // Supabase returns status 200 even when the email is already in use
-      // (anti-enumeration). The signal is data.user.identities being empty —
-      // a real signup always has at least one identity entry. Without this
-      // check the UI showed 'สมัครสำเร็จ' but no auth.users row was created,
-      // so the new_user trigger never fired and the admin saw no approval
-      // request.
-      if (data.user && (data.user.identities?.length ?? 0) === 0) {
-        throw new Error('อีเมลนี้ถูกใช้สมัครไปแล้ว — กรุณาเข้าสู่ระบบ หรือใช้ "ลืมรหัสผ่าน" เพื่อตั้งใหม่')
-      }
       setDone(true)
     } catch (ex) {
       setErr((ex as Error).message)

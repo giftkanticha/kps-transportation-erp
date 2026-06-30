@@ -51,6 +51,13 @@ router.post('/change-password', requireAuth, async (req: AuthRequest, res, next)
   } catch (err) { next(err) }
 })
 
+router.post('/set-password', requireAuth, async (req: AuthRequest, res, next) => {
+  try {
+    const result = await authService.setPassword(req.user!.userId, req.body.newPassword)
+    res.json({ success: true, data: result })
+  } catch (err) { next(err) }
+})
+
 router.get('/me', requireAuth, async (req: AuthRequest, res, next) => {
   try {
     const user = await prisma.user.findUnique({
