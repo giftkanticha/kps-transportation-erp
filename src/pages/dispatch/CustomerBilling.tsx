@@ -50,6 +50,11 @@ export function CustomerBilling() {
   const locById = useMemo(() => new Map(locations.map(l => [l.id, l])), [locations])
   const vehicleById = useMemo(() => new Map(vehicles.map(v => [v.id, v])), [vehicles])
   const plateOf = (d: Dispatch) => (d.vehicleId ? vehicleById.get(d.vehicleId)?.plate : '') || '—'
+  // ป้ายเตือนว่าขานี้มาจากรอบที่ยังไม่ปิด (ยอดเป็นข้อมูลชั่วคราว อาจเปลี่ยนตอนปิดรอบจริง)
+  const draftBadge = (d: Dispatch) =>
+    d.roundStatus !== 'closed'
+      ? <span className="badge amber" style={{ fontSize: 10, marginLeft: 6 }} title="ยังไม่ปิดรอบ — ยอดอาจเปลี่ยนตอนปิดรอบจริง">ยังไม่ปิดรอบ</span>
+      : null
   const custByName = useMemo(() => {
     const m = new Map<string, Location>()
     for (const l of customerLocs) m.set(l.name, l)
@@ -83,12 +88,19 @@ export function CustomerBilling() {
     return { leg, round, gross: leg.amount || 0, wht, net: (leg.amount || 0) - wht }
   }
 
+  // ขาที่ข้อมูลครบพอจะวางบิลได้แม้ยังไม่ปิดรอบ:
+  // เหมา = ยอดไม่ขึ้นกับน้ำหนักปลายทาง | อื่นๆ = ต้องกรอกน้ำหนักปลายทางแล้ว
+  const legDataReady = (l: DispatchLeg) =>
+    (l.amount || 0) > 0 && (l.priceMode === 'lump' || l.deliveredWeight != null)
+
   const eligible = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
-      if (d.roundStatus !== 'closed' || (!allMonths && roundMonth(d) !== month)) continue
+      if (!allMonths && roundMonth(d) !== month) continue
+      const closed = d.roundStatus === 'closed'
       for (const leg of d.legs ?? []) {
         if (!leg.id || leg.noBill || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
+        if (!closed && !legDataReady(leg)) continue   // รอบ draft: เอาเฉพาะขาที่ข้อมูลครบ
         if (billTo(leg)?.id !== customerId) continue
         out.push(mk(leg, d))
       }
@@ -97,13 +109,15 @@ export function CustomerBilling() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatches, customerId, month, allMonths, billedLegIds, custByName, locById])
 
-  // ขาที่ปิดงานในเดือนนี้ มีค่าขนส่ง แต่ยังหา "ผู้รับบิล" ไม่ได้ (ปลายทางไม่ใช่ลูกค้า & ไม่ override)
+  // ขาที่ปิดงาน/ข้อมูลครบในเดือนนี้ มีค่าขนส่ง แต่ยังหา "ผู้รับบิล" ไม่ได้ (ปลายทางไม่ใช่ลูกค้า & ไม่ override)
   const unassignedLegs = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
-      if (d.roundStatus !== 'closed' || (!allMonths && roundMonth(d) !== month)) continue
+      if (!allMonths && roundMonth(d) !== month) continue
+      const closed = d.roundStatus === 'closed'
       for (const leg of d.legs ?? []) {
         if (!leg.id || leg.noBill || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
+        if (!closed && !legDataReady(leg)) continue
         if (billTo(leg)) continue
         out.push(mk(leg, d))
       }
@@ -116,9 +130,11 @@ export function CustomerBilling() {
   const noBillLegs = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
-      if (d.roundStatus !== 'closed' || (!allMonths && roundMonth(d) !== month)) continue
+      if (!allMonths && roundMonth(d) !== month) continue
+      const closed = d.roundStatus === 'closed'
       for (const leg of d.legs ?? []) {
         if (!leg.id || !leg.noBill || (leg.amount || 0) <= 0) continue
+        if (!closed && !legDataReady(leg)) continue
         out.push(mk(leg, d))
       }
     }
@@ -304,7 +320,7 @@ export function CustomerBilling() {
       <div className="page-head no-print">
         <div>
           <h1 className="page-title">สรุป / วางบิลรายลูกค้า</h1>
-          <div className="page-sub">เลือกขาที่ปิดงานแล้วของลูกค้ามาออกใบวางบิล (หัก ณ ที่จ่าย 1% + เลขบัญชีบริษัท)</div>
+          <div className="page-sub">เลือกขาที่พร้อมวางบิลของลูกค้ามาออกใบวางบิล — รวมขาที่ข้อมูลครบแล้วแม้ยังไม่ปิดรอบ (หัก ณ ที่จ่าย 1% + เลขบัญชีบริษัท)</div>
         </div>
       </div>
 
@@ -341,7 +357,7 @@ export function CustomerBilling() {
       {unassignedLegs.length > 0 && (
         <div className="card no-print" style={{ marginBottom: 16, borderColor: '#FCD34D' }}>
           <div className="head" style={{ background: '#FFFBEB' }}>
-            <h3>⚠️ ขาที่ปิดงานแล้วยังไม่มีผู้รับบิล — {allMonths ? 'ทุกเดือน' : 'เดือนนี้'} ({unassignedLegs.length})</h3>
+            <h3>⚠️ ขาที่พร้อมวางบิลยังไม่มีผู้รับบิล — {allMonths ? 'ทุกเดือน' : 'เดือนนี้'} ({unassignedLegs.length})</h3>
           </div>
           <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
             เลือก “เก็บเงินจาก” ให้แต่ละขา — เลือกปลายทาง/ต้นทางของขานั้นได้เลย ระบบจะตั้งเป็นลูกค้าให้อัตโนมัติ (ครั้งหน้าขาที่ไปที่เดียวกันจะเข้าเอง)
@@ -354,7 +370,7 @@ export function CustomerBilling() {
               <tbody>
                 {unassignedLegs.map(b => (
                   <tr key={b.leg.id}>
-                    <td className="mono">{b.round.code}</td>
+                    <td className="mono">{b.round.code}{draftBadge(b.round)}</td>
                     <td className="mono">{plateOf(b.round)}</td>
                     <td>{db.thaiDate(b.round.date)}</td>
                     <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
@@ -393,7 +409,7 @@ export function CustomerBilling() {
               <tbody>
                 {noBillLegs.map(b => (
                   <tr key={b.leg.id}>
-                    <td className="mono">{b.round.code}</td>
+                    <td className="mono">{b.round.code}{draftBadge(b.round)}</td>
                     <td className="mono">{plateOf(b.round)}</td>
                     <td>{db.thaiDate(b.round.date)}</td>
                     <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
@@ -412,7 +428,7 @@ export function CustomerBilling() {
       {customerId && (
         <>
           <div className="card no-print" style={{ marginBottom: 16 }}>
-            <div className="head"><h3>ขาที่ปิดงานแล้ว ยังไม่วางบิล ({eligible.length})</h3></div>
+            <div className="head"><h3>ขาที่พร้อมวางบิล (ปิดงานแล้ว/ข้อมูลครบ) ยังไม่วางบิล ({eligible.length})</h3></div>
             {eligible.length > 0 && (
               <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
                 ✅ ติ๊กเลือกขาที่จะวางบิล แล้วปุ่ม “ออกใบวางบิล / ใบเสร็จ” จะขึ้นด้านล่าง
@@ -420,9 +436,10 @@ export function CustomerBilling() {
             )}
             {eligible.length === 0 ? (
               <div className="empty" style={{ padding: 32 }}>
-                ไม่มีขาของลูกค้ารายนี้ที่ปิดงานแล้วและยังไม่วางบิลในเดือนนี้
+                ไม่มีขาของลูกค้ารายนี้ที่พร้อมวางบิลและยังไม่วางบิลในเดือนนี้
                 <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                  (ขาจะมาที่นี่เมื่อ: ปลายทาง = ลูกค้ารายนี้ หรือเลือก “เก็บเงินจาก” เป็นรายนี้ + ปิดงานแล้ว + มีค่าขนส่ง &gt; 0)
+                  (ขาจะมาที่นี่เมื่อ: ปลายทาง = ลูกค้ารายนี้ หรือเลือก “เก็บเงินจาก” เป็นรายนี้ + มีค่าขนส่ง &gt; 0 + ปิดงานแล้ว
+                  {' '}หรือกรอกน้ำหนักปลายทางครบแล้วบันทึกร่าง)
                 </div>
               </div>
             ) : (
@@ -440,7 +457,7 @@ export function CustomerBilling() {
                     {eligible.map(b => (
                       <tr key={b.leg.id} onClick={() => toggle(b.leg.id!)} style={{ cursor: 'pointer', background: selected.has(b.leg.id!) ? 'var(--primary-50)' : undefined }}>
                         <td><input type="checkbox" checked={selected.has(b.leg.id!)} onChange={() => toggle(b.leg.id!)} onClick={e => e.stopPropagation()} style={{ accentColor: 'var(--primary)' }} /></td>
-                        <td className="mono">{b.round.code}</td>
+                        <td className="mono">{b.round.code}{draftBadge(b.round)}</td>
                         <td className="mono">{plateOf(b.round)}</td>
                         <td>{db.thaiDate(b.round.date)}</td>
                         <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
