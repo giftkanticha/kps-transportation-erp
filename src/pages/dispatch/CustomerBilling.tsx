@@ -31,6 +31,8 @@ export function CustomerBilling() {
   const [printNote, setPrintNote] = useState<BillingNote | null>(null)
   const [printOrient, setPrintOrient] = useState<'portrait' | 'landscape'>('landscape')
   const [printFont, setPrintFont] = useState(9)  // ขนาดตัวอักษรใบพิมพ์ (pt)
+  const [payNote, setPayNote] = useState<BillingNote | null>(null)   // ใบที่กำลังบันทึกรับเงิน
+  const [payDate, setPayDate] = useState('')                         // วันที่รับโอนจริง
 
   const { data: locations = [] } = useList<Location>('locations')
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -81,6 +83,21 @@ export function CustomerBilling() {
       for (const id of n.legIds ?? []) s.add(id)
     }
     return s
+  }, [notes])
+
+  // สถานะการวางบิล/รับเงินราย "ขา" (ข้ามโน้ตที่ยกเลิก) — ใช้ในโต๊ะภาพรวม
+  const legStatusById = useMemo(() => {
+    const m = new Map<string, 'paid' | 'issued'>()
+    const paidAt = new Map<string, string>()
+    for (const n of notes) {
+      if (n.status === 'void') continue
+      for (const id of n.legIds ?? []) {
+        // paid ชนะ issued เสมอ (ขาอยู่ในใบเสร็จ = รับเงินแล้ว)
+        if (n.status === 'paid') { m.set(id, 'paid'); if (n.paidAt) paidAt.set(id, n.paidAt) }
+        else if (!m.has(id)) m.set(id, 'issued')
+      }
+    }
+    return { status: m, paidAt }
   }, [notes])
 
   const mk = (leg: DispatchLeg, round: Dispatch): BillableLeg => {
@@ -144,6 +161,46 @@ export function CustomerBilling() {
     }
     return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
   }, [dispatches, month, allMonths])
+
+  // โต๊ะภาพรวมรายลูกค้า — ทุกเดือน (ไม่ผูกตัวกรองเดือน เพื่อไม่ให้ยอดค้างข้ามเดือนหาย)
+  interface CustOverview {
+    id: string; name: string; total: number
+    unbilled: number; unbilledAmt: number
+    issued: number; issuedAmt: number
+    paid: number; paidAmt: number
+    outstanding: number; lastPaidAt: string; overdue: boolean
+  }
+  const overview = useMemo<CustOverview[]>(() => {
+    const todayMs = Date.now()
+    const map = new Map<string, CustOverview>()
+    for (const d of dispatches) {
+      const closed = d.roundStatus === 'closed'
+      const baseDate = (d.returnAt || d.depart || d.date || '').slice(0, 10)
+      for (const leg of d.legs ?? []) {
+        if (!leg.id || leg.noBill || (leg.amount || 0) <= 0) continue
+        if (!closed && !legDataReady(leg)) continue
+        const loc = billTo(leg)
+        if (!loc) continue
+        const net = (leg.amount || 0) - db.legWht(leg)
+        const cur = map.get(loc.id) ?? { id: loc.id, name: loc.name, total: 0, unbilled: 0, unbilledAmt: 0, issued: 0, issuedAmt: 0, paid: 0, paidAmt: 0, outstanding: 0, lastPaidAt: '', overdue: false }
+        cur.total += 1
+        const st = legStatusById.status.get(leg.id)
+        if (st === 'paid') {
+          cur.paid += 1; cur.paidAmt += net
+          const pa = legStatusById.paidAt.get(leg.id) || ''
+          if (pa > cur.lastPaidAt) cur.lastPaidAt = pa
+        } else {
+          if (st === 'issued') { cur.issued += 1; cur.issuedAmt += net }
+          else { cur.unbilled += 1; cur.unbilledAmt += net }
+          cur.outstanding += net
+          if (baseDate && todayMs > new Date(baseDate).getTime() + (loc.credit ?? 30) * 86400000) cur.overdue = true
+        }
+        map.set(loc.id, cur)
+      }
+    }
+    return [...map.values()].sort((a, b) => b.outstanding - a.outstanding)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatches, legStatusById, custByName, locById])
 
   const restoreNoBill = (legId: string) => updateLeg.mutate({ id: legId, patch: { noBill: false } })
 
@@ -242,9 +299,15 @@ export function CustomerBilling() {
     }
   }
 
-  const markNotePaid = async (n: BillingNote) => {
-    if (!confirm(`บันทึกว่าได้รับเงินตาม ${docTypeLabel(n.docType)} ${n.code} แล้ว?`)) return
-    await updateNote.mutateAsync({ id: n.id, patch: { status: 'paid', paidAt: new Date().toISOString() } })
+  // เปิดมินิ-โมดัลให้เลือก "วันที่รับโอนจริง" ก่อนบันทึกรับเงิน
+  const openMarkPaid = (n: BillingNote) => {
+    setPayDate(new Date().toISOString().slice(0, 10))
+    setPayNote(n)
+  }
+  const confirmMarkPaid = async () => {
+    if (!payNote || !payDate) return
+    await updateNote.mutateAsync({ id: payNote.id, patch: { status: 'paid', paidAt: new Date(payDate).toISOString() } })
+    setPayNote(null)
   }
   const voidNote = async (n: BillingNote) => {
     if (!confirm(`ยกเลิก ${docTypeLabel(n.docType)} ${n.code}? ขาในบิลจะกลับมาเลือกวางบิลใหม่ได้`)) return
@@ -358,6 +421,57 @@ export function CustomerBilling() {
           </div>
         )}
       </div>
+
+      {/* โต๊ะภาพรวมรายลูกค้า — แสดงเมื่อยังไม่เลือกลูกค้า (กดแถวเพื่อเข้าไปออกบิล) */}
+      {!customerId && (
+        <div className="card no-print" style={{ marginBottom: 16 }}>
+          <div className="head"><h3>ภาพรวมการวางบิล/รับเงิน — ทุกลูกค้า (ทุกเดือน)</h3></div>
+          {overview.length === 0 ? (
+            <div className="empty" style={{ padding: 32 }}>ยังไม่มีขาที่ต้องวางบิล</div>
+          ) : (
+            <>
+              <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
+                กดแถวลูกค้าเพื่อไปออกใบวางบิล/ดูเอกสารของรายนั้น
+              </div>
+              <div className="tbl-wrap" style={{ border: 'none' }}>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>ลูกค้า</th>
+                      <th className="num right">เที่ยวต้องเก็บเงิน</th>
+                      <th className="num right">ยังไม่วางบิล</th>
+                      <th className="num right">รอรับเงิน</th>
+                      <th className="num right">รับแล้ว</th>
+                      <th className="num right">คงค้าง</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.map(o => (
+                      <tr key={o.id} onClick={() => { setCustomerId(o.id); setSelected(new Set()) }} style={{ cursor: 'pointer' }}>
+                        <td>
+                          {o.name}
+                          {o.overdue && <span className="badge red" style={{ fontSize: 10, marginLeft: 6 }}>เกินกำหนด</span>}
+                        </td>
+                        <td className="num right">{o.total}</td>
+                        <td className="num right">{o.unbilled > 0 ? `${o.unbilled} เที่ยว · ${db.thb(o.unbilledAmt)}` : '—'}</td>
+                        <td className="num right">{o.issued > 0 ? `${o.issued} เที่ยว · ${db.thb(o.issuedAmt)}` : '—'}</td>
+                        <td className="num right">
+                          {o.paid > 0
+                            ? <>{o.paid} เที่ยว · {db.thb(o.paidAmt)}{o.lastPaidAt ? <span className="muted" style={{ fontSize: 11 }}> · รับล่าสุด {db.thaiDate(o.lastPaidAt.slice(0, 10))}</span> : null}</>
+                            : '—'}
+                        </td>
+                        <td className="num right" style={{ fontWeight: 700, color: o.outstanding > 0 ? 'var(--primary)' : undefined }}>{o.outstanding > 0 ? db.thb(o.outstanding) : '—'}</td>
+                        <td className="right"><span className="muted" style={{ fontSize: 12 }}>ดู →</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {unassignedLegs.length > 0 && (
         <div className="card no-print" style={{ marginBottom: 16, borderColor: '#FCD34D' }}>
@@ -551,7 +665,7 @@ export function CustomerBilling() {
               </div>
               <div className="tbl-wrap" style={{ border: 'none' }}>
                 <table className="tbl">
-                  <thead><tr><th>เลขที่</th><th>ประเภท</th><th className="num right">ยอดสุทธิ</th><th>สถานะ</th><th></th></tr></thead>
+                  <thead><tr><th>เลขที่</th><th>ประเภท</th><th className="num right">ยอดสุทธิ</th><th>สถานะ</th><th>วันที่รับเงิน</th><th></th></tr></thead>
                   <tbody>
                     {customerNotes.map(n => (
                       <tr key={n.id} style={{ opacity: n.status === 'void' ? 0.5 : 1 }}>
@@ -559,11 +673,12 @@ export function CustomerBilling() {
                         <td>{docTypeLabel(n.docType)}</td>
                         <td className="num right">{db.thb2(n.net)}</td>
                         <td><span className={`badge ${n.status === 'paid' ? 'green' : n.status === 'void' ? 'red' : 'amber'}`} style={{ fontSize: 11 }}>{n.status === 'paid' ? 'รับเงินแล้ว' : n.status === 'void' ? 'ยกเลิก' : 'รอชำระ'}</span></td>
+                        <td>{n.status === 'paid' && n.paidAt ? db.thaiDate(n.paidAt.slice(0, 10)) : '—'}</td>
                         <td>
                           <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
                             <button className="btn ghost sm" onClick={() => setPrintNote(n)}><Icon name="download" size={13} /> พิมพ์</button>
                             <button className="btn ghost sm" onClick={() => exportNoteExcel(n)} style={{ color: 'var(--green)' }}><Icon name="download" size={13} /> Excel</button>
-                            {n.status === 'issued' && <button className="btn ghost sm" onClick={() => markNotePaid(n)} style={{ color: 'var(--green)' }}>รับเงินแล้ว</button>}
+                            {n.status === 'issued' && <button className="btn ghost sm" onClick={() => openMarkPaid(n)} style={{ color: 'var(--green)' }}>รับเงินแล้ว</button>}
                             {n.status !== 'void' && <button className="btn ghost sm" onClick={() => voidNote(n)} style={{ color: 'var(--red)' }}>ยกเลิก</button>}
                           </div>
                         </td>
@@ -575,6 +690,25 @@ export function CustomerBilling() {
             </div>
           )}
         </>
+      )}
+
+      {/* มินิ-โมดัลเลือกวันที่รับโอนจริง ก่อนบันทึกรับเงิน */}
+      {payNote && (
+        <div onClick={() => setPayNote(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} className="card pad" style={{ background: 'var(--card)', width: '90%', maxWidth: 380 }}>
+            <h3 style={{ marginTop: 0, marginBottom: 4 }}>บันทึกรับเงิน</h3>
+            <div className="muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
+              {docTypeLabel(payNote.docType)} {payNote.code} · สุทธิ {db.thb2(payNote.net)}
+            </div>
+            <Field label="วันที่รับโอนจริง *">
+              <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} />
+            </Field>
+            <div className="row btn-row" style={{ justifyContent: 'flex-end', marginTop: 16, gap: 8 }}>
+              <button className="btn" onClick={() => setPayNote(null)}>ยกเลิก</button>
+              <button className="btn primary" onClick={confirmMarkPaid} disabled={!payDate || updateNote.isPending}><Icon name="check" size={14} /> บันทึกรับเงิน</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* เอกสารสำหรับพิมพ์ */}
