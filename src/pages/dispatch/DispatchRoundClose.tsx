@@ -574,20 +574,19 @@ function CloseForm({
 
       // Persist each leg's closing data to its dispatch_legs row.
       await Promise.all(
-        newLegs.map(l =>
-          updateLeg.mutateAsync({
-            id: l.id as string,
-            patch: {
-              deliveredWeight: l.deliveredWeight,
-              price: l.price,
-              amount: l.amount,
-              perDiem: l.perDiem,
-              notes: l.notes,
-              unloadDate: l.unloadDate,
-              closed: l.closed,
-            } as Partial<DispatchLeg>,
-          }),
-        ),
+        newLegs.map(l => {
+          const patch: Partial<DispatchLeg> = {
+            deliveredWeight: l.deliveredWeight,
+            price: l.price,
+            amount: l.amount,
+            perDiem: l.perDiem,
+            notes: l.notes,
+            closed: l.closed,
+          }
+          // ส่งวันที่ลงสินค้าเฉพาะเมื่อมีค่า — กัน error ถ้า DB ยังไม่ได้เพิ่มคอลัมน์ (migration 0041)
+          if (l.unloadDate) patch.unloadDate = l.unloadDate
+          return updateLeg.mutateAsync({ id: l.id as string, patch })
+        }),
       )
 
       await updateDispatch.mutateAsync({

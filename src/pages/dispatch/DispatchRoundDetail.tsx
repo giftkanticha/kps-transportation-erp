@@ -663,9 +663,10 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       notes: form.notes.trim() || null,
       wht: form.legType !== 'outbound' ? form.wht : false,
       noBill: form.noBill,
-      loadDate: form.loadDate || null,
-      unloadDate: form.unloadDate || null,
     } as Partial<DispatchLeg>
+    // ส่งคอลัมน์วันที่เฉพาะเมื่อมีค่า — กัน error ถ้า DB ยังไม่ได้เพิ่มคอลัมน์ (migration 0041)
+    if (form.loadDate) (fields as Record<string, unknown>).loadDate = form.loadDate
+    if (form.unloadDate) (fields as Record<string, unknown>).unloadDate = form.unloadDate
     try {
       let nextLegs: DispatchLeg[]
       if (editingLeg.index < 0) {
