@@ -47,11 +47,14 @@ interface LegFormState {
   notes: string
   wht: boolean
   noBill: boolean
+  loadDate: string
+  unloadDate: string
 }
 
 const EMPTY_LEG: LegFormState = {
   origin: '', destination: '', billToLocationId: '', cargo: '', cargoType: '',
   priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '', wht: false, noBill: false,
+  loadDate: '', unloadDate: '',
 }
 
 function legTypeLabel(t?: string): string {
@@ -200,6 +203,16 @@ function LegModal({
             </Field>
             <Field label="ปลายทาง *">
               <LocationCombobox value={f.destination} onChange={v => set('destination', v)} placeholder="เช่น กรุงเทพ" />
+            </Field>
+          </div>
+          <div className="grid-2" style={{ gap: 12 }}>
+            <Field label="วันที่ขึ้นสินค้า (ต้นทาง)">
+              <input type="date" value={f.loadDate} onChange={e => set('loadDate', e.target.value)} />
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>วันรับของ/ขาไป — ช่วยตรวจสอบตอนวางบิล</div>
+            </Field>
+            <Field label="วันที่ลงสินค้า (ปลายทาง)">
+              <input type="date" value={f.unloadDate} onChange={e => set('unloadDate', e.target.value)} />
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>ถ้ายังไม่ส่ง เว้นไว้ก่อน แล้วเติมตอนปิดงานได้</div>
             </Field>
           </div>
           {!isReturn && (
@@ -650,6 +663,8 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       notes: form.notes.trim() || null,
       wht: form.legType !== 'outbound' ? form.wht : false,
       noBill: form.noBill,
+      loadDate: form.loadDate || null,
+      unloadDate: form.unloadDate || null,
     } as Partial<DispatchLeg>
     try {
       let nextLegs: DispatchLeg[]
@@ -884,6 +899,8 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                                   legType: l.legType ?? 'outbound',
                                   notes: l.notes || '',
                                   wht: l.wht ?? false,
+                                  loadDate: l.loadDate ?? '',
+                                  unloadDate: l.unloadDate ?? '',
                                 },
                               })
                             }}

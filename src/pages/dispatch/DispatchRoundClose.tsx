@@ -46,6 +46,7 @@ interface LegCloseState {
   perDiem: string
   notes: string
   price: string   // ราคา/เรท (฿/ตัน, ฿/กก. หรือยอดเหมา) — แก้ค่าบรรทุกที่ตั้งตอนเปิดขาได้
+  unloadDate: string   // วันที่ลงสินค้า (ปลายทาง) — เติม/แก้ได้ตอนกรอกน้ำหนักปลายทาง
 }
 
 const MAX_WEIGHT_LOSS_KG = 100
@@ -330,6 +331,7 @@ function CloseForm({
           perDiem: l.perDiem != null ? String(l.perDiem) : '',
           notes: l.notes || '',
           price: l.price != null ? String(l.price) : '',
+          unloadDate: l.unloadDate ?? '',
         })),
       )
     }
@@ -426,6 +428,7 @@ function CloseForm({
         amount: adjustedAmount(el, dwTon),
         perDiem: pd,
         notes: ls?.notes || l.notes,
+        unloadDate: ls?.unloadDate || l.unloadDate || null,
         closed: markClosed && (l.legType === 'return' || dwTon != null),
       }
     })
@@ -580,6 +583,7 @@ function CloseForm({
               amount: l.amount,
               perDiem: l.perDiem,
               notes: l.notes,
+              unloadDate: l.unloadDate,
               closed: l.closed,
             } as Partial<DispatchLeg>,
           }),
@@ -783,6 +787,19 @@ function CloseForm({
                         </div>
                       )
                     )}
+                  </Field>
+                )}
+                {!isReturn && (
+                  <Field label="วันที่ลงสินค้า (ปลายทาง)">
+                    <input
+                      type="date"
+                      value={ls.unloadDate}
+                      onChange={e => updateLegState(i, { unloadDate: e.target.value })}
+                      disabled={isClosed}
+                    />
+                    <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                      วันที่ส่งของถึงปลายทาง — ช่วยตรวจสอบตอนวางบิล
+                    </div>
                   </Field>
                 )}
                 <Field label="เบี้ยเลี้ยง (฿) *">

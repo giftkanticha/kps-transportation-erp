@@ -88,6 +88,10 @@ export function CustomerBilling() {
     return { leg, round, gross: leg.amount || 0, wht, net: (leg.amount || 0) - wht }
   }
 
+  // วันที่ขึ้น/ลงของขา — ถ้าไม่ได้กรอกต่อขา ให้ fallback ไปวันที่ของรอบ (ขาเก่ายังทำงาน)
+  const legLoadDate = (b: BillableLeg) => b.leg.loadDate || b.round.date
+  const legUnloadDate = (b: BillableLeg) => b.leg.unloadDate || (b.round.returnAt || '').slice(0, 10) || b.round.date
+
   // ขาที่ข้อมูลครบพอจะวางบิลได้แม้ยังไม่ปิดรอบ:
   // เหมา = ยอดไม่ขึ้นกับน้ำหนักปลายทาง | อื่นๆ = ต้องกรอกน้ำหนักปลายทางแล้ว
   const legDataReady = (l: DispatchLeg) =>
@@ -274,7 +278,8 @@ export function CustomerBilling() {
   const exportNoteExcel = (n: BillingNote) => {
     const rows = legsForNote(n)
     const body = rows.map(b => [
-      db.thaiDate(b.round.date),
+      db.thaiDate(legLoadDate(b)),
+      db.thaiDate(legUnloadDate(b)),
       `${b.leg.origin} → ${b.leg.destination}`,
       b.leg.weight || 0,
       b.leg.deliveredWeight ?? '',
@@ -291,9 +296,9 @@ export function CustomerBilling() {
       [`ลูกค้า: ${n.customerName}`],
       [`วันที่ออก: ${db.thaiDate((n.issuedAt || new Date().toISOString()).slice(0, 10))}`],
       [],
-      ['วันที่', 'เส้นทาง', 'น้ำหนักต้น (ตัน)', 'น้ำหนักปลาย (ตัน)', 'หาย/เกิน (กก.)', 'ค่าบรรทุก', 'ยอดเต็ม', 'หัก 1%', 'สุทธิ'],
+      ['วันที่ขึ้น', 'วันที่ลง', 'เส้นทาง', 'น้ำหนักต้น (ตัน)', 'น้ำหนักปลาย (ตัน)', 'หาย/เกิน (กก.)', 'ค่าบรรทุก', 'ยอดเต็ม', 'หัก 1%', 'สุทธิ'],
       ...body,
-      ['', '', '', '', '', 'รวม', n.gross, n.whtAmount, n.net],
+      ['', '', '', '', '', '', 'รวม', n.gross, n.whtAmount, n.net],
     ]
     const bank = noteBank(n)
     if (bank) {
@@ -301,13 +306,13 @@ export function CustomerBilling() {
       aoa.push([`ชำระโดยโอนเข้าบัญชี: ${bank.bankName} ${bank.accountNo} ${bank.accountName}${bank.branch ? ` สาขา ${bank.branch}` : ''}`])
     }
     const ws = XLSX.utils.aoa_to_sheet(aoa)
-    ws['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 15 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 13 }, { wch: 12 }, { wch: 13 }]
+    ws['!cols'] = [{ wch: 13 }, { wch: 13 }, { wch: 30 }, { wch: 15 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 13 }, { wch: 12 }, { wch: 13 }]
     for (let r = 7; r <= 7 + body.length; r++) {
-      for (const c of [2, 3, 6, 7, 8]) {  // น้ำหนัก + เงิน → 2 ตำแหน่ง
+      for (const c of [3, 4, 7, 8, 9]) {  // น้ำหนัก + เงิน → 2 ตำแหน่ง
         const addr = XLSX.utils.encode_cell({ r, c })
         if (ws[addr] && typeof ws[addr].v === 'number') ws[addr].z = '#,##0.00'
       }
-      const lossAddr = XLSX.utils.encode_cell({ r, c: 4 })  // หาย/เกิน → จำนวนเต็ม กก.
+      const lossAddr = XLSX.utils.encode_cell({ r, c: 5 })  // หาย/เกิน → จำนวนเต็ม กก.
       if (ws[lossAddr] && typeof ws[lossAddr].v === 'number') ws[lossAddr].z = '#,##0'
     }
     const wb = XLSX.utils.book_new()
@@ -365,14 +370,15 @@ export function CustomerBilling() {
           <div className="tbl-wrap" style={{ border: 'none' }}>
             <table className="tbl">
               <thead>
-                <tr><th>รหัสรอบ</th><th>ทะเบียนรถ</th><th>วันที่</th><th>เส้นทาง</th><th className="num right">ยอด</th><th>เก็บเงินจาก (ตั้งเป็นลูกค้า)</th></tr>
+                <tr><th>รหัสรอบ</th><th>ทะเบียนรถ</th><th>วันที่ขึ้น</th><th>วันที่ลง</th><th>เส้นทาง</th><th className="num right">ยอด</th><th>เก็บเงินจาก (ตั้งเป็นลูกค้า)</th></tr>
               </thead>
               <tbody>
                 {unassignedLegs.map(b => (
                   <tr key={b.leg.id}>
                     <td className="mono">{b.round.code}{draftBadge(b.round)}</td>
                     <td className="mono">{plateOf(b.round)}</td>
-                    <td>{db.thaiDate(b.round.date)}</td>
+                    <td>{db.thaiDate(legLoadDate(b))}</td>
+                    <td>{db.thaiDate(legUnloadDate(b))}</td>
                     <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
                     <td className="num right">{db.thb(b.gross)}</td>
                     <td>
@@ -404,14 +410,15 @@ export function CustomerBilling() {
           <div className="tbl-wrap" style={{ border: 'none' }}>
             <table className="tbl">
               <thead>
-                <tr><th>รหัสรอบ</th><th>ทะเบียนรถ</th><th>วันที่</th><th>เส้นทาง</th><th className="num right">ยอด</th><th></th></tr>
+                <tr><th>รหัสรอบ</th><th>ทะเบียนรถ</th><th>วันที่ขึ้น</th><th>วันที่ลง</th><th>เส้นทาง</th><th className="num right">ยอด</th><th></th></tr>
               </thead>
               <tbody>
                 {noBillLegs.map(b => (
                   <tr key={b.leg.id}>
                     <td className="mono">{b.round.code}{draftBadge(b.round)}</td>
                     <td className="mono">{plateOf(b.round)}</td>
-                    <td>{db.thaiDate(b.round.date)}</td>
+                    <td>{db.thaiDate(legLoadDate(b))}</td>
+                    <td>{db.thaiDate(legUnloadDate(b))}</td>
                     <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
                     <td className="num right">{db.thb(b.gross)}</td>
                     <td className="right">
@@ -448,7 +455,7 @@ export function CustomerBilling() {
                   <thead>
                     <tr>
                       <th style={{ width: 36 }}><input type="checkbox" checked={selected.size === eligible.length && eligible.length > 0} onChange={toggleAll} style={{ accentColor: 'var(--primary)' }} /></th>
-                      <th>รหัสรอบ</th><th>ทะเบียนรถ</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th>
+                      <th>รหัสรอบ</th><th>ทะเบียนรถ</th><th>วันที่ขึ้น</th><th>วันที่ลง</th><th>เส้นทาง</th><th>สินค้า</th>
                       <th className="num right">ยอดเต็ม</th><th className="num right">หัก 1%</th><th className="num right">สุทธิ</th>
                       <th>แก้ผู้รับบิล</th>
                     </tr>
@@ -459,7 +466,8 @@ export function CustomerBilling() {
                         <td><input type="checkbox" checked={selected.has(b.leg.id!)} onChange={() => toggle(b.leg.id!)} onClick={e => e.stopPropagation()} style={{ accentColor: 'var(--primary)' }} /></td>
                         <td className="mono">{b.round.code}{draftBadge(b.round)}</td>
                         <td className="mono">{plateOf(b.round)}</td>
-                        <td>{db.thaiDate(b.round.date)}</td>
+                        <td>{db.thaiDate(legLoadDate(b))}</td>
+                        <td>{db.thaiDate(legUnloadDate(b))}</td>
                         <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
                         <td style={{ fontSize: 12.5 }}>{b.leg.cargoType || '—'}</td>
                         <td className="num right">{db.thb2(b.gross)}</td>
@@ -587,7 +595,7 @@ export function CustomerBilling() {
           </div>
           <table className="tbl" style={{ width: '100%' }}>
             <thead><tr>
-              <th>วันที่</th><th>เส้นทาง</th>
+              <th>วันที่ขึ้น</th><th>วันที่ลง</th><th>เส้นทาง</th>
               <th className="num right">น้ำหนักต้น (กก.)</th>
               <th className="num right">น้ำหนักปลาย (กก.)</th>
               <th className="num right" style={{ width: 38 }}>± กก.</th>
@@ -599,7 +607,8 @@ export function CustomerBilling() {
             <tbody>
               {legsForNote(printNote).map(b => (
                 <tr key={b.leg.id}>
-                  <td>{db.thaiDate(b.round.date)}</td>
+                  <td>{db.thaiDate(legLoadDate(b))}</td>
+                  <td>{db.thaiDate(legUnloadDate(b))}</td>
                   <td>{b.leg.origin} → {b.leg.destination}</td>
                   <td className="num right">{db.fmt((b.leg.weight || 0) * 1000)}</td>
                   <td className="num right">{b.leg.deliveredWeight != null ? db.fmt(b.leg.deliveredWeight * 1000) : '—'}</td>
@@ -612,7 +621,7 @@ export function CustomerBilling() {
               ))}
             </tbody>
             <tfoot>
-              <tr><td colSpan={6} className="right"><strong>รวม</strong></td><td className="num right">{db.fmt2(printNote.gross)}</td><td className="num right">− {db.fmt2(printNote.whtAmount)}</td><td className="num right"><strong>{db.fmt2(printNote.net)}</strong></td></tr>
+              <tr><td colSpan={7} className="right"><strong>รวม</strong></td><td className="num right">{db.fmt2(printNote.gross)}</td><td className="num right">− {db.fmt2(printNote.whtAmount)}</td><td className="num right"><strong>{db.fmt2(printNote.net)}</strong></td></tr>
             </tfoot>
           </table>
           {noteBank(printNote) && (
