@@ -217,6 +217,7 @@ function CloseForm({
   const [toast, setToast] = useState<ToastState | null>(null)
   const initedRef = useRef<string | null>(null)
   const legsInitedRef = useRef<string | null>(null)
+  const mileageAutoFilledRef = useRef<string | null>(null)
 
   // Fuel transactions linked to this round (Supabase ledger).
   const linkedFuelTxs = useMemo(
@@ -249,21 +250,8 @@ function CloseForm({
       .sort((a, b) => a.dayDelta - b.dayDelta)
   }, [allFuelTxs, round?.vehicleId, round?.date])
 
-  // แนะนำไมล์ปิดรอบจากเลขไมล์ที่คีย์ไว้ในรายการน้ำมัน (fuel_records) ของรถคันนี้ —
-  // เก็บแบบหลวม ๆ ตอนคีย์ด่วน แล้วมาเสนอให้กดใช้ตรงนี้ (ผู้ใช้แก้ได้). เลือกรายการที่
-  // มี odometer > 0 และวันที่ใกล้วันรอบที่สุด
-  const suggestedMileage = useMemo<number | null>(() => {
-    if (!round?.vehicleId) return null
-    const roundDateMs = round.date ? new Date(round.date).getTime() : 0
-    const cands = allFuelRecs
-      .filter(r => r.vehicleId === round.vehicleId && (r.odometer ?? 0) > 0)
-      .map(r => ({ r, delta: Math.abs(new Date(r.date).getTime() - roundDateMs) }))
-      .sort((a, b) => a.delta - b.delta)
-    return cands.length > 0 ? (cands[0].r.odometer ?? null) : null
-  }, [allFuelRecs, round?.vehicleId, round?.date])
-
-  // หา odometer ของ tx (น้ำมันลอย) แบบ best-effort จาก fuel_records ที่ตรงกัน
-  // (vehicleId + date + liters) — ใช้โชว์ป้ายเลขไมล์ในวิดเจ็ตน้ำมันลอย
+  // หา odometer ของ tx จาก fuel_records ที่ตรงกัน (vehicleId + date + liters) แบบ
+  // best-effort — ใช้ทั้งแนะนำไมล์ปลายรอบ และโชว์ป้ายเลขไมล์ในวิดเจ็ตน้ำมันลอย
   const odoForTx = (t: FuelTransaction): number => {
     const rec = allFuelRecs.find(r =>
       r.vehicleId === t.vehicleId &&
@@ -272,6 +260,23 @@ function CloseForm({
     )
     return rec?.odometer ?? 0
   }
+
+  // แนะนำไมล์ "ปลายรอบ" จากเลขไมล์ที่คีย์ไว้ตอนคีย์ด่วน = เลขไมล์ "สูงสุด" (การเติม
+  // ตอนจบทริป) และต้อง > ไมล์ต้นรอบเสมอ — กันไม่ให้ไปหยิบไมล์ต้นรอบ (เช่นน้ำมัน
+  // ต้นรอบที่วันใกล้วันเปิดรอบ) มาแนะนำผิด
+  const suggestedMileage = useMemo<number | null>(() => {
+    if (!round?.vehicleId) return null
+    const start = round.startOdometer ?? 0
+    // (1) น้ำมันที่ผูกรอบนี้ — เลขไมล์สูงสุดที่ > ต้นรอบ
+    const linkedOdos = linkedFuelTxs.map(t => odoForTx(t)).filter(o => o > start)
+    if (linkedOdos.length > 0) return Math.max(...linkedOdos)
+    // (2) fallback — เลขไมล์สูงสุดของรถคันนี้ที่ > ต้นรอบ
+    const recOdos = allFuelRecs
+      .filter(r => r.vehicleId === round.vehicleId && (r.odometer ?? 0) > start)
+      .map(r => r.odometer as number)
+    return recOdos.length > 0 ? Math.max(...recOdos) : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedFuelTxs, allFuelRecs, round?.vehicleId, round?.startOdometer])
 
   const attachFloating = async (txId: string) => {
     try {
@@ -358,6 +363,21 @@ function CloseForm({
       )
     }
   }, [round])
+
+  // เติมช่อง "เลขไมล์ปลายรอบ" อัตโนมัติจากที่แนะนำ (ครั้งเดียวต่อรอบ) เมื่อรอบยังไม่มี
+  // ไมล์ปลายที่บันทึกไว้ และผู้ใช้ยังไม่ได้พิมพ์เอง. แยกจาก init effect เพราะ
+  // suggestedMileage มาช้ากว่า (fuel_records โหลด async หลังตัวรอบ). ref กันเขียนทับ
+  // หลังผู้ใช้แก้/ล้างค่า และตอน background refetch
+  useEffect(() => {
+    if (!round) return
+    if (mileageAutoFilledRef.current === round.id) return
+    if (round.endOdometer != null) { mileageAutoFilledRef.current = round.id; return }
+    if (endMileage !== '') return
+    if (suggestedMileage == null) return
+    mileageAutoFilledRef.current = round.id
+    setEndMileage(String(suggestedMileage))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round?.id, round?.endOdometer, endMileage, suggestedMileage])
 
   if (!round) {
     return (
