@@ -16,8 +16,8 @@ type StatusFilter = 'closed' | 'all'
 
 interface LegRow {
   key: string
-  depart: string
-  returnAt: string
+  loadDate: string
+  unloadDate: string
   crossMonth: boolean
   code: string
   status: 'draft' | 'closed' | 'legacy'
@@ -100,8 +100,8 @@ export function DispatchVehicleMonthlyReport() {
       if (legs.length === 0) {
         out.push({
           key: r.id,
-          depart: depart10,
-          returnAt: returnAt10,
+          loadDate: depart10,
+          unloadDate: returnAt10,
           crossMonth,
           code: r.code,
           status,
@@ -120,8 +120,8 @@ export function DispatchVehicleMonthlyReport() {
       legs.forEach((l, i) => {
         out.push({
           key: `${r.id}-${i}`,
-          depart: depart10,
-          returnAt: i === 0 ? returnAt10 : '',
+          loadDate: l.loadDate || depart10,
+          unloadDate: l.unloadDate || (i === 0 ? returnAt10 : ''),
           crossMonth: i === 0 ? crossMonth : false,
           code: i === 0 ? r.code : '',
           status: i === 0 ? status : status,
@@ -337,8 +337,8 @@ export function DispatchVehicleMonthlyReport() {
                 <thead>
                   <tr>
                     <th style={{ width: 36 }}>#</th>
-                    <th>วันเปิด</th>
-                    <th>วันปิด</th>
+                    <th>วันที่ขึ้น</th>
+                    <th>วันที่ลง</th>
                     <th>รหัสรอบ</th>
                     <th>รายการ / เส้นทาง</th>
                     <th className="num">น.น.ต้น</th>
@@ -355,9 +355,9 @@ export function DispatchVehicleMonthlyReport() {
                   {legRows.map((r, i) => (
                     <tr key={r.key} style={r.crossMonth ? { background: '#FFFBEB' } : undefined}>
                       <td className="muted">{i + 1}</td>
-                      <td className="num muted">{r.depart}</td>
+                      <td className="num muted">{r.loadDate}</td>
                       <td className="num muted">
-                        {r.returnAt || ''}
+                        {r.unloadDate || ''}
                         {r.crossMonth && <span style={{ color: '#B45309', marginLeft: 4 }} title="ปิดงานคนละเดือน">↗</span>}
                       </td>
                       <td className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>
