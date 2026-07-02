@@ -494,6 +494,8 @@ export interface Partner {
   taxId: string
   balance: number
   status: string
+  /** เป็นคลังอะไหล่ภายในของบริษัท — บิลที่ลงคู่ค้านี้จะตัดสต็อคอัตโนมัติ (แทนการผูกด้วยชื่อ) */
+  isWarehouse?: boolean
 }
 
 export interface SubDriver {
