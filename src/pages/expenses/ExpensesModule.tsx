@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
-import { Icon, Field, Info, SearchInput, FontScaleControl } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
+import { Icon, Field, Info, SearchInput, FontScaleControl } from '../../components/ui'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
 interface ExpensesModuleProps {
@@ -90,7 +90,7 @@ export function ExpensesModule({ tab, setActive }: ExpensesModuleProps) {
 
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head no-print">
         <div>
           <h1 className="page-title">ระบบค่าใช้จ่าย</h1>
         </div>
@@ -1056,6 +1056,7 @@ function ExpFinance() {
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: stocks = [] } = useList<StockItem>('stock_items')
   const [editing, setEditing] = useState<ExpenseHeader | null>(null)
+  const { print } = usePrint()
 
   const today = (() => { const d = new Date(); d.setHours(0,0,0,0); return d })()
   const unpaidHeaders = headers.filter((h) => !h.paid)
@@ -1094,10 +1095,15 @@ function ExpFinance() {
   }, [list, partners])
 
   const targetGroup = storeGroups.find((g) => g.partnerId === storeTarget)
+  // ยอดรวมของรายการที่กำลังแสดง (ตามตัวกรอง) — ใช้บนใบพิมพ์สรุปยอดค้าง
+  const printTotal = storeGroups.reduce((s, g) => s + g.total, 0)
+  const printOverdue = storeGroups.reduce((s, g) => s + g.overdueCount, 0)
+  const filterLabel =
+    filter === 'overdue' ? 'เฉพาะที่เกินกำหนดชำระ' : filter === 'due' ? 'เฉพาะที่ใกล้ครบกำหนด' : 'ยอดค้างชำระทั้งหมด'
 
   return (
     <div>
-      <div className="grid-4" style={{ marginBottom: 18 }}>
+      <div className="grid-4 no-print" style={{ marginBottom: 18 }}>
         <div className="card kpi">
           <div className="label">ยอดค้างชำระทั้งหมด</div>
           <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8, color: 'var(--red)' }}>
@@ -1124,7 +1130,7 @@ function ExpFinance() {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card no-print">
         <div className="head">
           <h3>รายการเจ้าหนี้ (Accounts Payable)</h3>
           <div className="right">
@@ -1145,6 +1151,15 @@ function ExpFinance() {
               <option value="overdue">เกินกำหนด</option>
               <option value="due">ใกล้ครบกำหนด</option>
             </select>
+            <button
+              className="btn sm"
+              onClick={() => print('landscape')}
+              disabled={storeGroups.length === 0}
+              title="พิมพ์สรุปยอดค้างพร้อมเลขบัญชี (ตามตัวกรองที่เลือก)"
+              style={{ marginLeft: 8 }}
+            >
+              <Icon name="download" size={13} /> พิมพ์สรุปยอดค้าง
+            </button>
           </div>
         </div>
         <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
@@ -1241,6 +1256,60 @@ function ExpFinance() {
           onSaved={() => setEditing(null)}
         />
       )}
+
+      {/* ── เอกสารพิมพ์: สรุปยอดเจ้าหนี้คงค้าง + เลขบัญชี (สำหรับส่งให้อนุมัติ/โอนจ่าย) ── */}
+      <div className="print-only">
+        <div className="kps-print-header">
+          <p className="co">KPS TRANSPORTATION</p>
+          <p className="ttl">สรุปยอดเจ้าหนี้คงค้าง (Accounts Payable)</p>
+          <p className="sub">
+            {filterLabel} · {storeGroups.length} ร้าน · รวม {db.fmt(printTotal)} ฿
+            {printOverdue > 0 ? ` · เกินกำหนด ${printOverdue} รายการ` : ''}
+          </p>
+          <p className="ts">พิมพ์เมื่อ {db.thaiDate(new Date().toISOString().slice(0, 10))}</p>
+        </div>
+        <table className="tbl" style={{ width: '100%' }}>
+          <thead>
+            <tr>
+              <th style={{ width: 28 }}>#</th>
+              <th>ช่าง / ร้านค้า</th>
+              <th>ธนาคาร</th>
+              <th>เลขที่บัญชี</th>
+              <th>ชื่อบัญชี</th>
+              <th className="num right">รายการ</th>
+              <th className="num right">ยอดค้าง (฿)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {storeGroups.map((g, i) => (
+              <tr key={g.partnerId}>
+                <td>{i + 1}</td>
+                <td>
+                  {g.partner?.name ?? '—'}
+                  {g.overdueCount > 0 && (
+                    <span style={{ color: '#b91c1c' }}> (เกินกำหนด {g.overdueCount})</span>
+                  )}
+                </td>
+                <td>{g.partner?.bank && g.partner.bank !== '—' ? g.partner.bank : '—'}</td>
+                <td className="mono">{g.partner?.account && g.partner.account !== '—' ? g.partner.account : '—'}</td>
+                <td>{g.partner?.accountName && g.partner.accountName !== '—' ? g.partner.accountName : '—'}</td>
+                <td className="num right">{g.headers.length}</td>
+                <td className="num right">{db.fmt(g.total)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={6} className="right"><strong>รวมทั้งสิ้น</strong></td>
+              <td className="num right"><strong>{db.fmt(printTotal)}</strong></td>
+            </tr>
+          </tfoot>
+        </table>
+        <div className="kps-print-sig">
+          <div className="kps-print-sig-slot"><div className="line">ผู้จัดทำ</div></div>
+          <div className="kps-print-sig-slot"><div className="line">ผู้อนุมัติจ่าย</div></div>
+        </div>
+      </div>
     </div>
   )
 }
