@@ -1100,6 +1100,9 @@ function ExpFinance() {
   const printOverdue = storeGroups.reduce((s, g) => s + g.overdueCount, 0)
   const filterLabel =
     filter === 'overdue' ? 'เฉพาะที่เกินกำหนดชำระ' : filter === 'due' ? 'เฉพาะที่ใกล้ครบกำหนด' : 'ยอดค้างชำระทั้งหมด'
+  // วันครบกำหนดที่ใกล้ที่สุดของร้าน (บิลที่ต้องจ่ายก่อน) — ใช้บนใบพิมพ์
+  const nearestDue = (hs: ExpenseHeader[]): string =>
+    hs.map((h) => h.dueDate).filter(Boolean).sort()[0] ?? ''
 
   return (
     <div>
@@ -1276,12 +1279,16 @@ function ExpFinance() {
               <th>ธนาคาร</th>
               <th>เลขที่บัญชี</th>
               <th>ชื่อบัญชี</th>
+              <th>ครบกำหนด</th>
               <th className="num right">รายการ</th>
               <th className="num right">ยอดค้าง (฿)</th>
             </tr>
           </thead>
           <tbody>
-            {storeGroups.map((g, i) => (
+            {storeGroups.map((g, i) => {
+              const due = nearestDue(g.headers)
+              const isOverdue = !!due && new Date(due) < today
+              return (
               <tr key={g.partnerId}>
                 <td>{i + 1}</td>
                 <td>
@@ -1293,14 +1300,18 @@ function ExpFinance() {
                 <td>{g.partner?.bank && g.partner.bank !== '—' ? g.partner.bank : '—'}</td>
                 <td className="mono">{g.partner?.account && g.partner.account !== '—' ? g.partner.account : '—'}</td>
                 <td>{g.partner?.accountName && g.partner.accountName !== '—' ? g.partner.accountName : '—'}</td>
+                <td style={isOverdue ? { color: '#b91c1c', fontWeight: 700 } : undefined}>
+                  {due ? db.thaiDate(due.slice(0, 10)) : '—'}
+                </td>
                 <td className="num right">{g.headers.length}</td>
                 <td className="num right">{db.fmt(g.total)}</td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
           <tfoot>
             <tr>
-              <td colSpan={6} className="right"><strong>รวมทั้งสิ้น</strong></td>
+              <td colSpan={7} className="right"><strong>รวมทั้งสิ้น</strong></td>
               <td className="num right"><strong>{db.fmt(printTotal)}</strong></td>
             </tr>
           </tfoot>
