@@ -114,14 +114,24 @@ export function CustomerBilling() {
   const legDataReady = (l: DispatchLeg) =>
     (l.amount || 0) > 0 && (l.priceMode === 'lump' || l.deliveredWeight != null)
 
+  // ขาที่ "ต้องเก็บเงิน" — ทุกขาที่ไม่ได้ตั้งไม่วางบิลและไม่ใช่เที่ยวเปล่า
+  // ต้องโผล่ในหน้านี้เสมอแม้ข้อมูลยังไม่ครบ เพื่อไม่ให้ตกหล่นเงียบๆ
+  const billIntent = (l: DispatchLeg) => !l.noBill && l.legType !== 'return'
+  // พร้อมกดออกบิล: มียอด + (ปิดรอบแล้ว หรือข้อมูลครบพอ)
+  const legReady = (l: DispatchLeg, closed: boolean) =>
+    (l.amount || 0) > 0 && (closed || legDataReady(l))
+  // เหตุผลที่ยังออกบิลไม่ได้ — โชว์เป็นป้าย "รอข้อมูล" แทนการซ่อนแถว
+  const pendingReason = (l: DispatchLeg): string =>
+    (l.amount || 0) <= 0 ? 'ยังไม่กรอกราคา/ยอด' : 'รอน้ำหนักปลายทาง หรือปิดรอบ'
+
   const eligible = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
       if (!allMonths && roundMonth(d) !== month) continue
       const closed = d.roundStatus === 'closed'
       for (const leg of d.legs ?? []) {
-        if (!leg.id || leg.noBill || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
-        if (!closed && !legDataReady(leg)) continue   // รอบ draft: เอาเฉพาะขาที่ข้อมูลครบ
+        if (!leg.id || !billIntent(leg) || billedLegIds.has(leg.id)) continue
+        if (!legReady(leg, closed)) continue
         if (billTo(leg)?.id !== customerId) continue
         out.push(mk(leg, d))
       }
@@ -130,32 +140,46 @@ export function CustomerBilling() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatches, customerId, month, allMonths, billedLegIds, custByName, locById])
 
-  // ขาที่ปิดงาน/ข้อมูลครบในเดือนนี้ มีค่าขนส่ง แต่ยังหา "ผู้รับบิล" ไม่ได้ (ปลายทางไม่ใช่ลูกค้า & ไม่ override)
-  const unassignedLegs = useMemo<BillableLeg[]>(() => {
+  // ขาของลูกค้ารายนี้ที่ต้องเก็บเงินแต่ข้อมูลยังไม่ครบ — โชว์เป็น "รอข้อมูล" (เดิมถูกซ่อนจนตกหล่น)
+  const pendingForCustomer = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
       if (!allMonths && roundMonth(d) !== month) continue
       const closed = d.roundStatus === 'closed'
       for (const leg of d.legs ?? []) {
-        if (!leg.id || leg.noBill || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
-        if (!closed && !legDataReady(leg)) continue
+        if (!leg.id || !billIntent(leg) || billedLegIds.has(leg.id)) continue
+        if (legReady(leg, closed)) continue
+        if (billTo(leg)?.id !== customerId) continue
+        out.push(mk(leg, d))
+      }
+    }
+    return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatches, customerId, month, allMonths, billedLegIds, custByName, locById])
+
+  // ขาที่ต้องเก็บเงินแต่ยังหา "ผู้รับบิล" ไม่ได้ (ปลายทางไม่ใช่ลูกค้า & ไม่ override)
+  // นับทุกเดือนเสมอ — เป็นคิวงานค้างที่ต้องเคลียร์ ไม่ใช่รายงานรายเดือน
+  // (เดิมกรองตามเดือน ทำให้ขาค้างจากเดือนก่อนหายจากสายตา)
+  const unassignedLegs = useMemo<BillableLeg[]>(() => {
+    const out: BillableLeg[] = []
+    for (const d of dispatches) {
+      for (const leg of d.legs ?? []) {
+        if (!leg.id || !billIntent(leg) || billedLegIds.has(leg.id)) continue
         if (billTo(leg)) continue
         out.push(mk(leg, d))
       }
     }
     return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatches, month, allMonths, billedLegIds, custByName, locById])
+  }, [dispatches, billedLegIds, custByName, locById])
 
-  // ขาที่เผลอตั้ง "ไม่ต้องวางบิล" ในเดือนนี้ — ให้เอากลับมาได้
+  // ขาที่ตั้ง "ไม่ต้องวางบิล" ในเดือนนี้ — ให้เอากลับมาได้ (ไม่รวมเที่ยวเปล่า)
   const noBillLegs = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
       if (!allMonths && roundMonth(d) !== month) continue
-      const closed = d.roundStatus === 'closed'
       for (const leg of d.legs ?? []) {
-        if (!leg.id || !leg.noBill || (leg.amount || 0) <= 0) continue
-        if (!closed && !legDataReady(leg)) continue
+        if (!leg.id || !leg.noBill || leg.legType === 'return') continue
         out.push(mk(leg, d))
       }
     }
@@ -166,6 +190,7 @@ export function CustomerBilling() {
   interface CustOverview {
     id: string; name: string; total: number
     unbilled: number; unbilledAmt: number
+    pending: number
     issued: number; issuedAmt: number
     paid: number; paidAmt: number
     outstanding: number; lastPaidAt: string; overdue: boolean
@@ -177,12 +202,11 @@ export function CustomerBilling() {
       const closed = d.roundStatus === 'closed'
       const baseDate = (d.returnAt || d.depart || d.date || '').slice(0, 10)
       for (const leg of d.legs ?? []) {
-        if (!leg.id || leg.noBill || (leg.amount || 0) <= 0) continue
-        if (!closed && !legDataReady(leg)) continue
+        if (!leg.id || !billIntent(leg)) continue
         const loc = billTo(leg)
         if (!loc) continue
         const net = (leg.amount || 0) - db.legWht(leg)
-        const cur = map.get(loc.id) ?? { id: loc.id, name: loc.name, total: 0, unbilled: 0, unbilledAmt: 0, issued: 0, issuedAmt: 0, paid: 0, paidAmt: 0, outstanding: 0, lastPaidAt: '', overdue: false }
+        const cur = map.get(loc.id) ?? { id: loc.id, name: loc.name, total: 0, unbilled: 0, unbilledAmt: 0, pending: 0, issued: 0, issuedAmt: 0, paid: 0, paidAmt: 0, outstanding: 0, lastPaidAt: '', overdue: false }
         cur.total += 1
         const st = legStatusById.status.get(leg.id)
         if (st === 'paid') {
@@ -190,9 +214,9 @@ export function CustomerBilling() {
           const pa = legStatusById.paidAt.get(leg.id) || ''
           if (pa > cur.lastPaidAt) cur.lastPaidAt = pa
         } else {
-          if (st === 'issued') { cur.issued += 1; cur.issuedAmt += net }
-          else { cur.unbilled += 1; cur.unbilledAmt += net }
-          cur.outstanding += net
+          if (st === 'issued') { cur.issued += 1; cur.issuedAmt += net; cur.outstanding += net }
+          else if (legReady(leg, closed)) { cur.unbilled += 1; cur.unbilledAmt += net; cur.outstanding += net }
+          else { cur.pending += 1 }  // ต้องเก็บเงินแต่ข้อมูลยังไม่ครบ — ยอดยังไม่นิ่ง ไม่รวมในเงินคงค้าง
           if (baseDate && todayMs > new Date(baseDate).getTime() + (loc.credit ?? 30) * 86400000) cur.overdue = true
         }
         map.set(loc.id, cur)
@@ -201,6 +225,17 @@ export function CustomerBilling() {
     return [...map.values()].sort((a, b) => b.outstanding - a.outstanding)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatches, legStatusById, custByName, locById])
+
+  // ─── ตัวเลขคุมยอดทั้งระบบ (นับทุกเดือน ไม่ขึ้นกับตัวกรองด้านล่าง) ───────────
+  // แบ่ง 3 กลุ่มไม่ซ้ำกัน: พร้อมวางบิล / รอข้อมูล / ยังไม่มีผู้รับบิล
+  const control = useMemo(() => {
+    let readyCnt = 0, readyAmt = 0, pendingCnt = 0
+    for (const o of overview) {
+      readyCnt += o.unbilled; readyAmt += o.unbilledAmt
+      pendingCnt += o.pending
+    }
+    return { readyCnt, readyAmt, pendingCnt, unassignedCnt: unassignedLegs.length }
+  }, [overview, unassignedLegs])
 
   const restoreNoBill = (legId: string) => updateLeg.mutate({ id: legId, patch: { noBill: false } })
 
@@ -392,6 +427,32 @@ export function CustomerBilling() {
         </div>
       </div>
 
+      {/* ตัวเลขคุมยอดกันตกหล่น — นับทุกเดือนเสมอ ไม่ขึ้นกับตัวกรองเดือนด้านล่าง */}
+      <div className="card pad no-print" style={{ marginBottom: 16, borderColor: (control.pendingCnt > 0 || control.unassignedCnt > 0) ? '#FCD34D' : undefined }}>
+        <div className="row" style={{ gap: 20, flexWrap: 'wrap', alignItems: 'center', fontSize: 13.5 }}>
+          <strong style={{ fontSize: 13 }}>เที่ยวที่ต้องเก็บเงิน (นับทุกเดือน):</strong>
+          <span>
+            🧾 พร้อมวางบิล <strong style={{ color: 'var(--primary)' }}>{control.readyCnt}</strong> เที่ยว
+            {control.readyCnt > 0 && <span className="mono"> · {db.thb(control.readyAmt)}</span>}
+          </span>
+          <span style={{ color: control.pendingCnt > 0 ? 'var(--amber)' : undefined }}>
+            ⏳ รอข้อมูล (ราคา/น้ำหนัก) <strong>{control.pendingCnt}</strong> เที่ยว
+          </span>
+          <span style={{ color: control.unassignedCnt > 0 ? 'var(--red)' : undefined }}>
+            ❓ ยังไม่มีผู้รับบิล <strong>{control.unassignedCnt}</strong> เที่ยว
+          </span>
+          {control.readyCnt === 0 && control.pendingCnt === 0 && control.unassignedCnt === 0 && (
+            <span style={{ color: 'var(--green)' }}>✅ ไม่มีเที่ยวตกค้าง</span>
+          )}
+        </div>
+        {(control.pendingCnt > 0 || control.unassignedCnt > 0) && (
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+            เที่ยว "รอข้อมูล" จะแสดงในรายการของลูกค้าแต่ละราย (ยังกดออกบิลไม่ได้) — เติมราคา/น้ำหนักที่หน้ารอบงาน ·
+            เที่ยว "ยังไม่มีผู้รับบิล" เลือกลูกค้าได้ที่การ์ดด้านล่าง
+          </div>
+        )}
+      </div>
+
       <div className="card pad no-print" style={{ marginBottom: 16 }}>
         <div className="grid-2" style={{ gap: 14 }}>
           <Field label="ลูกค้า *">
@@ -440,6 +501,7 @@ export function CustomerBilling() {
                       <th>ลูกค้า</th>
                       <th className="num right">เที่ยวต้องเก็บเงิน</th>
                       <th className="num right">ยังไม่วางบิล</th>
+                      <th className="num right">รอข้อมูล</th>
                       <th className="num right">รอรับเงิน</th>
                       <th className="num right">รับแล้ว</th>
                       <th className="num right">คงค้าง</th>
@@ -455,6 +517,7 @@ export function CustomerBilling() {
                         </td>
                         <td className="num right">{o.total}</td>
                         <td className="num right">{o.unbilled > 0 ? `${o.unbilled} เที่ยว · ${db.thb(o.unbilledAmt)}` : '—'}</td>
+                        <td className="num right">{o.pending > 0 ? <span style={{ color: 'var(--amber)', fontWeight: 600 }}>⏳ {o.pending} เที่ยว</span> : '—'}</td>
                         <td className="num right">{o.issued > 0 ? `${o.issued} เที่ยว · ${db.thb(o.issuedAmt)}` : '—'}</td>
                         <td className="num right">
                           {o.paid > 0
@@ -476,7 +539,7 @@ export function CustomerBilling() {
       {unassignedLegs.length > 0 && (
         <div className="card no-print" style={{ marginBottom: 16, borderColor: '#FCD34D' }}>
           <div className="head" style={{ background: '#FFFBEB' }}>
-            <h3>⚠️ ขาที่พร้อมวางบิลยังไม่มีผู้รับบิล — {allMonths ? 'ทุกเดือน' : 'เดือนนี้'} ({unassignedLegs.length})</h3>
+            <h3>⚠️ ขาที่ต้องเก็บเงินแต่ยังไม่มีผู้รับบิล — ทุกเดือน ({unassignedLegs.length})</h3>
           </div>
           <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
             เลือก “เก็บเงินจาก” ให้แต่ละขา — เลือกปลายทาง/ต้นทางของขานั้นได้เลย ระบบจะตั้งเป็นลูกค้าให้อัตโนมัติ (ครั้งหน้าขาที่ไปที่เดียวกันจะเข้าเอง)
@@ -493,8 +556,13 @@ export function CustomerBilling() {
                     <td className="mono">{plateOf(b.round)}</td>
                     <td>{db.thaiDate(legLoadDate(b))}</td>
                     <td>{db.thaiDate(legUnloadDate(b))}</td>
-                    <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
-                    <td className="num right">{db.thb(b.gross)}</td>
+                    <td style={{ fontSize: 12.5 }}>
+                      {b.leg.origin} → {b.leg.destination}
+                      {!legReady(b.leg, b.round.roundStatus === 'closed') && (
+                        <span className="badge amber" style={{ fontSize: 10, marginLeft: 6 }} title={pendingReason(b.leg)}>⏳ {pendingReason(b.leg)}</span>
+                      )}
+                    </td>
+                    <td className="num right">{b.gross > 0 ? db.thb(b.gross) : '—'}</td>
                     <td>
                       <select value="" onChange={e => { pickBillTo(b.leg, e.target.value); e.target.value = '' }} disabled={updateLeg.isPending || insertLocation.isPending} style={{ minWidth: 200 }}>
                         <option value="">— เลือกผู้รับบิล —</option>
@@ -524,7 +592,7 @@ export function CustomerBilling() {
           <div className="tbl-wrap" style={{ border: 'none' }}>
             <table className="tbl">
               <thead>
-                <tr><th>รหัสรอบ</th><th>ทะเบียนรถ</th><th>วันที่ขึ้น</th><th>วันที่ลง</th><th>เส้นทาง</th><th className="num right">ยอด</th><th></th></tr>
+                <tr><th>รหัสรอบ</th><th>ทะเบียนรถ</th><th>วันที่ขึ้น</th><th>วันที่ลง</th><th>เส้นทาง</th><th>เหตุผล</th><th className="num right">ยอด</th><th></th></tr>
               </thead>
               <tbody>
                 {noBillLegs.map(b => (
@@ -534,7 +602,8 @@ export function CustomerBilling() {
                     <td>{db.thaiDate(legLoadDate(b))}</td>
                     <td>{db.thaiDate(legUnloadDate(b))}</td>
                     <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
-                    <td className="num right">{db.thb(b.gross)}</td>
+                    <td style={{ fontSize: 12 }} className="muted">{b.leg.noBillReason || '—'}</td>
+                    <td className="num right">{b.gross > 0 ? db.thb(b.gross) : '—'}</td>
                     <td className="right">
                       <button className="btn ghost sm" onClick={() => restoreNoBill(b.leg.id!)} disabled={updateLeg.isPending}>เอากลับมา</button>
                     </td>
@@ -549,18 +618,22 @@ export function CustomerBilling() {
       {customerId && (
         <>
           <div className="card no-print" style={{ marginBottom: 16 }}>
-            <div className="head"><h3>ขาที่พร้อมวางบิล (ปิดงานแล้ว/ข้อมูลครบ) ยังไม่วางบิล ({eligible.length})</h3></div>
+            <div className="head">
+              <h3>
+                ขาที่พร้อมวางบิล (ปิดงานแล้ว/ข้อมูลครบ) ยังไม่วางบิล ({eligible.length})
+                {pendingForCustomer.length > 0 && <span style={{ color: 'var(--amber)', fontWeight: 600, fontSize: 13, marginLeft: 8 }}>· ⏳ รอข้อมูล {pendingForCustomer.length}</span>}
+              </h3>
+            </div>
             {eligible.length > 0 && (
               <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
                 ✅ ติ๊กเลือกขาที่จะวางบิล แล้วปุ่ม “ออกใบวางบิล / ใบเสร็จ” จะขึ้นด้านล่าง
               </div>
             )}
-            {eligible.length === 0 ? (
+            {eligible.length + pendingForCustomer.length === 0 ? (
               <div className="empty" style={{ padding: 32 }}>
-                ไม่มีขาของลูกค้ารายนี้ที่พร้อมวางบิลและยังไม่วางบิลในเดือนนี้
+                ไม่มีขาของลูกค้ารายนี้ที่ต้องเก็บเงินและยังไม่วางบิลในเดือนนี้
                 <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                  (ขาจะมาที่นี่เมื่อ: ปลายทาง = ลูกค้ารายนี้ หรือเลือก “เก็บเงินจาก” เป็นรายนี้ + มีค่าขนส่ง &gt; 0 + ปิดงานแล้ว
-                  {' '}หรือกรอกน้ำหนักปลายทางครบแล้วบันทึกร่าง)
+                  (ลองติ๊ก “รวมข้ามเดือนในใบเดียว” ด้านบนเพื่อดูทุกเดือน)
                 </div>
               </div>
             ) : (
@@ -595,6 +668,34 @@ export function CustomerBilling() {
                         </td>
                         <td className="num right">{db.thb2(whtMode === 'per_leg' ? b.net : b.gross)}</td>
                         <td onClick={e => e.stopPropagation()}>
+                          <select value="" onChange={e => { changeBillTo(b.leg, e.target.value); e.target.value = '' }} disabled={updateLeg.isPending} style={{ minWidth: 110, fontSize: 12 }}>
+                            <option value="">เปลี่ยน…</option>
+                            <optgroup label="ย้ายไปลูกค้า">
+                              {customerLocs.filter(c => c.id !== customerId).map(c => <option key={c.id} value={`id:${c.id}`}>{c.name}</option>)}
+                            </optgroup>
+                            <option value="auto">คืนค่าอัตโนมัติ (ตามปลายทาง)</option>
+                            <option value="nobill">ไม่ต้องวางบิล</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                    {/* ขาที่ต้องเก็บเงินแต่ข้อมูลยังไม่ครบ — โชว์ให้เห็นว่าค้างอยู่ ยังติ๊กออกบิลไม่ได้ */}
+                    {pendingForCustomer.map(b => (
+                      <tr key={b.leg.id} style={{ opacity: 0.75, background: '#FFFBEB' }}>
+                        <td><input type="checkbox" disabled title={pendingReason(b.leg)} /></td>
+                        <td className="mono">{b.round.code}{draftBadge(b.round)}</td>
+                        <td className="mono">{plateOf(b.round)}</td>
+                        <td>{db.thaiDate(legLoadDate(b))}</td>
+                        <td>{db.thaiDate(legUnloadDate(b))}</td>
+                        <td style={{ fontSize: 12.5 }}>
+                          {b.leg.origin} → {b.leg.destination}
+                          <span className="badge amber" style={{ fontSize: 10, marginLeft: 6 }}>⏳ {pendingReason(b.leg)}</span>
+                        </td>
+                        <td style={{ fontSize: 12.5 }}>{b.leg.cargoType || '—'}</td>
+                        <td className="num right">{b.gross > 0 ? db.thb2(b.gross) : '—'}</td>
+                        <td className="num right">—</td>
+                        <td className="num right">—</td>
+                        <td>
                           <select value="" onChange={e => { changeBillTo(b.leg, e.target.value); e.target.value = '' }} disabled={updateLeg.isPending} style={{ minWidth: 110, fontSize: 12 }}>
                             <option value="">เปลี่ยน…</option>
                             <optgroup label="ย้ายไปลูกค้า">
