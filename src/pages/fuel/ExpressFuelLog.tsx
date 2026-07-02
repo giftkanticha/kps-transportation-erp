@@ -23,6 +23,8 @@ interface GridRow {
   vehicleId: string
   liters: string
   pricePerL: string
+  // เลขไมล์ ณ ตอนเติม — เก็บไว้เฉย ๆ (ไม่ผูกปิดรอบ); หน้าปิดงานนำไป "แนะนำไมล์ปิดรอบ"
+  odometer: string
   source: FuelSource
   status: RowStatus
   statusLabel: string
@@ -38,15 +40,17 @@ interface GridRow {
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
 
-function makeRow(): GridRow {
+function makeRow(source: FuelSource = 'FACTORY_TANK'): GridRow {
   return {
     key: uid('row'),
     date: todayStr(),
     plateTerm: '',
     vehicleId: '',
     liters: '',
-    pricePerL: '35',
-    source: 'FACTORY_TANK',
+    // ราคาคลังโรงงาน auto-fill ทีหลัง (default 35); ปั๊มนอกให้คนขับกรอกเอง
+    pricePerL: source === 'FACTORY_TANK' ? '35' : '',
+    odometer: '',
+    source,
     status: 'PENDING',
     statusLabel: '— รอคีย์',
     tripId: null,
@@ -128,6 +132,9 @@ async function persistRow(
   const total = totalOverride != null ? totalOverride : liters * pricePerL
   const txId = uid('ftx')
   const fuelRecId = uid('f')
+  // เลขไมล์ ณ ตอนเติม (ถ้ากรอก) — เก็บไว้บน fuel_records (คอลัมน์ที่มีอยู่แล้ว);
+  // หน้าปิดงานจะนำไปแนะนำไมล์ปิดรอบ
+  const odometer = row.odometer ? Number(row.odometer) : 0
 
   await insertFuelTx.mutateAsync({
     id: txId,
@@ -155,7 +162,7 @@ async function persistRow(
     liters,
     pricePerL,
     total,
-    odometer: 0,
+    odometer,
     date: row.date,
     type: 'diesel',
   })
@@ -247,14 +254,16 @@ interface FloatingToast {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => void }) {
+  // แหล่งน้ำมันเริ่มต้นแบบรวม — ตั้งทีเดียวใช้กับทุกแถวที่ยังไม่บันทึก เพื่อคีย์เร็ว
+  const [globalSource, setGlobalSource] = useState<FuelSource>('FACTORY_TANK')
   const [rows, setRows] = useState<GridRow[]>([makeRow()])
   const [toast, setToast] = useState<FloatingToast | null>(null)
   const [quickOpenCtx, setQuickOpenCtx] = useState<{ vehicleId: string; date: string; floatingTxId: string } | null>(null)
 
   // Edit state
   const [editingKey, setEditingKey] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState<{ date: string; plateTerm: string; vehicleId: string; liters: string; pricePerL: string; source: FuelSource }>({
-    date: '', plateTerm: '', vehicleId: '', liters: '', pricePerL: '35', source: 'FACTORY_TANK',
+  const [editDraft, setEditDraft] = useState<{ date: string; plateTerm: string; vehicleId: string; liters: string; pricePerL: string; odometer: string; source: FuelSource }>({
+    date: '', plateTerm: '', vehicleId: '', liters: '', pricePerL: '35', odometer: '', source: 'FACTORY_TANK',
   })
 
   // Reverse confirm
@@ -296,6 +305,20 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     patchRow(i, { plateTerm: val, vehicleId: found?.id ?? '' })
   }
 
+  // ปุ่มสลับแหล่งน้ำมันแบบรวม — apply กับแถวที่ยังไม่บันทึก/ไม่ยกเลิก. ราคา sync
+  // เหมือน select รายแถว.
+  const applyGlobalSource = (s: FuelSource) => {
+    setGlobalSource(s)
+    setRows(prev => prev.map(r => {
+      if (r.committed || r.reversed) return r
+      if (s === 'FACTORY_TANK') {
+        const auto = priceForDate(dailyPrices, 'FACTORY_TANK', r.date)
+        return auto != null ? { ...r, source: s, pricePerL: String(auto) } : { ...r, source: s }
+      }
+      return { ...r, source: s, pricePerL: '' }
+    }))
+  }
+
   const commitAndAdvance = async (i: number) => {
     const row = rows[i]
     if (row.committed) {
@@ -307,7 +330,9 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
       return
     }
 
-    const result = autoRoute(row.vehicleId, row.date, row.source, parseFloat(row.liters), vehicles, dispatches, fuelStock, fuelRecords)
+    const liters = parseFloat(row.liters)
+    // เลขไมล์ที่กรอกถูกเก็บไว้เฉย ๆ (ไม่ผูกปิดรอบ) — ทุกแถวเดินผ่าน autoRoute ปกติ
+    const result = autoRoute(row.vehicleId, row.date, row.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
     const updated: GridRow = { ...row, ...result, committed: result.status !== 'ERROR' }
 
     // External-pump receipts are usually paid as a whole baht — the
@@ -315,7 +340,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     // round up to the next baht so the AP figure matches the receipt.
     let totalOverride: number | undefined
     if (updated.committed && row.source === 'EXTERNAL_PUMP') {
-      const raw = parseFloat(row.liters) * (parseFloat(row.pricePerL) || 35)
+      const raw = liters * (parseFloat(row.pricePerL) || 35)
       const ceil = Math.ceil(raw)
       if (raw > 0 && Math.abs(ceil - raw) > 0.001) {
         if (confirm(`ยอดปั๊มภายนอก = ${raw.toFixed(2)} บาท\n\nตกลง = ปัดขึ้นเป็น ${ceil.toLocaleString()} บาท\nยกเลิก = ใช้ยอดตามจริง ${raw.toFixed(2)} บาท`)) {
@@ -325,24 +350,31 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
     }
 
     if (updated.committed) {
-      const { txId, fuelRecId } = await persistRow(updated, vehicles, insertFuelTx, insertFuelRec, totalOverride)
-      updated.txId = txId
-      updated.fuelRecId = fuelRecId
-      if (result.status === 'FLOATING') {
-        setToast({
-          message: `🟡 รถ ${row.plateTerm} — บันทึกแล้ว (น้ำมันลอย)`,
-          vehicleId: row.vehicleId,
-          date: row.date,
-          floatingTxId: txId,
-          plateTerm: row.plateTerm,
-        })
-        setTimeout(() => setToast(null), 8000)
+      try {
+        const { txId, fuelRecId } = await persistRow(updated, vehicles, insertFuelTx, insertFuelRec, totalOverride)
+        updated.txId = txId
+        updated.fuelRecId = fuelRecId
+        if (updated.status === 'FLOATING') {
+          setToast({
+            message: `🟡 รถ ${row.plateTerm} — บันทึกแล้ว (น้ำมันลอย)`,
+            vehicleId: row.vehicleId,
+            date: row.date,
+            floatingTxId: txId,
+            plateTerm: row.plateTerm,
+          })
+          setTimeout(() => setToast(null), 8000)
+        }
+      } catch (e) {
+        // อย่าให้ insert ล้มแบบเงียบ — โชว์สาเหตุที่แถวนั้น
+        const msg = e instanceof Error ? e.message : String(e)
+        patchRow(i, { status: 'ERROR', statusLabel: '❌ บันทึกไม่สำเร็จ', error: msg, committed: false })
+        return
       }
     }
 
     setRows(prev => {
       const next = prev.map((r, idx) => idx === i ? updated : r)
-      return updated.committed && i === prev.length - 1 ? [...next, makeRow()] : next
+      return updated.committed && i === prev.length - 1 ? [...next, makeRow(globalSource)] : next
     })
 
     setTimeout(() => {
@@ -362,7 +394,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
   }
 
   const removeRow = (i: number) =>
-    setRows(prev => prev.length === 1 ? [makeRow()] : prev.filter((_, idx) => idx !== i))
+    setRows(prev => prev.length === 1 ? [makeRow(globalSource)] : prev.filter((_, idx) => idx !== i))
 
   const commitAll = () => {
     rows.forEach((row, i) => {
@@ -380,6 +412,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
       vehicleId: row.vehicleId,
       liters: row.liters,
       pricePerL: row.pricePerL,
+      odometer: row.odometer,
       source: row.source,
     })
   }
@@ -393,6 +426,8 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
       const liters = parseFloat(editDraft.liters)
       const pricePerL = parseFloat(editDraft.pricePerL) || 35
       const total = liters * pricePerL
+      // เลขไมล์เก็บบน fuel_records เท่านั้น (คอลัมน์ที่มีอยู่แล้ว)
+      const odometer = editDraft.odometer.trim() !== '' ? Number(editDraft.odometer) : 0
 
       const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
 
@@ -424,6 +459,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
             pricePerL,
             total,
             station: editDraft.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
+            odometer,
           },
         })
       }
@@ -434,6 +470,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
         vehicleId,
         liters: editDraft.liters,
         pricePerL: editDraft.pricePerL,
+        odometer: editDraft.odometer,
         source: editDraft.source,
         status: result.status,
         statusLabel: result.statusLabel,
@@ -487,7 +524,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
         <div>
           <h1 className="page-title">⚡ คีย์ด่วนน้ำมัน (Express Fuel Log)</h1>
           <div className="page-sub">
-            กด <kbd style={{ background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: 4, padding: '1px 6px', fontSize: 11 }}>Enter</kbd> เพื่อบันทึกแถวและขึ้นบรรทัดใหม่ · รองรับ Keyboard-only
+            กด <kbd style={{ background: '#F1F5F9', border: '1px solid #CBD5E1', borderRadius: 4, padding: '1px 6px', fontSize: 11 }}>Enter</kbd> เพื่อบันทึกแถวและขึ้นบรรทัดใหม่ · รองรับ Keyboard-only · กรอก <strong>เลขไมล์</strong> ไว้ได้ ระบบจะแนะนำเป็นไมล์ปิดรอบให้ตอนปิดงาน
           </div>
         </div>
         <div className="actions">
@@ -612,8 +649,27 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
             กด <kbd style={{ background: '#fff', border: '1px solid #CBD5E1', borderRadius: 4, padding: '1px 5px', fontSize: 10 }}>Enter</kbd> ที่ช่องสุดท้ายของแถวเพื่อบันทึก
           </span>
           <div style={{ flex: 1 }} />
+          {/* สลับแหล่งน้ำมันทั้งตารางทีเดียว — คีย์เร็วเมื่อทั้งชุดมาจากแหล่งเดียวกัน */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginRight: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>บันทึกทั้งหมดเป็น:</span>
+            {(['FACTORY_TANK', 'EXTERNAL_PUMP'] as FuelSource[]).map(s => (
+              <button
+                key={s}
+                onClick={() => applyGlobalSource(s)}
+                title="ตั้งแหล่งน้ำมันให้ทุกแถวที่ยังไม่บันทึก (แถวปิดรอบยังเป็นคลังโรงงานเสมอ)"
+                style={{
+                  background: globalSource === s ? '#0066CC' : '#fff',
+                  color: globalSource === s ? '#fff' : '#64748B',
+                  border: '1px solid ' + (globalSource === s ? '#0066CC' : '#CBD5E1'),
+                  borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit',
+                }}
+              >
+                {s === 'FACTORY_TANK' ? '🏭 คลังโรงงาน' : '⛽ ปั๊มนอก'}
+              </button>
+            ))}
+          </div>
           <button
-            onClick={() => setRows(prev => [...prev, makeRow()])}
+            onClick={() => setRows(prev => [...prev, makeRow(globalSource)])}
             style={{ background: 'none', border: '1px solid #CBD5E1', borderRadius: 6, padding: '4px 12px', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit', color: '#64748B' }}
           >
             + เพิ่มแถว
@@ -625,13 +681,13 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#F8FAFC', borderBottom: '2px solid #E2E8F0' }}>
-                {(['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ']
+                {(['#', 'วันที่', 'ทะเบียน', 'ลิตร', 'ราคา/ลิตร', 'เลขไมล์ (ตอนเติม)', 'แหล่งน้ำมัน', 'สถานะ', 'จัดการ']
                 ).map((h, hi) => (
                   <th key={hi} style={{
                     padding: '9px 12px',
-                    textAlign: hi === 0 ? 'center' : hi === 3 || hi === 4 ? 'right' : hi === 7 ? 'center' : 'left',
+                    textAlign: hi === 0 ? 'center' : (hi === 3 || hi === 4 || hi === 5) ? 'right' : hi === 8 ? 'center' : 'left',
                     color: '#64748B', fontSize: 11, fontWeight: 700,
-                    width: [40, 130, 155, 95, 110, 165, undefined, 120][hi],
+                    width: [40, 130, 155, 95, 110, 120, 165, undefined, 120][hi],
                     whiteSpace: 'nowrap',
                   }}>{h}</th>
                 ))}
@@ -782,8 +838,41 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                       )}
                     </td>
 
+                    {/* เลขไมล์ (ตอนเติม) — เก็บไว้เฉย ๆ; หน้าปิดงานจะนำไปแนะนำเป็นไมล์ปิดรอบ */}
+                    <td style={{ padding: '5px 7px', verticalAlign: 'top' }}>
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={editDraft.odometer}
+                          onChange={e => setEditDraft(d => ({ ...d, odometer: e.target.value }))}
+                          placeholder="เลขไมล์"
+                          style={{ ...cellInput, textAlign: 'right' }}
+                        />
+                      ) : (
+                        <>
+                          <input
+                            id={`cell-${i}-4`}
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={row.odometer}
+                            disabled={locked || row.reversed}
+                            onChange={e => patchRow(i, { odometer: e.target.value })}
+                            onKeyDown={onKeyDown(i, false)}
+                            placeholder="— (ถ้ามี)"
+                            style={{ ...cellInput, textAlign: 'right', border: '1px solid var(--line)', background: locked ? 'transparent' : '#fff', opacity: locked ? 0.55 : 1 }}
+                          />
+                          {!locked && row.odometer.trim() !== '' && (
+                            <div style={{ fontSize: 10, color: '#64748B', marginTop: 2 }}>ใช้แนะนำตอนปิดรอบ</div>
+                          )}
+                        </>
+                      )}
+                    </td>
+
                     {/* แหล่ง */}
-                    <td style={{ padding: '5px 7px' }}>
+                    <td style={{ padding: '5px 7px', verticalAlign: 'top' }}>
                       {isEditing ? (
                         <select
                           value={editDraft.source}
@@ -795,7 +884,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                         </select>
                       ) : (
                         <select
-                          id={`cell-${i}-4`}
+                          id={`cell-${i}-5`}
                           value={row.source}
                           disabled={locked || row.reversed}
                           onChange={e => {
@@ -918,7 +1007,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
               บันทึกทั้งหมด ({uncommitted})
             </button>
           )}
-          <button className="btn" onClick={() => setRows([makeRow()])} style={{ fontSize: 13 }}>
+          <button className="btn" onClick={() => setRows([makeRow(globalSource)])} style={{ fontSize: 13 }}>
             ล้างตาราง
           </button>
         </div>
