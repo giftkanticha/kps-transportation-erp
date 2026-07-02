@@ -158,6 +158,10 @@ export interface DispatchLeg {
   billToLocationId?: string | null
   /** ไม่ต้องวางบิล/ไม่มีลูกค้า (งานภายใน) — ตัดออกจากหน้าวางบิลและยอดค้าง */
   noBill?: boolean
+  /** วันที่ขึ้นสินค้า/รับของต้นทาง (ขาไป) */
+  loadDate?: string | null
+  /** วันที่ลงสินค้า/ส่งของปลายทาง */
+  unloadDate?: string | null
 }
 
 export interface OtherExpense {

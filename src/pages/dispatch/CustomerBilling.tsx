@@ -4,7 +4,7 @@ import { db } from '../../lib/db'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { Icon, Field } from '../../components/ui'
-import type { CompanyBankAccount, BillingNote, Dispatch, DispatchLeg, Location } from '../../types'
+import type { CompanyBankAccount, BillingNote, Dispatch, DispatchLeg, Location, Vehicle } from '../../types'
 
 const docTypeLabel = (t: BillingNote['docType']) => (t === 'receipt' ? 'ใบเสร็จรับเงิน' : 'ใบวางบิล')
 
@@ -31,8 +31,11 @@ export function CustomerBilling() {
   const [printNote, setPrintNote] = useState<BillingNote | null>(null)
   const [printOrient, setPrintOrient] = useState<'portrait' | 'landscape'>('landscape')
   const [printFont, setPrintFont] = useState(9)  // ขนาดตัวอักษรใบพิมพ์ (pt)
+  const [payNote, setPayNote] = useState<BillingNote | null>(null)   // ใบที่กำลังบันทึกรับเงิน
+  const [payDate, setPayDate] = useState('')                         // วันที่รับโอนจริง
 
   const { data: locations = [] } = useList<Location>('locations')
+  const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: dispatches = [] } = useDispatches()
   const { data: bankAccounts = [] } = useList<CompanyBankAccount>('company_bank_accounts')
   const { data: notes = [] } = useList<BillingNote>('billing_notes')
@@ -47,6 +50,13 @@ export function CustomerBilling() {
     [locations],
   )
   const locById = useMemo(() => new Map(locations.map(l => [l.id, l])), [locations])
+  const vehicleById = useMemo(() => new Map(vehicles.map(v => [v.id, v])), [vehicles])
+  const plateOf = (d: Dispatch) => (d.vehicleId ? vehicleById.get(d.vehicleId)?.plate : '') || '—'
+  // ป้ายเตือนว่าขานี้มาจากรอบที่ยังไม่ปิด (ยอดเป็นข้อมูลชั่วคราว อาจเปลี่ยนตอนปิดรอบจริง)
+  const draftBadge = (d: Dispatch) =>
+    d.roundStatus !== 'closed'
+      ? <span className="badge amber" style={{ fontSize: 10, marginLeft: 6 }} title="ยังไม่ปิดรอบ — ยอดอาจเปลี่ยนตอนปิดรอบจริง">ยังไม่ปิดรอบ</span>
+      : null
   const custByName = useMemo(() => {
     const m = new Map<string, Location>()
     for (const l of customerLocs) m.set(l.name, l)
@@ -75,17 +85,43 @@ export function CustomerBilling() {
     return s
   }, [notes])
 
+  // สถานะการวางบิล/รับเงินราย "ขา" (ข้ามโน้ตที่ยกเลิก) — ใช้ในโต๊ะภาพรวม
+  const legStatusById = useMemo(() => {
+    const m = new Map<string, 'paid' | 'issued'>()
+    const paidAt = new Map<string, string>()
+    for (const n of notes) {
+      if (n.status === 'void') continue
+      for (const id of n.legIds ?? []) {
+        // paid ชนะ issued เสมอ (ขาอยู่ในใบเสร็จ = รับเงินแล้ว)
+        if (n.status === 'paid') { m.set(id, 'paid'); if (n.paidAt) paidAt.set(id, n.paidAt) }
+        else if (!m.has(id)) m.set(id, 'issued')
+      }
+    }
+    return { status: m, paidAt }
+  }, [notes])
+
   const mk = (leg: DispatchLeg, round: Dispatch): BillableLeg => {
     const wht = db.legWht(leg)
     return { leg, round, gross: leg.amount || 0, wht, net: (leg.amount || 0) - wht }
   }
 
+  // วันที่ขึ้น/ลงของขา — ถ้าไม่ได้กรอกต่อขา ให้ fallback ไปวันที่ของรอบ (ขาเก่ายังทำงาน)
+  const legLoadDate = (b: BillableLeg) => b.leg.loadDate || b.round.date
+  const legUnloadDate = (b: BillableLeg) => b.leg.unloadDate || (b.round.returnAt || '').slice(0, 10) || b.round.date
+
+  // ขาที่ข้อมูลครบพอจะวางบิลได้แม้ยังไม่ปิดรอบ:
+  // เหมา = ยอดไม่ขึ้นกับน้ำหนักปลายทาง | อื่นๆ = ต้องกรอกน้ำหนักปลายทางแล้ว
+  const legDataReady = (l: DispatchLeg) =>
+    (l.amount || 0) > 0 && (l.priceMode === 'lump' || l.deliveredWeight != null)
+
   const eligible = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
-      if (d.roundStatus !== 'closed' || (!allMonths && roundMonth(d) !== month)) continue
+      if (!allMonths && roundMonth(d) !== month) continue
+      const closed = d.roundStatus === 'closed'
       for (const leg of d.legs ?? []) {
         if (!leg.id || leg.noBill || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
+        if (!closed && !legDataReady(leg)) continue   // รอบ draft: เอาเฉพาะขาที่ข้อมูลครบ
         if (billTo(leg)?.id !== customerId) continue
         out.push(mk(leg, d))
       }
@@ -94,13 +130,15 @@ export function CustomerBilling() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dispatches, customerId, month, allMonths, billedLegIds, custByName, locById])
 
-  // ขาที่ปิดงานในเดือนนี้ มีค่าขนส่ง แต่ยังหา "ผู้รับบิล" ไม่ได้ (ปลายทางไม่ใช่ลูกค้า & ไม่ override)
+  // ขาที่ปิดงาน/ข้อมูลครบในเดือนนี้ มีค่าขนส่ง แต่ยังหา "ผู้รับบิล" ไม่ได้ (ปลายทางไม่ใช่ลูกค้า & ไม่ override)
   const unassignedLegs = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
-      if (d.roundStatus !== 'closed' || (!allMonths && roundMonth(d) !== month)) continue
+      if (!allMonths && roundMonth(d) !== month) continue
+      const closed = d.roundStatus === 'closed'
       for (const leg of d.legs ?? []) {
         if (!leg.id || leg.noBill || (leg.amount || 0) <= 0 || billedLegIds.has(leg.id)) continue
+        if (!closed && !legDataReady(leg)) continue
         if (billTo(leg)) continue
         out.push(mk(leg, d))
       }
@@ -113,14 +151,56 @@ export function CustomerBilling() {
   const noBillLegs = useMemo<BillableLeg[]>(() => {
     const out: BillableLeg[] = []
     for (const d of dispatches) {
-      if (d.roundStatus !== 'closed' || (!allMonths && roundMonth(d) !== month)) continue
+      if (!allMonths && roundMonth(d) !== month) continue
+      const closed = d.roundStatus === 'closed'
       for (const leg of d.legs ?? []) {
         if (!leg.id || !leg.noBill || (leg.amount || 0) <= 0) continue
+        if (!closed && !legDataReady(leg)) continue
         out.push(mk(leg, d))
       }
     }
     return out.sort((a, b) => (a.round.date || '').localeCompare(b.round.date || ''))
   }, [dispatches, month, allMonths])
+
+  // โต๊ะภาพรวมรายลูกค้า — ทุกเดือน (ไม่ผูกตัวกรองเดือน เพื่อไม่ให้ยอดค้างข้ามเดือนหาย)
+  interface CustOverview {
+    id: string; name: string; total: number
+    unbilled: number; unbilledAmt: number
+    issued: number; issuedAmt: number
+    paid: number; paidAmt: number
+    outstanding: number; lastPaidAt: string; overdue: boolean
+  }
+  const overview = useMemo<CustOverview[]>(() => {
+    const todayMs = Date.now()
+    const map = new Map<string, CustOverview>()
+    for (const d of dispatches) {
+      const closed = d.roundStatus === 'closed'
+      const baseDate = (d.returnAt || d.depart || d.date || '').slice(0, 10)
+      for (const leg of d.legs ?? []) {
+        if (!leg.id || leg.noBill || (leg.amount || 0) <= 0) continue
+        if (!closed && !legDataReady(leg)) continue
+        const loc = billTo(leg)
+        if (!loc) continue
+        const net = (leg.amount || 0) - db.legWht(leg)
+        const cur = map.get(loc.id) ?? { id: loc.id, name: loc.name, total: 0, unbilled: 0, unbilledAmt: 0, issued: 0, issuedAmt: 0, paid: 0, paidAmt: 0, outstanding: 0, lastPaidAt: '', overdue: false }
+        cur.total += 1
+        const st = legStatusById.status.get(leg.id)
+        if (st === 'paid') {
+          cur.paid += 1; cur.paidAmt += net
+          const pa = legStatusById.paidAt.get(leg.id) || ''
+          if (pa > cur.lastPaidAt) cur.lastPaidAt = pa
+        } else {
+          if (st === 'issued') { cur.issued += 1; cur.issuedAmt += net }
+          else { cur.unbilled += 1; cur.unbilledAmt += net }
+          cur.outstanding += net
+          if (baseDate && todayMs > new Date(baseDate).getTime() + (loc.credit ?? 30) * 86400000) cur.overdue = true
+        }
+        map.set(loc.id, cur)
+      }
+    }
+    return [...map.values()].sort((a, b) => b.outstanding - a.outstanding)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dispatches, legStatusById, custByName, locById])
 
   const restoreNoBill = (legId: string) => updateLeg.mutate({ id: legId, patch: { noBill: false } })
 
@@ -219,9 +299,15 @@ export function CustomerBilling() {
     }
   }
 
-  const markNotePaid = async (n: BillingNote) => {
-    if (!confirm(`บันทึกว่าได้รับเงินตาม ${docTypeLabel(n.docType)} ${n.code} แล้ว?`)) return
-    await updateNote.mutateAsync({ id: n.id, patch: { status: 'paid', paidAt: new Date().toISOString() } })
+  // เปิดมินิ-โมดัลให้เลือก "วันที่รับโอนจริง" ก่อนบันทึกรับเงิน
+  const openMarkPaid = (n: BillingNote) => {
+    setPayDate(new Date().toISOString().slice(0, 10))
+    setPayNote(n)
+  }
+  const confirmMarkPaid = async () => {
+    if (!payNote || !payDate) return
+    await updateNote.mutateAsync({ id: payNote.id, patch: { status: 'paid', paidAt: new Date(payDate).toISOString() } })
+    setPayNote(null)
   }
   const voidNote = async (n: BillingNote) => {
     if (!confirm(`ยกเลิก ${docTypeLabel(n.docType)} ${n.code}? ขาในบิลจะกลับมาเลือกวางบิลใหม่ได้`)) return
@@ -255,7 +341,8 @@ export function CustomerBilling() {
   const exportNoteExcel = (n: BillingNote) => {
     const rows = legsForNote(n)
     const body = rows.map(b => [
-      db.thaiDate(b.round.date),
+      db.thaiDate(legLoadDate(b)),
+      db.thaiDate(legUnloadDate(b)),
       `${b.leg.origin} → ${b.leg.destination}`,
       b.leg.weight || 0,
       b.leg.deliveredWeight ?? '',
@@ -272,9 +359,9 @@ export function CustomerBilling() {
       [`ลูกค้า: ${n.customerName}`],
       [`วันที่ออก: ${db.thaiDate((n.issuedAt || new Date().toISOString()).slice(0, 10))}`],
       [],
-      ['วันที่', 'เส้นทาง', 'น้ำหนักต้น (ตัน)', 'น้ำหนักปลาย (ตัน)', 'หาย/เกิน (กก.)', 'ค่าบรรทุก', 'ยอดเต็ม', 'หัก 1%', 'สุทธิ'],
+      ['วันที่ขึ้น', 'วันที่ลง', 'เส้นทาง', 'น้ำหนักต้น (ตัน)', 'น้ำหนักปลาย (ตัน)', 'หาย/เกิน (กก.)', 'ค่าบรรทุก', 'ยอดเต็ม', 'หัก 1%', 'สุทธิ'],
       ...body,
-      ['', '', '', '', '', 'รวม', n.gross, n.whtAmount, n.net],
+      ['', '', '', '', '', '', 'รวม', n.gross, n.whtAmount, n.net],
     ]
     const bank = noteBank(n)
     if (bank) {
@@ -282,13 +369,13 @@ export function CustomerBilling() {
       aoa.push([`ชำระโดยโอนเข้าบัญชี: ${bank.bankName} ${bank.accountNo} ${bank.accountName}${bank.branch ? ` สาขา ${bank.branch}` : ''}`])
     }
     const ws = XLSX.utils.aoa_to_sheet(aoa)
-    ws['!cols'] = [{ wch: 14 }, { wch: 30 }, { wch: 15 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 13 }, { wch: 12 }, { wch: 13 }]
+    ws['!cols'] = [{ wch: 13 }, { wch: 13 }, { wch: 30 }, { wch: 15 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 13 }, { wch: 12 }, { wch: 13 }]
     for (let r = 7; r <= 7 + body.length; r++) {
-      for (const c of [2, 3, 6, 7, 8]) {  // น้ำหนัก + เงิน → 2 ตำแหน่ง
+      for (const c of [3, 4, 7, 8, 9]) {  // น้ำหนัก + เงิน → 2 ตำแหน่ง
         const addr = XLSX.utils.encode_cell({ r, c })
         if (ws[addr] && typeof ws[addr].v === 'number') ws[addr].z = '#,##0.00'
       }
-      const lossAddr = XLSX.utils.encode_cell({ r, c: 4 })  // หาย/เกิน → จำนวนเต็ม กก.
+      const lossAddr = XLSX.utils.encode_cell({ r, c: 5 })  // หาย/เกิน → จำนวนเต็ม กก.
       if (ws[lossAddr] && typeof ws[lossAddr].v === 'number') ws[lossAddr].z = '#,##0'
     }
     const wb = XLSX.utils.book_new()
@@ -301,7 +388,7 @@ export function CustomerBilling() {
       <div className="page-head no-print">
         <div>
           <h1 className="page-title">สรุป / วางบิลรายลูกค้า</h1>
-          <div className="page-sub">เลือกขาที่ปิดงานแล้วของลูกค้ามาออกใบวางบิล (หัก ณ ที่จ่าย 1% + เลขบัญชีบริษัท)</div>
+          <div className="page-sub">เลือกขาที่พร้อมวางบิลของลูกค้ามาออกใบวางบิล — รวมขาที่ข้อมูลครบแล้วแม้ยังไม่ปิดรอบ (หัก ณ ที่จ่าย 1% + เลขบัญชีบริษัท)</div>
         </div>
       </div>
 
@@ -335,10 +422,61 @@ export function CustomerBilling() {
         )}
       </div>
 
+      {/* โต๊ะภาพรวมรายลูกค้า — แสดงเมื่อยังไม่เลือกลูกค้า (กดแถวเพื่อเข้าไปออกบิล) */}
+      {!customerId && (
+        <div className="card no-print" style={{ marginBottom: 16 }}>
+          <div className="head"><h3>ภาพรวมการวางบิล/รับเงิน — ทุกลูกค้า (ทุกเดือน)</h3></div>
+          {overview.length === 0 ? (
+            <div className="empty" style={{ padding: 32 }}>ยังไม่มีขาที่ต้องวางบิล</div>
+          ) : (
+            <>
+              <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
+                กดแถวลูกค้าเพื่อไปออกใบวางบิล/ดูเอกสารของรายนั้น
+              </div>
+              <div className="tbl-wrap" style={{ border: 'none' }}>
+                <table className="tbl">
+                  <thead>
+                    <tr>
+                      <th>ลูกค้า</th>
+                      <th className="num right">เที่ยวต้องเก็บเงิน</th>
+                      <th className="num right">ยังไม่วางบิล</th>
+                      <th className="num right">รอรับเงิน</th>
+                      <th className="num right">รับแล้ว</th>
+                      <th className="num right">คงค้าง</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.map(o => (
+                      <tr key={o.id} onClick={() => { setCustomerId(o.id); setSelected(new Set()) }} style={{ cursor: 'pointer' }}>
+                        <td>
+                          {o.name}
+                          {o.overdue && <span className="badge red" style={{ fontSize: 10, marginLeft: 6 }}>เกินกำหนด</span>}
+                        </td>
+                        <td className="num right">{o.total}</td>
+                        <td className="num right">{o.unbilled > 0 ? `${o.unbilled} เที่ยว · ${db.thb(o.unbilledAmt)}` : '—'}</td>
+                        <td className="num right">{o.issued > 0 ? `${o.issued} เที่ยว · ${db.thb(o.issuedAmt)}` : '—'}</td>
+                        <td className="num right">
+                          {o.paid > 0
+                            ? <>{o.paid} เที่ยว · {db.thb(o.paidAmt)}{o.lastPaidAt ? <span className="muted" style={{ fontSize: 11 }}> · รับล่าสุด {db.thaiDate(o.lastPaidAt.slice(0, 10))}</span> : null}</>
+                            : '—'}
+                        </td>
+                        <td className="num right" style={{ fontWeight: 700, color: o.outstanding > 0 ? 'var(--primary)' : undefined }}>{o.outstanding > 0 ? db.thb(o.outstanding) : '—'}</td>
+                        <td className="right"><span className="muted" style={{ fontSize: 12 }}>ดู →</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {unassignedLegs.length > 0 && (
         <div className="card no-print" style={{ marginBottom: 16, borderColor: '#FCD34D' }}>
           <div className="head" style={{ background: '#FFFBEB' }}>
-            <h3>⚠️ ขาที่ปิดงานแล้วยังไม่มีผู้รับบิล — {allMonths ? 'ทุกเดือน' : 'เดือนนี้'} ({unassignedLegs.length})</h3>
+            <h3>⚠️ ขาที่พร้อมวางบิลยังไม่มีผู้รับบิล — {allMonths ? 'ทุกเดือน' : 'เดือนนี้'} ({unassignedLegs.length})</h3>
           </div>
           <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
             เลือก “เก็บเงินจาก” ให้แต่ละขา — เลือกปลายทาง/ต้นทางของขานั้นได้เลย ระบบจะตั้งเป็นลูกค้าให้อัตโนมัติ (ครั้งหน้าขาที่ไปที่เดียวกันจะเข้าเอง)
@@ -346,13 +484,15 @@ export function CustomerBilling() {
           <div className="tbl-wrap" style={{ border: 'none' }}>
             <table className="tbl">
               <thead>
-                <tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th className="num right">ยอด</th><th>เก็บเงินจาก (ตั้งเป็นลูกค้า)</th></tr>
+                <tr><th>รหัสรอบ</th><th>ทะเบียนรถ</th><th>วันที่ขึ้น</th><th>วันที่ลง</th><th>เส้นทาง</th><th className="num right">ยอด</th><th>เก็บเงินจาก (ตั้งเป็นลูกค้า)</th></tr>
               </thead>
               <tbody>
                 {unassignedLegs.map(b => (
                   <tr key={b.leg.id}>
-                    <td className="mono">{b.round.code}</td>
-                    <td>{db.thaiDate(b.round.date)}</td>
+                    <td className="mono">{b.round.code}{draftBadge(b.round)}</td>
+                    <td className="mono">{plateOf(b.round)}</td>
+                    <td>{db.thaiDate(legLoadDate(b))}</td>
+                    <td>{db.thaiDate(legUnloadDate(b))}</td>
                     <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
                     <td className="num right">{db.thb(b.gross)}</td>
                     <td>
@@ -384,13 +524,15 @@ export function CustomerBilling() {
           <div className="tbl-wrap" style={{ border: 'none' }}>
             <table className="tbl">
               <thead>
-                <tr><th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th className="num right">ยอด</th><th></th></tr>
+                <tr><th>รหัสรอบ</th><th>ทะเบียนรถ</th><th>วันที่ขึ้น</th><th>วันที่ลง</th><th>เส้นทาง</th><th className="num right">ยอด</th><th></th></tr>
               </thead>
               <tbody>
                 {noBillLegs.map(b => (
                   <tr key={b.leg.id}>
-                    <td className="mono">{b.round.code}</td>
-                    <td>{db.thaiDate(b.round.date)}</td>
+                    <td className="mono">{b.round.code}{draftBadge(b.round)}</td>
+                    <td className="mono">{plateOf(b.round)}</td>
+                    <td>{db.thaiDate(legLoadDate(b))}</td>
+                    <td>{db.thaiDate(legUnloadDate(b))}</td>
                     <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
                     <td className="num right">{db.thb(b.gross)}</td>
                     <td className="right">
@@ -407,7 +549,7 @@ export function CustomerBilling() {
       {customerId && (
         <>
           <div className="card no-print" style={{ marginBottom: 16 }}>
-            <div className="head"><h3>ขาที่ปิดงานแล้ว ยังไม่วางบิล ({eligible.length})</h3></div>
+            <div className="head"><h3>ขาที่พร้อมวางบิล (ปิดงานแล้ว/ข้อมูลครบ) ยังไม่วางบิล ({eligible.length})</h3></div>
             {eligible.length > 0 && (
               <div style={{ padding: '8px 16px', fontSize: 12.5 }} className="muted">
                 ✅ ติ๊กเลือกขาที่จะวางบิล แล้วปุ่ม “ออกใบวางบิล / ใบเสร็จ” จะขึ้นด้านล่าง
@@ -415,9 +557,10 @@ export function CustomerBilling() {
             )}
             {eligible.length === 0 ? (
               <div className="empty" style={{ padding: 32 }}>
-                ไม่มีขาของลูกค้ารายนี้ที่ปิดงานแล้วและยังไม่วางบิลในเดือนนี้
+                ไม่มีขาของลูกค้ารายนี้ที่พร้อมวางบิลและยังไม่วางบิลในเดือนนี้
                 <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                  (ขาจะมาที่นี่เมื่อ: ปลายทาง = ลูกค้ารายนี้ หรือเลือก “เก็บเงินจาก” เป็นรายนี้ + ปิดงานแล้ว + มีค่าขนส่ง &gt; 0)
+                  (ขาจะมาที่นี่เมื่อ: ปลายทาง = ลูกค้ารายนี้ หรือเลือก “เก็บเงินจาก” เป็นรายนี้ + มีค่าขนส่ง &gt; 0 + ปิดงานแล้ว
+                  {' '}หรือกรอกน้ำหนักปลายทางครบแล้วบันทึกร่าง)
                 </div>
               </div>
             ) : (
@@ -426,7 +569,7 @@ export function CustomerBilling() {
                   <thead>
                     <tr>
                       <th style={{ width: 36 }}><input type="checkbox" checked={selected.size === eligible.length && eligible.length > 0} onChange={toggleAll} style={{ accentColor: 'var(--primary)' }} /></th>
-                      <th>รหัสรอบ</th><th>วันที่</th><th>เส้นทาง</th><th>สินค้า</th>
+                      <th>รหัสรอบ</th><th>ทะเบียนรถ</th><th>วันที่ขึ้น</th><th>วันที่ลง</th><th>เส้นทาง</th><th>สินค้า</th>
                       <th className="num right">ยอดเต็ม</th><th className="num right">หัก 1%</th><th className="num right">สุทธิ</th>
                       <th>แก้ผู้รับบิล</th>
                     </tr>
@@ -435,8 +578,10 @@ export function CustomerBilling() {
                     {eligible.map(b => (
                       <tr key={b.leg.id} onClick={() => toggle(b.leg.id!)} style={{ cursor: 'pointer', background: selected.has(b.leg.id!) ? 'var(--primary-50)' : undefined }}>
                         <td><input type="checkbox" checked={selected.has(b.leg.id!)} onChange={() => toggle(b.leg.id!)} onClick={e => e.stopPropagation()} style={{ accentColor: 'var(--primary)' }} /></td>
-                        <td className="mono">{b.round.code}</td>
-                        <td>{db.thaiDate(b.round.date)}</td>
+                        <td className="mono">{b.round.code}{draftBadge(b.round)}</td>
+                        <td className="mono">{plateOf(b.round)}</td>
+                        <td>{db.thaiDate(legLoadDate(b))}</td>
+                        <td>{db.thaiDate(legUnloadDate(b))}</td>
                         <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
                         <td style={{ fontSize: 12.5 }}>{b.leg.cargoType || '—'}</td>
                         <td className="num right">{db.thb2(b.gross)}</td>
@@ -520,7 +665,7 @@ export function CustomerBilling() {
               </div>
               <div className="tbl-wrap" style={{ border: 'none' }}>
                 <table className="tbl">
-                  <thead><tr><th>เลขที่</th><th>ประเภท</th><th className="num right">ยอดสุทธิ</th><th>สถานะ</th><th></th></tr></thead>
+                  <thead><tr><th>เลขที่</th><th>ประเภท</th><th className="num right">ยอดสุทธิ</th><th>สถานะ</th><th>วันที่รับเงิน</th><th></th></tr></thead>
                   <tbody>
                     {customerNotes.map(n => (
                       <tr key={n.id} style={{ opacity: n.status === 'void' ? 0.5 : 1 }}>
@@ -528,11 +673,12 @@ export function CustomerBilling() {
                         <td>{docTypeLabel(n.docType)}</td>
                         <td className="num right">{db.thb2(n.net)}</td>
                         <td><span className={`badge ${n.status === 'paid' ? 'green' : n.status === 'void' ? 'red' : 'amber'}`} style={{ fontSize: 11 }}>{n.status === 'paid' ? 'รับเงินแล้ว' : n.status === 'void' ? 'ยกเลิก' : 'รอชำระ'}</span></td>
+                        <td>{n.status === 'paid' && n.paidAt ? db.thaiDate(n.paidAt.slice(0, 10)) : '—'}</td>
                         <td>
                           <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
                             <button className="btn ghost sm" onClick={() => setPrintNote(n)}><Icon name="download" size={13} /> พิมพ์</button>
                             <button className="btn ghost sm" onClick={() => exportNoteExcel(n)} style={{ color: 'var(--green)' }}><Icon name="download" size={13} /> Excel</button>
-                            {n.status === 'issued' && <button className="btn ghost sm" onClick={() => markNotePaid(n)} style={{ color: 'var(--green)' }}>รับเงินแล้ว</button>}
+                            {n.status === 'issued' && <button className="btn ghost sm" onClick={() => openMarkPaid(n)} style={{ color: 'var(--green)' }}>รับเงินแล้ว</button>}
                             {n.status !== 'void' && <button className="btn ghost sm" onClick={() => voidNote(n)} style={{ color: 'var(--red)' }}>ยกเลิก</button>}
                           </div>
                         </td>
@@ -544,6 +690,25 @@ export function CustomerBilling() {
             </div>
           )}
         </>
+      )}
+
+      {/* มินิ-โมดัลเลือกวันที่รับโอนจริง ก่อนบันทึกรับเงิน */}
+      {payNote && (
+        <div onClick={() => setPayNote(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} className="card pad" style={{ background: 'var(--card)', width: '90%', maxWidth: 380 }}>
+            <h3 style={{ marginTop: 0, marginBottom: 4 }}>บันทึกรับเงิน</h3>
+            <div className="muted" style={{ fontSize: 12.5, marginBottom: 14 }}>
+              {docTypeLabel(payNote.docType)} {payNote.code} · สุทธิ {db.thb2(payNote.net)}
+            </div>
+            <Field label="วันที่รับโอนจริง *">
+              <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} />
+            </Field>
+            <div className="row btn-row" style={{ justifyContent: 'flex-end', marginTop: 16, gap: 8 }}>
+              <button className="btn" onClick={() => setPayNote(null)}>ยกเลิก</button>
+              <button className="btn primary" onClick={confirmMarkPaid} disabled={!payDate || updateNote.isPending}><Icon name="check" size={14} /> บันทึกรับเงิน</button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* เอกสารสำหรับพิมพ์ */}
@@ -564,7 +729,7 @@ export function CustomerBilling() {
           </div>
           <table className="tbl" style={{ width: '100%' }}>
             <thead><tr>
-              <th>วันที่</th><th>เส้นทาง</th>
+              <th>วันที่ขึ้น</th><th>วันที่ลง</th><th>เส้นทาง</th>
               <th className="num right">น้ำหนักต้น (กก.)</th>
               <th className="num right">น้ำหนักปลาย (กก.)</th>
               <th className="num right" style={{ width: 38 }}>± กก.</th>
@@ -576,7 +741,8 @@ export function CustomerBilling() {
             <tbody>
               {legsForNote(printNote).map(b => (
                 <tr key={b.leg.id}>
-                  <td>{db.thaiDate(b.round.date)}</td>
+                  <td>{db.thaiDate(legLoadDate(b))}</td>
+                  <td>{db.thaiDate(legUnloadDate(b))}</td>
                   <td>{b.leg.origin} → {b.leg.destination}</td>
                   <td className="num right">{db.fmt((b.leg.weight || 0) * 1000)}</td>
                   <td className="num right">{b.leg.deliveredWeight != null ? db.fmt(b.leg.deliveredWeight * 1000) : '—'}</td>
@@ -589,7 +755,7 @@ export function CustomerBilling() {
               ))}
             </tbody>
             <tfoot>
-              <tr><td colSpan={6} className="right"><strong>รวม</strong></td><td className="num right">{db.fmt2(printNote.gross)}</td><td className="num right">− {db.fmt2(printNote.whtAmount)}</td><td className="num right"><strong>{db.fmt2(printNote.net)}</strong></td></tr>
+              <tr><td colSpan={7} className="right"><strong>รวม</strong></td><td className="num right">{db.fmt2(printNote.gross)}</td><td className="num right">− {db.fmt2(printNote.whtAmount)}</td><td className="num right"><strong>{db.fmt2(printNote.net)}</strong></td></tr>
             </tfoot>
           </table>
           {noteBank(printNote) && (

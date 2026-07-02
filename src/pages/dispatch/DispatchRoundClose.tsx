@@ -46,6 +46,7 @@ interface LegCloseState {
   perDiem: string
   notes: string
   price: string   // ราคา/เรท (฿/ตัน, ฿/กก. หรือยอดเหมา) — แก้ค่าบรรทุกที่ตั้งตอนเปิดขาได้
+  unloadDate: string   // วันที่ลงสินค้า (ปลายทาง) — เติม/แก้ได้ตอนกรอกน้ำหนักปลายทาง
 }
 
 const MAX_WEIGHT_LOSS_KG = 100
@@ -250,6 +251,15 @@ function CloseForm({
       .sort((a, b) => a.dayDelta - b.dayDelta)
   }, [allFuelTxs, round?.vehicleId, round?.date])
 
+  // sync วันที่จากน้ำมันที่ผูก → "วันที่เติม" + "เวลาถึงฐาน" (เฉพาะส่วนวันที่ คงเวลาไว้)
+  // เพื่อไม่ต้องมาแก้วันที่ปิดรอบซ้ำให้ตรงกับน้ำมันคลังโรงงาน
+  const syncCloseDatesFromFuel = (fuelDate?: string | null) => {
+    if (!fuelDate) return
+    const d = fuelDate.slice(0, 10)
+    setClosingFuelDate(d)
+    setReturnAt(prev => `${d}T${prev.slice(11) || '00:00'}`)
+  }
+
   // หา odometer ของ tx จาก fuel_records ที่ตรงกัน (vehicleId + date + liters) แบบ
   // best-effort — ใช้ทั้งแนะนำไมล์ปลายรอบ และโชว์ป้ายเลขไมล์ในวิดเจ็ตน้ำมันลอย
   const odoForTx = (t: FuelTransaction): number => {
@@ -280,11 +290,15 @@ function CloseForm({
 
   const attachFloating = async (txId: string) => {
     try {
+      const tx = allFuelTxs.find(t => t.id === txId)
       await updateFuelTx.mutateAsync({
         id: txId,
         patch: { tripId: roundId, status: 'TRIP_LINKED' },
       })
-      setToast({ kind: 'success', msg: '✅ ผูกน้ำมันลอยกับรอบนี้แล้ว' })
+      // น้ำมันคลังโรงงาน = ฐานวันที่ปิดรอบ → ปรับวันที่ให้ตรงอัตโนมัติ (เลขไมล์ยังกรอกเอง)
+      const isFactory = tx?.source === 'FACTORY_TANK'
+      if (isFactory) syncCloseDatesFromFuel(tx?.date)
+      setToast({ kind: 'success', msg: isFactory ? '✅ ผูกน้ำมันคลังโรงงานแล้ว · ปรับวันที่ปิดรอบให้ตรงน้ำมันแล้ว' : '✅ ผูกน้ำมันลอยกับรอบนี้แล้ว' })
     } catch (e) {
       setToast({ kind: 'error', msg: e instanceof Error ? e.message : 'ผูกไม่สำเร็จ' })
     }
@@ -331,18 +345,25 @@ function CloseForm({
     if (initedRef.current !== round.id) {
       initedRef.current = round.id
       setEndMileage(round.endOdometer != null ? String(round.endOdometer) : '')
-      setReturnAt(round.returnAt || nowLocal())
+      // วันที่ของน้ำมันคลัง/ปลายรอบที่ผูกไว้แล้ว (ถ้ามี) — ใช้ตั้งต้นให้วันที่ปิดรอบตรงกัน
+      const linkedFuelDate =
+        ownClosingTx?.date
+        ?? externalClosing[0]?.date
+        ?? linkedFuelTxs.find(t => t.source === 'FACTORY_TANK')?.date
+        ?? null
+      // เวลาถึงฐาน: ค่าที่บันทึกไว้ > วันที่น้ำมันคลังที่ผูก > เวลาปัจจุบัน
+      setReturnAt(round.returnAt || (linkedFuelDate ? `${linkedFuelDate.slice(0, 10)}T00:00` : nowLocal()))
       setOtherExp(round.otherExpenses ?? [])
       setRoundNotes(round.notes || '')
       // Restore the closing fuel saved on a previous draft (persisted on the
       // dispatch row itself, so it survives reopen reliably).
       setClosingFuelLiters(round.closingFuelLiters != null ? String(round.closingFuelLiters) : '')
       setClosingFuelPrice(round.closingFuelPrice != null ? String(round.closingFuelPrice) : '')
-      // Default closing-fuel date: existing TRIP_CLOSING tx > round.date > today.
+      // Default closing-fuel date: existing TRIP_CLOSING/factory-tank tx > round.date > today.
       // This is what gets stamped on the fuel ledger so backdated trips don't
       // pull from today's stock balance.
       setClosingFuelDate(
-        ownClosingTx?.date
+        linkedFuelDate
         ?? round.date
         ?? new Date().toISOString().slice(0, 10),
       )
@@ -359,6 +380,7 @@ function CloseForm({
           perDiem: l.perDiem != null ? String(l.perDiem) : '',
           notes: l.notes || '',
           price: l.price != null ? String(l.price) : '',
+          unloadDate: l.unloadDate ?? '',
         })),
       )
     }
@@ -470,6 +492,7 @@ function CloseForm({
         amount: adjustedAmount(el, dwTon),
         perDiem: pd,
         notes: ls?.notes || l.notes,
+        unloadDate: ls?.unloadDate || l.unloadDate || null,
         closed: markClosed && (l.legType === 'return' || dwTon != null),
       }
     })
@@ -615,19 +638,19 @@ function CloseForm({
 
       // Persist each leg's closing data to its dispatch_legs row.
       await Promise.all(
-        newLegs.map(l =>
-          updateLeg.mutateAsync({
-            id: l.id as string,
-            patch: {
-              deliveredWeight: l.deliveredWeight,
-              price: l.price,
-              amount: l.amount,
-              perDiem: l.perDiem,
-              notes: l.notes,
-              closed: l.closed,
-            } as Partial<DispatchLeg>,
-          }),
-        ),
+        newLegs.map(l => {
+          const patch: Partial<DispatchLeg> = {
+            deliveredWeight: l.deliveredWeight,
+            price: l.price,
+            amount: l.amount,
+            perDiem: l.perDiem,
+            notes: l.notes,
+            closed: l.closed,
+          }
+          // ส่งวันที่ลงสินค้าเฉพาะเมื่อมีค่า — กัน error ถ้า DB ยังไม่ได้เพิ่มคอลัมน์ (migration 0041)
+          if (l.unloadDate) patch.unloadDate = l.unloadDate
+          return updateLeg.mutateAsync({ id: l.id as string, patch })
+        }),
       )
 
       await updateDispatch.mutateAsync({
@@ -829,6 +852,19 @@ function CloseForm({
                     )}
                   </Field>
                 )}
+                {!isReturn && (
+                  <Field label="วันที่ลงสินค้า (ปลายทาง)">
+                    <input
+                      type="date"
+                      value={ls.unloadDate}
+                      onChange={e => updateLegState(i, { unloadDate: e.target.value })}
+                      disabled={isClosed}
+                    />
+                    <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                      วันที่ส่งของถึงปลายทาง — ช่วยตรวจสอบตอนวางบิล
+                    </div>
+                  </Field>
+                )}
                 <Field label="เบี้ยเลี้ยง (฿) *">
                   <input
                     type="number"
@@ -955,6 +991,9 @@ function CloseForm({
               onChange={e => setReturnAt(e.target.value)}
               disabled={isClosed}
             />
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+              วันที่ปรับให้ตรงน้ำมันคลังโรงงานที่ผูก/เติมอัตโนมัติ — แก้เองได้
+            </div>
           </Field>
         </div>
 
@@ -1243,11 +1282,11 @@ function CloseForm({
                     type="date"
                     value={closingFuelDate}
                     max={new Date().toISOString().slice(0, 10)}
-                    onChange={e => setClosingFuelDate(e.target.value)}
+                    onChange={e => { setClosingFuelDate(e.target.value); if (e.target.value) setReturnAt(prev => `${e.target.value}T${prev.slice(11) || '00:00'}`) }}
                     disabled={isClosed}
                   />
                   <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                    วันที่ที่ใช้ตัดสต๊อกถังโรงงาน (รองรับย้อนหลัง)
+                    วันที่ที่ใช้ตัดสต๊อกถังโรงงาน (รองรับย้อนหลัง) · ปรับ “เวลาถึงฐาน” ให้ตรงวันนี้อัตโนมัติ
                   </div>
                 </Field>
                 <Field label="จำนวนน้ำมันเติมปลายรอบ (ลิตร)">
