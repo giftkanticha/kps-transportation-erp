@@ -217,6 +217,7 @@ function CloseForm({
   const [toast, setToast] = useState<ToastState | null>(null)
   const initedRef = useRef<string | null>(null)
   const legsInitedRef = useRef<string | null>(null)
+  const mileageAutoFilledRef = useRef<string | null>(null)
 
   // Fuel transactions linked to this round (Supabase ledger).
   const linkedFuelTxs = useMemo(
@@ -248,6 +249,34 @@ function CloseForm({
       }))
       .sort((a, b) => a.dayDelta - b.dayDelta)
   }, [allFuelTxs, round?.vehicleId, round?.date])
+
+  // หา odometer ของ tx จาก fuel_records ที่ตรงกัน (vehicleId + date + liters) แบบ
+  // best-effort — ใช้ทั้งแนะนำไมล์ปลายรอบ และโชว์ป้ายเลขไมล์ในวิดเจ็ตน้ำมันลอย
+  const odoForTx = (t: FuelTransaction): number => {
+    const rec = allFuelRecs.find(r =>
+      r.vehicleId === t.vehicleId &&
+      r.date?.slice(0, 10) === t.date?.slice(0, 10) &&
+      Math.abs((r.liters || 0) - (t.liters || 0)) < 0.01,
+    )
+    return rec?.odometer ?? 0
+  }
+
+  // แนะนำไมล์ "ปลายรอบ" จากเลขไมล์ที่คีย์ไว้ตอนคีย์ด่วน = เลขไมล์ "สูงสุด" (การเติม
+  // ตอนจบทริป) และต้อง > ไมล์ต้นรอบเสมอ — กันไม่ให้ไปหยิบไมล์ต้นรอบ (เช่นน้ำมัน
+  // ต้นรอบที่วันใกล้วันเปิดรอบ) มาแนะนำผิด
+  const suggestedMileage = useMemo<number | null>(() => {
+    if (!round?.vehicleId) return null
+    const start = round.startOdometer ?? 0
+    // (1) น้ำมันที่ผูกรอบนี้ — เลขไมล์สูงสุดที่ > ต้นรอบ
+    const linkedOdos = linkedFuelTxs.map(t => odoForTx(t)).filter(o => o > start)
+    if (linkedOdos.length > 0) return Math.max(...linkedOdos)
+    // (2) fallback — เลขไมล์สูงสุดของรถคันนี้ที่ > ต้นรอบ
+    const recOdos = allFuelRecs
+      .filter(r => r.vehicleId === round.vehicleId && (r.odometer ?? 0) > start)
+      .map(r => r.odometer as number)
+    return recOdos.length > 0 ? Math.max(...recOdos) : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedFuelTxs, allFuelRecs, round?.vehicleId, round?.startOdometer])
 
   const attachFloating = async (txId: string) => {
     try {
@@ -334,6 +363,21 @@ function CloseForm({
       )
     }
   }, [round])
+
+  // เติมช่อง "เลขไมล์ปลายรอบ" อัตโนมัติจากที่แนะนำ (ครั้งเดียวต่อรอบ) เมื่อรอบยังไม่มี
+  // ไมล์ปลายที่บันทึกไว้ และผู้ใช้ยังไม่ได้พิมพ์เอง. แยกจาก init effect เพราะ
+  // suggestedMileage มาช้ากว่า (fuel_records โหลด async หลังตัวรอบ). ref กันเขียนทับ
+  // หลังผู้ใช้แก้/ล้างค่า และตอน background refetch
+  useEffect(() => {
+    if (!round) return
+    if (mileageAutoFilledRef.current === round.id) return
+    if (round.endOdometer != null) { mileageAutoFilledRef.current = round.id; return }
+    if (endMileage !== '') return
+    if (suggestedMileage == null) return
+    mileageAutoFilledRef.current = round.id
+    setEndMileage(String(suggestedMileage))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [round?.id, round?.endOdometer, endMileage, suggestedMileage])
 
   if (!round) {
     return (
@@ -883,9 +927,21 @@ function CloseForm({
               type="number"
               value={endMileage}
               onChange={e => setEndMileage(e.target.value)}
-              placeholder="เช่น 248410"
+              placeholder={suggestedMileage != null ? String(suggestedMileage) : 'เช่น 248410'}
               disabled={isClosed}
             />
+            {!isClosed && !endMileage && suggestedMileage != null && (
+              <div style={{ fontSize: 11, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span className="muted">💡 แนะนำจากที่คีย์ไว้: <strong>{db.fmt(suggestedMileage)}</strong> km</span>
+                <button
+                  type="button"
+                  className="btn sm"
+                  onClick={() => setEndMileage(String(suggestedMileage))}
+                >
+                  ใช้เลขไมล์นี้
+                </button>
+              </div>
+            )}
             {distance > 0 && (
               <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
                 ระยะทาง: {db.fmt(distance)} km
@@ -1049,6 +1105,12 @@ function CloseForm({
                       <span style={{ marginLeft: 10, fontSize: 11 }}>
                         {t.source === 'FACTORY_TANK' ? '🏭 ถังโรงงาน' : '⛽ ปั๊มภายนอก'}
                       </span>
+                      {odoForTx(t) > 0 && (
+                        <>
+                          <span className="muted" style={{ marginLeft: 10 }}>·</span>
+                          <span style={{ marginLeft: 10, fontSize: 11 }}>📍 ไมล์ {db.fmt(odoForTx(t))}</span>
+                        </>
+                      )}
                       {isNear && (
                         <span style={{ marginLeft: 10, fontSize: 10.5, fontWeight: 700, color: '#92400E' }}>
                           ⭐ ใกล้วันเปิดรอบ
