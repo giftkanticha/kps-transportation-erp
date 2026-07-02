@@ -47,6 +47,7 @@ interface LegFormState {
   notes: string
   wht: boolean
   noBill: boolean
+  noBillReason: string
   loadDate: string
   unloadDate: string
 }
@@ -54,8 +55,11 @@ interface LegFormState {
 const EMPTY_LEG: LegFormState = {
   origin: '', destination: '', billToLocationId: '', cargo: '', cargoType: '',
   priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '', wht: false, noBill: false,
-  loadDate: '', unloadDate: '',
+  noBillReason: '', loadDate: '', unloadDate: '',
 }
+
+// เหตุผลมาตรฐานที่ขาไม่เก็บเงิน — ไว้ย้อนดูภายหลังว่าทำไมไม่วางบิล
+const NO_BILL_REASONS = ['เที่ยวเปล่า (ตีรถกลับ)', 'งานภายใน / ไม่มีลูกค้า', 'คิดรวมกับขาอื่น', 'อื่นๆ']
 
 function legTypeLabel(t?: string): string {
   if (t === 'backhaul') return 'Backhaul'
@@ -107,12 +111,51 @@ function LegModal({
 }) {
   const [f, setF] = useState(initial)
   const { data: locations = [] } = useList<Location>('locations')
+  const { data: allDispatches = [] } = useDispatches()
+  const insertLocation = useInsert<Location>('locations')
+  const updateLocation = useUpdate<Location>('locations')
   const customerLocs = locations.filter(l => l.isCustomer && l.active).sort((a, b) => a.name.localeCompare(b.name, 'th'))
   // ปลายทางเป็นลูกค้าไหม → ใช้เป็นค่าเริ่มต้นผู้รับบิล
   const destIsCustomer = customerLocs.some(l => l.name === f.destination.trim())
   const set = <K extends keyof LegFormState>(k: K, v: LegFormState[K]) => setF(s => ({ ...s, [k]: v }))
   const isReturn = f.legType === 'return'
   const isLump = f.priceMode === 'lump'
+
+  // ผู้ใช้แตะตัวเลือก เก็บเงิน/ไม่เก็บเงิน เองแล้วหรือยัง — ถ้ายัง ให้ default ตามประเภทขา
+  const [billTouched, setBillTouched] = useState(false)
+  const onLegTypeChange = (t: LegFormState['legType']) => {
+    setF(s => {
+      const next = { ...s, legType: t }
+      if (!billTouched) {
+        // เที่ยวเปล่า = ไม่เก็บเงินโดยธรรมชาติ / เที่ยวมีสินค้า = ต้องเก็บเงินเสมอ (จนกว่าผู้ใช้จะเลือกเอง)
+        next.noBill = t === 'return'
+        next.noBillReason = t === 'return' ? 'เที่ยวเปล่า (ตีรถกลับ)' : ''
+      }
+      return next
+    })
+  }
+
+  // จำจากประวัติ: ปลายทางนี้เคยเก็บเงินจากลูกค้ารายไหน → เติมให้อัตโนมัติ
+  const histBillTo = useMemo(() => {
+    const m = new Map<string, string>()
+    const sorted = [...allDispatches].sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+    for (const d of sorted) {
+      for (const l of d.legs ?? []) {
+        if (l.billToLocationId && l.destination) m.set(l.destination.trim(), l.billToLocationId)  // เที่ยวล่าสุดชนะ
+      }
+    }
+    return m
+  }, [allDispatches])
+  const [autoFilledFrom, setAutoFilledFrom] = useState('')
+  useEffect(() => {
+    if (f.noBill || f.billToLocationId || destIsCustomer || !f.destination.trim()) return
+    const hist = histBillTo.get(f.destination.trim())
+    if (hist && customerLocs.some(c => c.id === hist)) {
+      setF(s => ({ ...s, billToLocationId: hist }))
+      setAutoFilledFrom(f.destination.trim())
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [f.destination, histBillTo])
 
   // Switching priceMode auto-converts the weight value so the displayed number
   // represents the same load in the new unit.
@@ -134,7 +177,7 @@ function LegModal({
   // amount = weight × price when units match (per_ton: ตัน×฿/ตัน, per_kg: กก.×฿/กก.). Lump: just price.
   const previewAmount = isReturn ? 0 : isLump ? p : wInput * p
 
-  const submit = () => {
+  const submit = async () => {
     if (!f.origin.trim()) return alert('กรุณากรอกต้นทาง')
     if (!f.destination.trim()) return alert('กรุณากรอกปลายทาง')
     if (!isReturn) {
@@ -144,6 +187,31 @@ function LegModal({
         if (!confirm(`น้ำหนัก ${wInput.toLocaleString()} ตัน สูงผิดปกติ (ปกติ ≤ ${MAX_REALISTIC_TON} ตัน)\n\nถ้านี่คือค่าจากใบชั่ง (กก.) ควรกรอก ${(wInput / 1000).toLocaleString()} ตัน หรือเปลี่ยนหน่วยราคาเป็น "ต่อกิโลกรัม"\n\nยืนยันบันทึกค่านี้?`))
           return
       }
+    }
+    // ขาที่ "เก็บเงิน" ต้องรู้ว่าเก็บจากใครตั้งแต่ตอนบันทึก — ไม่ปล่อยให้ไปตกหล่นที่หน้าวางบิล
+    if (!f.noBill && !isReturn && !f.billToLocationId && !destIsCustomer) {
+      const name = f.destination.trim()
+      const ok = confirm(
+        `เที่ยวนี้ตั้งเป็น "เก็บเงิน (วางบิล)" แต่ปลายทาง "${name}" ยังไม่ใช่ลูกค้าในระบบ\n\n` +
+        `กด OK → ตั้ง "${name}" เป็นลูกค้า แล้วเก็บเงินจากที่นี่ (ครั้งหน้าระบบจะจำให้เอง)\n` +
+        `กด Cancel → กลับไปเลือก "เก็บเงินจาก" เอง หรือเปลี่ยนเป็น "ไม่เก็บเงิน"`,
+      )
+      if (!ok) return
+      try {
+        const existing = locations.find(l => l.name === name)
+        let locId: string
+        if (existing) {
+          if (!existing.isCustomer) await updateLocation.mutateAsync({ id: existing.id, patch: { isCustomer: true, credit: existing.credit ?? 30 } })
+          locId = existing.id
+        } else {
+          const created = await insertLocation.mutateAsync({ name, category: '', province: '', address: '', notes: '', active: true, isCustomer: true, credit: 30, taxId: '', phone: '', contact: '' })
+          locId = created.id
+        }
+        onSave({ ...f, billToLocationId: locId })
+      } catch (e) {
+        alert('ตั้งลูกค้าไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+      }
+      return
     }
     onSave(f)
   }
@@ -178,25 +246,73 @@ function LegModal({
         <div style={{ padding: '18px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className="grid-2" style={{ gap: 12 }}>
             <Field label="ประเภทขา">
-              <select value={f.legType} onChange={e => set('legType', e.target.value as LegFormState['legType'])}>
+              <select value={f.legType} onChange={e => onLegTypeChange(e.target.value as LegFormState['legType'])}>
                 <option value="outbound">Outbound (เที่ยวไป)</option>
                 <option value="backhaul">Backhaul (เที่ยวกลับ มีสินค้า)</option>
                 <option value="return">Return (เที่ยวกลับ เปล่า)</option>
               </select>
             </Field>
             <Field label="เก็บเงินจาก (ลูกค้า)">
-              <select value={f.billToLocationId} onChange={e => set('billToLocationId', e.target.value)} disabled={f.noBill}>
+              <select
+                value={f.billToLocationId}
+                onChange={e => { set('billToLocationId', e.target.value); setAutoFilledFrom('') }}
+                disabled={f.noBill}
+              >
                 <option value="">{destIsCustomer ? `— ใช้ปลายทาง: ${f.destination} —` : '— ใช้ปลายทางอัตโนมัติ —'}</option>
                 {customerLocs.map(l => (
                   <option key={l.id} value={l.id}>{l.name}</option>
                 ))}
               </select>
+              {!f.noBill && !!f.billToLocationId && autoFilledFrom === f.destination.trim() && (
+                <div className="muted" style={{ fontSize: 11, marginTop: 4, color: 'var(--primary)' }}>
+                  ✓ เติมให้อัตโนมัติจากเที่ยวก่อนหน้าที่ไป “{autoFilledFrom}” — เปลี่ยนได้ถ้าไม่ใช่
+                </div>
+              )}
             </Field>
           </div>
-          <label className="row" style={{ gap: 8, cursor: 'pointer', fontSize: 13, alignItems: 'center' }}>
-            <input type="checkbox" checked={f.noBill} onChange={e => set('noBill', e.target.checked)} style={{ accentColor: 'var(--primary)' }} />
-            <span>ไม่ต้องวางบิล (งานภายใน / ไม่มีลูกค้า) — ตัดออกจากหน้าวางบิลและยอดค้าง</span>
-          </label>
+          {/* คำถามหลักที่ห้ามข้าม: เที่ยวนี้เก็บเงินไหม — แทน checkbox เล็กๆ เดิมที่มักถูกมองข้าม */}
+          <div
+            style={{
+              padding: '10px 14px', borderRadius: 8,
+              background: f.noBill ? 'var(--bg)' : '#F0FDF4',
+              border: f.noBill ? '1px dashed var(--line)' : '1px solid #BBF7D0',
+            }}
+          >
+            <div className="row" style={{ gap: 20, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>การเก็บเงินเที่ยวนี้ *</span>
+              <label className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13, alignItems: 'center' }}>
+                <input
+                  type="radio" name="leg-bill" checked={!f.noBill}
+                  onChange={() => { setBillTouched(true); setF(s => ({ ...s, noBill: false, noBillReason: '' })) }}
+                  style={{ accentColor: 'var(--green)' }}
+                />
+                <span>💰 เก็บเงิน (วางบิลลูกค้า)</span>
+              </label>
+              <label className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13, alignItems: 'center' }}>
+                <input
+                  type="radio" name="leg-bill" checked={f.noBill}
+                  onChange={() => { setBillTouched(true); setF(s => ({ ...s, noBill: true, noBillReason: s.noBillReason || (s.legType === 'return' ? 'เที่ยวเปล่า (ตีรถกลับ)' : '') })) }}
+                  style={{ accentColor: 'var(--primary)' }}
+                />
+                <span>🚫 ไม่เก็บเงิน</span>
+              </label>
+              {f.noBill && (
+                <select
+                  value={f.noBillReason}
+                  onChange={e => set('noBillReason', e.target.value)}
+                  style={{ fontSize: 12.5, minWidth: 170 }}
+                >
+                  <option value="">— เหตุผล (เลือกได้) —</option>
+                  {NO_BILL_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+              )}
+            </div>
+            {f.noBill && (
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+                เที่ยวนี้จะถูกตัดออกจากหน้าวางบิลและยอดค้าง — ย้อนดู/เอากลับมาได้ที่หน้า สรุป/วางบิลรายลูกค้า
+              </div>
+            )}
+          </div>
           <div className="grid-2" style={{ gap: 12 }}>
             <Field label="ต้นทาง *">
               <LocationCombobox value={f.origin} onChange={v => set('origin', v)} placeholder="เช่น โรงงาน KPS" />
@@ -667,6 +783,8 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
     // ส่งคอลัมน์วันที่เฉพาะเมื่อมีค่า — กัน error ถ้า DB ยังไม่ได้เพิ่มคอลัมน์ (migration 0041)
     if (form.loadDate) (fields as Record<string, unknown>).loadDate = form.loadDate
     if (form.unloadDate) (fields as Record<string, unknown>).unloadDate = form.unloadDate
+    // เหตุผลไม่เก็บเงิน — ส่งเฉพาะเมื่อมีค่า กัน error ถ้ายังไม่รัน migration 0042
+    if (form.noBill && form.noBillReason) (fields as Record<string, unknown>).noBillReason = form.noBillReason
     try {
       let nextLegs: DispatchLeg[]
       if (editingLeg.index < 0) {
@@ -892,6 +1010,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                                   destination: l.destination,
                                   billToLocationId: l.billToLocationId || '',
                                   noBill: l.noBill ?? false,
+                                  noBillReason: l.noBillReason ?? '',
                                   cargo: l.cargo || '',
                                   cargoType: l.cargoType || '',
                                   priceMode: mode,

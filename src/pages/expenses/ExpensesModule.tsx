@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
-import { Icon, Field, Info, SearchInput, FontScaleControl } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
+import { Icon, Field, Info, SearchInput, FontScaleControl } from '../../components/ui'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
 interface ExpensesModuleProps {
@@ -26,10 +26,12 @@ const inlineInput: React.CSSProperties = {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-const isKPSPartner = (partnerId: string, partners: Partner[]): boolean => {
-  const p = partners.find((x) => x.id === partnerId)
-  return !!p && p.name.replace(/\s+/g, '') === KPS_WAREHOUSE_NAME.replace(/\s+/g, '')
-}
+// คู่ค้านี้เป็น "คลังอะไหล่ KPS" ที่ต้องตัดสต็อคหรือไม่ — ผูกด้วยธง isWarehouse เป็นหลัก
+// และยังรองรับชื่อเดิม 'คลังอะไหล่ KPS' ไว้ (คู่ค้าเก่าที่ยังไม่ได้ติดธง)
+const isWarehousePartner = (p: Partner | undefined): boolean =>
+  !!p && (p.isWarehouse === true || p.name.replace(/\s+/g, '') === KPS_WAREHOUSE_NAME.replace(/\s+/g, ''))
+const isKPSPartner = (partnerId: string, partners: Partner[]): boolean =>
+  isWarehousePartner(partners.find((x) => x.id === partnerId))
 
 // Build stock movement patches for KPS warehouse expense lines.
 // sign = -1 to deduct (when adding/editing an expense), +1 to revert (when removing/editing)
@@ -88,7 +90,7 @@ export function ExpensesModule({ tab, setActive }: ExpensesModuleProps) {
 
   return (
     <div>
-      <div className="page-head">
+      <div className="page-head no-print">
         <div>
           <h1 className="page-title">ระบบค่าใช้จ่าย</h1>
         </div>
@@ -1054,6 +1056,7 @@ function ExpFinance() {
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: stocks = [] } = useList<StockItem>('stock_items')
   const [editing, setEditing] = useState<ExpenseHeader | null>(null)
+  const { print } = usePrint()
 
   const today = (() => { const d = new Date(); d.setHours(0,0,0,0); return d })()
   const unpaidHeaders = headers.filter((h) => !h.paid)
@@ -1092,10 +1095,18 @@ function ExpFinance() {
   }, [list, partners])
 
   const targetGroup = storeGroups.find((g) => g.partnerId === storeTarget)
+  // ยอดรวมของรายการที่กำลังแสดง (ตามตัวกรอง) — ใช้บนใบพิมพ์สรุปยอดค้าง
+  const printTotal = storeGroups.reduce((s, g) => s + g.total, 0)
+  const printOverdue = storeGroups.reduce((s, g) => s + g.overdueCount, 0)
+  const filterLabel =
+    filter === 'overdue' ? 'เฉพาะที่เกินกำหนดชำระ' : filter === 'due' ? 'เฉพาะที่ใกล้ครบกำหนด' : 'ยอดค้างชำระทั้งหมด'
+  // วันครบกำหนดที่ใกล้ที่สุดของร้าน (บิลที่ต้องจ่ายก่อน) — ใช้บนใบพิมพ์
+  const nearestDue = (hs: ExpenseHeader[]): string =>
+    hs.map((h) => h.dueDate).filter(Boolean).sort()[0] ?? ''
 
   return (
     <div>
-      <div className="grid-4" style={{ marginBottom: 18 }}>
+      <div className="grid-4 no-print" style={{ marginBottom: 18 }}>
         <div className="card kpi">
           <div className="label">ยอดค้างชำระทั้งหมด</div>
           <div className="mono" style={{ fontSize: 26, fontWeight: 700, marginTop: 8, color: 'var(--red)' }}>
@@ -1122,7 +1133,7 @@ function ExpFinance() {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card no-print">
         <div className="head">
           <h3>รายการเจ้าหนี้ (Accounts Payable)</h3>
           <div className="right">
@@ -1143,6 +1154,15 @@ function ExpFinance() {
               <option value="overdue">เกินกำหนด</option>
               <option value="due">ใกล้ครบกำหนด</option>
             </select>
+            <button
+              className="btn sm"
+              onClick={() => print('landscape')}
+              disabled={storeGroups.length === 0}
+              title="พิมพ์สรุปยอดค้างพร้อมเลขบัญชี (ตามตัวกรองที่เลือก)"
+              style={{ marginLeft: 8 }}
+            >
+              <Icon name="download" size={13} /> พิมพ์สรุปยอดค้าง
+            </button>
           </div>
         </div>
         <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
@@ -1239,6 +1259,68 @@ function ExpFinance() {
           onSaved={() => setEditing(null)}
         />
       )}
+
+      {/* ── เอกสารพิมพ์: สรุปยอดเจ้าหนี้คงค้าง + เลขบัญชี (สำหรับส่งให้อนุมัติ/โอนจ่าย) ── */}
+      <div className="print-only">
+        <div className="kps-print-header">
+          <p className="co">KPS TRANSPORTATION</p>
+          <p className="ttl">สรุปยอดเจ้าหนี้คงค้าง (Accounts Payable)</p>
+          <p className="sub">
+            {filterLabel} · {storeGroups.length} ร้าน · รวม {db.fmt(printTotal)} ฿
+            {printOverdue > 0 ? ` · เกินกำหนด ${printOverdue} รายการ` : ''}
+          </p>
+          <p className="ts">พิมพ์เมื่อ {db.thaiDate(new Date().toISOString().slice(0, 10))}</p>
+        </div>
+        <table className="tbl" style={{ width: '100%' }}>
+          <thead>
+            <tr>
+              <th style={{ width: 28 }}>#</th>
+              <th>ช่าง / ร้านค้า</th>
+              <th>ธนาคาร</th>
+              <th>เลขที่บัญชี</th>
+              <th>ชื่อบัญชี</th>
+              <th>ครบกำหนด</th>
+              <th className="num right">รายการ</th>
+              <th className="num right">ยอดค้าง (฿)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {storeGroups.map((g, i) => {
+              const due = nearestDue(g.headers)
+              const isOverdue = !!due && new Date(due) < today
+              return (
+              <tr key={g.partnerId}>
+                <td>{i + 1}</td>
+                <td>
+                  {g.partner?.name ?? '—'}
+                  {g.overdueCount > 0 && (
+                    <span style={{ color: '#b91c1c' }}> (เกินกำหนด {g.overdueCount})</span>
+                  )}
+                </td>
+                <td>{g.partner?.bank && g.partner.bank !== '—' ? g.partner.bank : '—'}</td>
+                <td className="mono">{g.partner?.account && g.partner.account !== '—' ? g.partner.account : '—'}</td>
+                <td>{g.partner?.accountName && g.partner.accountName !== '—' ? g.partner.accountName : '—'}</td>
+                <td style={isOverdue ? { color: '#b91c1c', fontWeight: 700 } : undefined}>
+                  {due ? db.thaiDate(due.slice(0, 10)) : '—'}
+                </td>
+                <td className="num right">{g.headers.length}</td>
+                <td className="num right">{db.fmt(g.total)}</td>
+              </tr>
+              )
+            })}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={7} className="right"><strong>รวมทั้งสิ้น</strong></td>
+              <td className="num right"><strong>{db.fmt(printTotal)}</strong></td>
+            </tr>
+          </tfoot>
+        </table>
+        <div className="kps-print-sig">
+          <div className="kps-print-sig-slot"><div className="line">ผู้จัดทำ</div></div>
+          <div className="kps-print-sig-slot"><div className="line">ผู้อนุมัติจ่าย</div></div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1341,7 +1423,8 @@ function ExpStock() {
   const insertStock = useInsert<StockItem>('stock_items')
   const insertReceipt = useInsert<StockReceipt>('stock_receipts')
   const insertPartner = useInsert<Partner>('partners')
-  const partners = allPartners.filter((p) => p.name !== KPS_WAREHOUSE_NAME)
+  // dropdown "รับของเข้าคลังจากใคร" = ซัพพลายเออร์ภายนอกเท่านั้น — ตัดคลังเองออก
+  const partners = allPartners.filter((p) => !isWarehousePartner(p))
 
   const total = stock.reduce((s, r) => s + r.qty * r.unitCost, 0)
   const low = stock.filter((s) => s.qty <= s.reorderAt)
@@ -2171,17 +2254,23 @@ function VendorEditModal({
     account: partner?.account ?? '',
     accountName: partner?.accountName ?? '',
     status: partner?.status ?? 'active',
+    isWarehouse: partner?.isWarehouse ?? false,
   })
-  const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }))
+  const set = (k: keyof typeof form, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }))
   const knownTypes = [...new Set([...PARTNER_TYPES.filter(t => t !== 'อื่นๆ'), ...partners.map(p => p.type).filter(Boolean)])]
 
   const save = async () => {
     if (!form.name.trim()) { alert('กรุณากรอกชื่อร้านค้า/ช่าง'); return }
     try {
+      // ส่ง is_warehouse เฉพาะเมื่อเกี่ยวข้อง (ติดธงอยู่/เคยติด) — คู่ค้าทั่วไปจะไม่ส่งคอลัมน์นี้
+      // จึงยังแก้ไขร้านค้าได้แม้ยังไม่ได้รัน migration 0043
+      const { isWarehouse, ...rest } = form
+      const payload: Record<string, unknown> = { ...rest }
+      if (isWarehouse || partner?.isWarehouse) payload.isWarehouse = isWarehouse
       if (isNew) {
-        await insertPartner.mutateAsync({ ...form, balance: 0 })
+        await insertPartner.mutateAsync({ ...payload, balance: 0 } as Partial<Partner>)
       } else {
-        await updatePartner.mutateAsync({ id: partner!.id, patch: form })
+        await updatePartner.mutateAsync({ id: partner!.id, patch: payload as Partial<Partner> })
       }
       onSaved()
       onClose()
@@ -2256,6 +2345,29 @@ function VendorEditModal({
                 style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--line)', borderRadius: 6, background: '#fff', fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }}
               />
             </Field>
+          </div>
+          <div
+            style={{
+              marginTop: 16, padding: '12px 14px', borderRadius: 8,
+              background: form.isWarehouse ? '#F0FDF4' : 'var(--bg)',
+              border: form.isWarehouse ? '1px solid #BBF7D0' : '1px dashed var(--line)',
+            }}
+          >
+            <label className="row" style={{ gap: 10, cursor: 'pointer', alignItems: 'flex-start' }}>
+              <input
+                type="checkbox"
+                checked={form.isWarehouse}
+                onChange={(e) => set('isWarehouse', e.target.checked)}
+                style={{ accentColor: 'var(--green)', marginTop: 2 }}
+              />
+              <span style={{ fontSize: 13 }}>
+                <strong>เป็นคลังอะไหล่ KPS (คลังภายในบริษัท)</strong>
+                <div className="muted" style={{ fontSize: 11.5, marginTop: 3 }}>
+                  ★ เมื่อติ๊ก บิลค่าใช้จ่ายที่ลงคู่ค้านี้จะดึงรายการจากสต๊อกและ<strong>ตัดจำนวนคงเหลืออัตโนมัติ</strong> —
+                  ตั้งได้เพียงคู่ค้าเดียวที่เป็นคลังของบริษัท (ช่าง/ร้านค้าภายนอกไม่ต้องติ๊ก)
+                </div>
+              </span>
+            </label>
           </div>
           <h4 style={{ margin: '18px 0 10px', fontSize: 14, fontWeight: 600 }}>ข้อมูลธนาคาร (สำหรับโอนเงิน)</h4>
           <div className="grid-2" style={{ gap: 14 }}>
@@ -2353,7 +2465,12 @@ function ExpVendors() {
             {filtered.map((p) => (
               <tr key={p.id}>
                 <td>
-                  <div style={{ fontWeight: 500 }}>{p.name}</div>
+                  <div style={{ fontWeight: 500 }}>
+                    {p.name}
+                    {isWarehousePartner(p) && (
+                      <span className="badge green" style={{ fontSize: 10, marginLeft: 6 }} title="คู่ค้านี้เป็นคลังภายใน — ตัดสต็อคอัตโนมัติ">📦 คลัง KPS · ตัดสต็อค</span>
+                    )}
+                  </div>
                   <div className="muted mono" style={{ fontSize: 11 }}>{p.code}</div>
                 </td>
                 <td>
