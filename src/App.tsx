@@ -95,9 +95,14 @@ const crumbMap: Record<string, string> = {
   'admin.import': 'Import File',
 }
 
+const VALID_ROUTES = new Set(Object.keys(crumbMap))
+
 export default function App() {
   const { legacyUser, logout, isAdmin, loading, recoveryMode } = useAuth()
-  const [active, setActive] = useState('dashboard')
+  const [active, setActive] = useState(() => {
+    const key = decodeURIComponent((typeof location !== 'undefined' ? location.hash : '').replace(/^#/, ''))
+    return key && VALID_ROUTES.has(key) ? key : 'dashboard'
+  })
   const [subject, setSubject] = useState<unknown>(null)
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -105,6 +110,24 @@ export default function App() {
   useEffect(() => {
     if (legacyUser?.role === 'driver') setActive('dispatch')
   }, [legacyUser?.id])
+
+  // Deep-link support: keep the current page in the URL hash so refreshes,
+  // the mobile back button, and LINE notification links all land on the right
+  // page instead of resetting to the dashboard. The initial page is seeded from
+  // the hash in useState above; here we react to later hash changes (back/forward).
+  useEffect(() => {
+    const applyHash = () => {
+      const key = decodeURIComponent(location.hash.replace(/^#/, ''))
+      if (key && VALID_ROUTES.has(key)) setActive(key)
+    }
+    window.addEventListener('hashchange', applyHash)
+    return () => window.removeEventListener('hashchange', applyHash)
+  }, [])
+
+  useEffect(() => {
+    const current = decodeURIComponent(location.hash.replace(/^#/, ''))
+    if (current !== active) location.hash = active
+  }, [active])
 
   if (loading) {
     return (

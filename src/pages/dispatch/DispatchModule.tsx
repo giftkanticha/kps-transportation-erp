@@ -57,7 +57,7 @@ function DispatchTabs({ current, onChange }: TabsProps) {
     { id: 'history', label: 'ประวัติการวิ่งงาน',     icon: <HistoryIcon /> },
   ]
   return (
-    <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 12, padding: 6, display: 'inline-flex', gap: 2 }}>
+    <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 12, padding: 6, display: 'flex', gap: 2, overflowX: 'auto', maxWidth: '100%', WebkitOverflowScrolling: 'touch' }}>
       {items.map(it => (
         <button
           key={it.id}
@@ -74,6 +74,8 @@ function DispatchTabs({ current, onChange }: TabsProps) {
             borderBottom: current === it.id ? '2px solid var(--primary)' : '2px solid transparent',
             marginBottom: -2,
             transition: 'background .15s, color .15s',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
           }}
         >
           {it.icon}

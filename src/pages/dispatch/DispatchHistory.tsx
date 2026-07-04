@@ -75,21 +75,24 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
 
       {/* Filters */}
       <div className="card pad" style={{ marginBottom: 14 }}>
-        <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+        <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
           <SearchInput
             value={query}
             onChange={setQuery}
             placeholder="ค้นหา Job No, ทะเบียนรถ, คนขับ, สินค้า, เส้นทาง..."
+            style={{ flex: '1 1 200px', minWidth: 160 }}
           />
-          <SegmentedFilter
-            value={status}
-            onChange={setStatus}
-            options={[
-              { value: 'all', label: `ทั้งหมด (${rounds.length})` },
-              { value: 'draft', label: `กำลังดำเนินการ (${draftCount})` },
-              { value: 'closed', label: `เสร็จสิ้น (${closedCount})` },
-            ]}
-          />
+          <div style={{ overflowX: 'auto', maxWidth: '100%' }}>
+            <SegmentedFilter
+              value={status}
+              onChange={setStatus}
+              options={[
+                { value: 'all', label: `ทั้งหมด (${rounds.length})` },
+                { value: 'draft', label: `กำลังดำเนินการ (${draftCount})` },
+                { value: 'closed', label: `เสร็จสิ้น (${closedCount})` },
+              ]}
+            />
+          </div>
           <span className="muted" style={{ fontSize: 13 }}>{filtered.length} รายการ</span>
         </div>
       </div>
@@ -176,36 +179,38 @@ export function DispatchHistory({ setActive, setSubject }: Props) {
                 {isExpanded && (
                   <div style={{ padding: 18, borderTop: '1px solid var(--line)', background: 'var(--bg)' }}>
                     {legs.length > 0 && (
-                      <table className="tbl" style={{ marginBottom: 12 }}>
-                        <thead>
-                          <tr>
-                            <th>ขา</th>
-                            <th>เส้นทาง</th>
-                            <th>สินค้า</th>
-                            <th className="num">น้ำหนัก</th>
-                            {isManager && <th className="num">ราคา</th>}
-                            {isManager && <th className="num right">ค่าขนส่ง</th>}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {legs.map((l, i) => (
-                            <tr key={l.id || i}>
-                              <td>{i + 1}</td>
-                              <td>{l.origin} → {l.destination}</td>
-                              <td>{l.cargo}</td>
-                              <td className="num">{(l.weight || 0).toFixed(2)} ตัน</td>
-                              {isManager && (
-                                <td className="num">
-                                  {l.priceMode === 'lump'
-                                    ? `${db.fmt(l.price)}`
-                                    : `${db.fmt(l.price)} / ${l.priceMode === 'per_kg' ? 'กก.' : 'ตัน'}`}
-                                </td>
-                              )}
-                              {isManager && <td className="num right">{db.thb(l.amount)}</td>}
+                      <div className="tbl-wrap stack-wrap" style={{ marginBottom: 12 }}>
+                        <table className="tbl stack">
+                          <thead>
+                            <tr>
+                              <th>ขา</th>
+                              <th>เส้นทาง</th>
+                              <th>สินค้า</th>
+                              <th className="num">น้ำหนัก</th>
+                              {isManager && <th className="num">ราคา</th>}
+                              {isManager && <th className="num right">ค่าขนส่ง</th>}
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {legs.map((l, i) => (
+                              <tr key={l.id || i}>
+                                <td data-label="ขา">{i + 1}</td>
+                                <td data-label="เส้นทาง">{l.origin} → {l.destination}</td>
+                                <td data-label="สินค้า">{l.cargo}</td>
+                                <td className="num" data-label="น้ำหนัก">{(l.weight || 0).toFixed(2)} ตัน</td>
+                                {isManager && (
+                                  <td className="num" data-label="ราคา">
+                                    {l.priceMode === 'lump'
+                                      ? `${db.fmt(l.price)}`
+                                      : `${db.fmt(l.price)} / ${l.priceMode === 'per_kg' ? 'กก.' : 'ตัน'}`}
+                                  </td>
+                                )}
+                                {isManager && <td className="num right" data-label="ค่าขนส่ง">{db.thb(l.amount)}</td>}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
                     )}
                     <div className={isManager ? 'grid-4' : 'grid-2'} style={{ gap: 12, fontSize: 12.5 }}>
                       <div>

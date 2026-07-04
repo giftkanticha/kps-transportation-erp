@@ -586,7 +586,7 @@ function PendingApprovalsSection({ user, requests, onReview }: PendingApprovalsS
                   }}
                 >
                   {req.changeFields.map((f, i) => (
-                    <div key={i} className="row" style={{ gap: 6, alignItems: 'center', marginTop: i > 0 ? 4 : 0 }}>
+                    <div key={i} className="row" style={{ gap: 6, alignItems: 'center', flexWrap: 'wrap', marginTop: i > 0 ? 4 : 0 }}>
                       <span style={{ color: 'var(--text-2)', minWidth: 110 }}>{f.label}:</span>
                       <span className="mono muted">{f.before}</span>
                       <Icon name="arrow-right" size={11} style={{ color: 'var(--text-faint)' }} />
