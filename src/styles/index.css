@@ -74,6 +74,8 @@ input, select, textarea { font-family: inherit; }
   display: grid;
   grid-template-columns: 260px 1fr;
   height: 100vh;
+  height: 100dvh; /* dynamic viewport unit: avoids content hidden behind the
+                     mobile URL bar / LINE in-app browser chrome */
   background: var(--bg);
   transition: grid-template-columns .25s cubic-bezier(.4,0,.2,1);
   isolation: isolate; /* contain z-index from pages so modals can't leak into the shell */
@@ -476,7 +478,70 @@ input:focus, select:focus, textarea:focus {
 .tbl tbody tr:hover { background: var(--bg-sunk); cursor: pointer; }
 .tbl .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .tbl .right { text-align: right; }
-.tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r-lg); background: #fff; }
+.tbl-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--line); border-radius: var(--r-lg); background: #fff; }
+
+/* Utility: show/hide by viewport. Cards vs. tables swap at the ≤640px break. */
+.only-mobile { display: none; }
+.only-desktop { display: block; }
+
+/* Responsive "table → cards" variant. On desktop this renders as a normal
+   table; on narrow screens each row becomes a stacked card where every cell
+   shows its column label (via data-label) next to the value. Opt in per table
+   with class="tbl stack" and a data-label on each <td>. */
+@media (max-width: 640px) {
+  .only-mobile { display: block; }
+  .only-desktop { display: none; }
+
+  .tbl.stack { font-size: 13px; display: block; width: 100%; }
+  .tbl.stack thead { display: none; }
+  .tbl.stack tbody,
+  .tbl.stack tbody tr,
+  .tbl.stack tbody td { display: block; width: 100%; box-sizing: border-box; }
+  .tbl.stack tbody tr {
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    background: #fff;
+  }
+  .tbl.stack tbody tr:last-child { margin-bottom: 0; }
+  .tbl.stack tbody tr:hover { background: #fff; cursor: default; }
+  /* Label pinned to the left, value fills the rest and right-aligns. Block flow
+     (not flexbox) so a long value wraps inside the card instead of overflowing. */
+  .tbl.stack tbody td {
+    border: none !important;
+    position: relative;
+    padding: 6px 0 6px 42%;
+    min-height: 20px;
+    text-align: right;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .tbl.stack tbody td::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 0;
+    top: 6px;
+    width: 38%;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    text-align: left;
+    white-space: normal;
+  }
+  /* Cells with no data-label (e.g. an actions row) span the full card width */
+  .tbl.stack tbody td:not([data-label]) { padding-left: 0; text-align: right; }
+  .tbl.stack tbody td:empty { display: none; }
+  /* A stacked table needs no horizontal scroll frame */
+  .tbl-wrap.stack-wrap { overflow: visible; border: none; background: transparent; }
+}
+
+/* Two-column "main + aside" layout that collapses to a single column on
+   tablets/phones. Replaces inline gridTemplateColumns that never collapsed. */
+.layout-main-aside { display: grid; grid-template-columns: 3fr 2fr; gap: 16px; }
+@media (max-width: 768px) {
+  .layout-main-aside { grid-template-columns: 1fr; }
+}
 
 /* Report tables (printable pages) scale with the A−/A+ control on screen.
    Base bumped to 14px for readability; multiplied by --report-font-scale.
@@ -822,9 +887,10 @@ input:focus, select:focus, textarea:focus {
   .app.collapsed .logout-btn span { display: inline; }
 
   .topbar .hamburger { display: grid; }
-  .topbar { padding: 0 16px; gap: 10px; }
+  .topbar { padding: 0 16px; gap: 10px; padding-top: env(safe-area-inset-top); }
   .topbar .search { width: 220px; min-width: 0; }
-  .content { padding: 18px 18px 48px; }
+  .content { padding: 18px 18px calc(48px + env(safe-area-inset-bottom)); }
+  .sidebar { padding-left: env(safe-area-inset-left); }
 
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
@@ -871,6 +937,18 @@ input:focus, select:focus, textarea:focus {
 
   .toolbar { gap: 8px; }
   .toolbar > * { min-width: 0; }
+
+  /* Touch targets: keep interactive controls tappable (≈40px min) on phones */
+  .btn, .btn.sm, .icon-btn, .tab, .subnav-item { min-height: 40px; }
+  .icon-btn { min-width: 40px; }
+  .tbl tbody td { padding-top: 9px; padding-bottom: 9px; }
+}
+
+/* Very small / notch phones (≤640px): drop the login poster so the form fits
+   above the fold, and keep the toast within the viewport. */
+@media (max-width: 640px) {
+  .login-poster { display: none; }
+  .login-wrap { grid-template-columns: 1fr; }
 }
 
 /* Small mobile (≤480px): hide breadcrumb, shrink controls, scroll tabs */

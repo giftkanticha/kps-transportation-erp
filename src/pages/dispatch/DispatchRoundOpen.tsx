@@ -27,7 +27,7 @@ function Toast({ toast, onClose }: { toast: ToastState; onClose: () => void }) {
         background: ok ? '#10B981' : '#EF4444', color: '#fff',
         padding: '12px 18px', borderRadius: 10,
         boxShadow: '0 8px 24px rgba(0,0,0,.25)', fontSize: 14, fontWeight: 500,
-        minWidth: 260,
+        minWidth: 260, maxWidth: 'calc(100vw - 32px)',
       }}
     >{toast.msg}</div>
   )
@@ -161,8 +161,8 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
           <div className="head">
             <h3>รอบงานค้าง ({drafts.length})</h3>
           </div>
-          <div className="tbl-wrap" style={{ border: 'none' }}>
-            <table className="tbl">
+          <div className="tbl-wrap stack-wrap" style={{ border: 'none' }}>
+            <table className="tbl stack">
               <thead>
                 <tr>
                   <th>รหัสรอบ</th>
@@ -187,12 +187,12 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
                         setActive('dispatch.round')
                       }}
                     >
-                      <td className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{d.code}</td>
-                      <td className="mono">{v?.plate ?? '—'}</td>
-                      <td>{dr?.name ?? '—'}</td>
-                      <td className="num muted">{db.thaiDate(d.depart || d.date)}</td>
-                      <td className="num">{db.fmt(d.startOdometer)}</td>
-                      <td className="num">{d.legs?.length ?? 0}</td>
+                      <td className="mono" data-label="รหัสรอบ" style={{ color: 'var(--primary)', fontWeight: 600 }}>{d.code}</td>
+                      <td className="mono" data-label="ทะเบียน">{v?.plate ?? '—'}</td>
+                      <td data-label="คนขับ">{dr?.name ?? '—'}</td>
+                      <td className="num muted" data-label="ออกเดินทาง">{db.thaiDate(d.depart || d.date)}</td>
+                      <td className="num" data-label="ไมล์ต้น">{db.fmt(d.startOdometer)}</td>
+                      <td className="num" data-label="จำนวนขา">{d.legs?.length ?? 0}</td>
                       <td onClick={e => e.stopPropagation()}>
                         <button
                           className="btn sm"
@@ -213,7 +213,7 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 16 }}>
+      <div className="layout-main-aside">
         {/* Form */}
         <div className="card pad">
           <div className="row" style={{ marginBottom: 16 }}>

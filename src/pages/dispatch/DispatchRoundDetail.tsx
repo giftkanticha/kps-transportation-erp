@@ -843,8 +843,8 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             )}
           </div>
         ) : (
-          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-            <table className="tbl">
+          <div className="tbl-wrap stack-wrap" style={{ border: 'none', borderRadius: 0 }}>
+            <table className="tbl stack">
               <thead>
                 <tr>
                   <th>ขา</th>
@@ -859,16 +859,16 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
               <tbody>
                 {legs.map((l, i) => (
                   <tr key={l.id || i}>
-                    <td style={{ fontWeight: 600 }}>{i + 1}</td>
-                    <td>
+                    <td data-label="ขา" style={{ fontWeight: 600 }}>{i + 1}</td>
+                    <td data-label="เส้นทาง">
                       <div style={{ fontSize: 13 }}>{l.origin}</div>
                       <div className="muted" style={{ fontSize: 11.5 }}>→ {l.destination}</div>
                     </td>
-                    <td>{l.cargoType || <span className="muted">—</span>}</td>
-                    <td><span className="badge" style={{ fontSize: 11 }}>{legTypeLabel(l.legType)}</span></td>
-                    <td className="num">{(l.weight || 0).toFixed(2)}</td>
+                    <td data-label="สินค้า">{l.cargoType || <span className="muted">—</span>}</td>
+                    <td data-label="ประเภท"><span className="badge" style={{ fontSize: 11 }}>{legTypeLabel(l.legType)}</span></td>
+                    <td className="num" data-label="น้ำหนัก (ตัน)">{(l.weight || 0).toFixed(2)}</td>
                     {isManager && (
-                      <td className="num right">
+                      <td className="num right" data-label="ค่าขนส่ง">
                         {db.thb(l.amount)}
                         {l.wht && (
                           <div className="muted" style={{ fontSize: 10.5, color: 'var(--amber)' }}>

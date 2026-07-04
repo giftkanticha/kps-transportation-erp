@@ -107,7 +107,7 @@ function RegistrationModal({ reg, onClose }: { reg: RegItem; onClose: () => void
         {/* Section 1 */}
         <div style={sectionStyle}>
           <div style={sectionLabel}>การต่อทะเบียนครั้งนี้</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="grid-2" style={{ gap: 12 }}>
             <div>
               <label style={labelStyle}>วันที่ต่อ *</label>
               <input type="date" value={form.date} onChange={e => set('date', e.target.value)} style={inputStyle} />
@@ -145,7 +145,7 @@ function RegistrationModal({ reg, onClose }: { reg: RegItem; onClose: () => void
         {/* Section 2 */}
         <div style={sectionStyle}>
           <div style={sectionLabel}>ข้อมูลชำระเงิน</div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div className="grid-2" style={{ gap: 12 }}>
             <div>
               <label style={labelStyle}>วันที่จ่ายเงิน *</label>
               <input type="date" value={form.payDate} onChange={e => set('payDate', e.target.value)} style={inputStyle} />
@@ -561,7 +561,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
       </div>
 
       {/* Middle 2-column section */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+      <div className="grid-2" style={{ marginBottom: 20 }}>
 
         {/* Left column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -883,8 +883,8 @@ export function Dashboard({ user, setActive }: DashboardProps) {
             </button>
           </div>
         </div>
-        <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-          <table className="tbl">
+        <div className="tbl-wrap stack-wrap" style={{ border: 'none', borderRadius: 0 }}>
+          <table className="tbl stack">
             <thead>
               <tr>
                 <th>รหัสงาน</th>
@@ -908,18 +908,18 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                 const v  = vehicles.find(v => v.id === t.vehicleId)
                 return (
                   <tr key={t.id}>
-                    <td><span className="mono" style={{ fontWeight: 600 }}>{t.code}</span></td>
-                    <td>
+                    <td data-label="รหัสงาน"><span className="mono" style={{ fontWeight: 600 }}>{t.code}</span></td>
+                    <td data-label="เส้นทาง">
                       <div style={{ fontWeight: 500 }}>{db.originOf(t)}</div>
                       <div className="muted" style={{ fontSize: 11.5, marginTop: 1 }}>→ {db.destOf(t)}</div>
                     </td>
-                    <td>{cu?.name?.replace('บริษัท ', '').replace(' จำกัด', '') || '—'}</td>
-                    <td>
+                    <td data-label="ลูกค้า">{cu?.name?.replace('บริษัท ', '').replace(' จำกัด', '') || '—'}</td>
+                    <td data-label="คนขับ / รถ">
                       <div style={{ fontSize: 12.5 }}>{dr?.name || '—'}</div>
                       <div className="muted mono" style={{ fontSize: 11 }}>{v?.plate || '—'}</div>
                     </td>
-                    <td><StatusBadge status={t.status} /></td>
-                    <td className="right" style={{ minWidth: 140 }}>
+                    <td data-label="สถานะ"><StatusBadge status={t.status} /></td>
+                    <td className="right" data-label="ความคืบหน้า" style={{ minWidth: 140 }}>
                       <div className="row" style={{ justifyContent: 'flex-end' }}>
                         <div className="progress" style={{ width: 80 }}>
                           <div className="fill" style={{ width: t.progress + '%' }} />
