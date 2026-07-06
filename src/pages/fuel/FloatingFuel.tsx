@@ -265,7 +265,13 @@ export function FloatingFuel() {
       {linkTx && (() => {
         const vehicle = vehicles.find(v => v.id === linkTx.vehicleId)
         const candidates = allDispatches
-          .filter(d => d.vehicleId === linkTx.vehicleId && d.status !== 'cancelled')
+          // Only offer rounds that can still absorb fuel: not cancelled, not
+          // already closed, and not in a locked (closed) accounting period —
+          // linking into those would desync stored round totals / a closed period.
+          .filter(d => d.vehicleId === linkTx.vehicleId
+            && d.status !== 'cancelled'
+            && d.roundStatus !== 'closed'
+            && d.locked !== true)
           .sort((a, b) =>
             Math.abs(new Date(a.date).getTime() - new Date(linkTx.date).getTime()) -
             Math.abs(new Date(b.date).getTime() - new Date(linkTx.date).getTime()),

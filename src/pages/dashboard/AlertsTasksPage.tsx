@@ -93,7 +93,9 @@ function buildAlerts(vehicles: Vehicle[], maintenance: Maintenance[]): AlertItem
     if (ins) out.push(ins)
 
     const kmLeft = v.nextServiceKm - v.odometer
-    const mileSev = severityFromKm(kmLeft)
+    // Skip vehicles with no service target set — otherwise nextServiceKm=0 on a
+    // truck at 250,000 km yields kmLeft=-250000 and a false "overdue" alert.
+    const mileSev = v.nextServiceKm > 0 && v.odometer > 0 ? severityFromKm(kmLeft) : null
     if (mileSev) {
       out.push({
         id: `mileage-${v.id}`,

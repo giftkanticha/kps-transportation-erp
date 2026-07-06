@@ -11,7 +11,7 @@ interface RegItem {
   id: number; plate: string; label: string; type: string; dueDate: string; status: 'warning' | 'critical'
 }
 interface ReqItem {
-  id: number; title: string; desc: string; time: string; priority: 'critical' | 'warning' | 'info'
+  id: string; title: string; desc: string; time: string; priority: 'critical' | 'warning' | 'info'
 }
 
 // Renewals + employee requests used to be hard-coded demo data — kept the
@@ -294,7 +294,7 @@ interface DashboardProps {
 export function Dashboard({ user, setActive }: DashboardProps) {
   const [regModal, setRegModal]         = useState<RegItem | null>(null)
   const [approvalModal, setApprovalModal] = useState<ReqItem | null>(null)
-  const [dismissedReqs, setDismissedReqs] = useState<Set<number>>(new Set())
+  const [dismissedReqs, setDismissedReqs] = useState<Set<string>>(new Set())
   const [showExport, setShowExport]       = useState(false)
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -425,7 +425,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
         bills: 0,
         earliestDue: null,
       }
-      cur.total += h.total
+      cur.total += h.total || 0
       cur.bills += 1
       if (h.dueDate && (cur.earliestDue == null || h.dueDate < cur.earliestDue)) cur.earliestDue = h.dueDate
       map.set(key, cur)
@@ -495,9 +495,9 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const pendingRequests: ReqItem[] = useMemo(() => {
     if (!canApprove) return []
     return editApprovals
-      .filter(r => r.status === 'pending' && !dismissedReqs.has(Number(r.id)))
+      .filter(r => r.status === 'pending' && !dismissedReqs.has(r.id))
       .sort((a, b) => (b.requestedAt || '').localeCompare(a.requestedAt || ''))
-      .map((r, i) => {
+      .map((r) => {
         const changes = r.changes as Record<string, unknown> | undefined
         const isReopen = changes?._kind === 'dispatch_reopen'
         const roundCode = isReopen ? String(changes?.roundCode ?? '') : ''
@@ -507,7 +507,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
           : `ขอแก้ไข ${r.vehiclePlate}`
         const ageHrs = Math.max(0, Math.floor((Date.now() - new Date(r.requestedAt).getTime()) / 3_600_000))
         return {
-          id: typeof r.id === 'number' ? r.id : Number(i + 1),
+          id: r.id,
           title,
           desc: `${r.requesterName}${fields.length > 0 ? ' · ' + fields.join(', ') : ''}${r.reason ? ' — ' + r.reason : ''}`,
           time: ageHrs < 1 ? 'ไม่กี่นาที' : ageHrs < 24 ? `${ageHrs} ชม.` : `${Math.floor(ageHrs / 24)} วัน`,
@@ -894,7 +894,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                     <div className="body">
                       <div className="who">{a.who}</div>
                       <div className="txt">{a.text}</div>
-                      <div className="when">{a.at.slice(11)}</div>
+                      <div className="when">{(a.at ?? '').slice(11)}</div>
                     </div>
                   </div>
                 ))}
