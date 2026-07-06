@@ -212,15 +212,18 @@ function VehicleFormModal({
             </div>
           </div>
 
-          {/* Tank capacity */}
+          {/* Fuel level — same 0–100% meaning as the vehicles list / detail page.
+              (Was labelled/stored as tank-capacity litres, which collided with
+              the percentage the other pages read from the same column.) */}
           <div>
-            <label style={labelStyle}>ความจุถัง (ลิตร)</label>
+            <label style={labelStyle}>ระดับน้ำมัน (%)</label>
             <input
               type="number"
               min="0"
+              max="100"
               value={form.fuel || ''}
-              onChange={e => set('fuel', parseInt(e.target.value, 10) || 0)}
-              placeholder="500"
+              onChange={e => set('fuel', Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0)))}
+              placeholder="0–100"
               style={inputStyle}
             />
           </div>

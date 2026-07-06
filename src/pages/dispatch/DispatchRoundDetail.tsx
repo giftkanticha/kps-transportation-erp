@@ -632,6 +632,11 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   }
 
   const isClosed = round.roundStatus === 'closed'
+  // A round whose accounting period is CLOSED is locked. Editing/reopening/
+  // deleting it would diverge live reports from the frozen snapshot, so block
+  // those here (only DispatchRoundClose enforced this before) — the period must
+  // be reopened first from the period-close page.
+  const isLocked = round.locked === true
   const vehicle = vehicles.find(v => v.id === round.vehicleId)
   const driver = employees.find(e => e.id === round.driverId)
   const legs = round.legs ?? []
@@ -737,7 +742,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
               <Icon name="edit" size={14} /> แก้ไขรอบ
             </button>
           )}
-          {isAdmin && (
+          {isAdmin && !isLocked && (
             <button
               className="btn"
               style={{ color: 'var(--red)', borderColor: '#fecaca' }}
@@ -760,7 +765,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
               <Icon name="check" size={15} /> ไปปิดงาน →
             </button>
           )}
-          {isClosed && isAdmin && (
+          {isClosed && isAdmin && !isLocked && (
             <button
               className="btn"
               onClick={() => setShowReopenConfirm(true)}
@@ -768,6 +773,11 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             >
               <Icon name="edit" size={14} /> เปิดเพื่อแก้ไข
             </button>
+          )}
+          {isLocked && (
+            <span className="badge" style={{ background: '#FEF3C7', color: '#92400E' }}>
+              🔒 งวดบัญชีถูกปิด — ต้องเปิดงวดก่อนจึงแก้ไขได้
+            </span>
           )}
           {isClosed && !isAdmin && (
             <button

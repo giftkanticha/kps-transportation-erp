@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
-import { useList, useInsert, useUpdate } from '../../hooks/useTable'
+import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
 import type { Vehicle, Employee, Location, Dispatch, DispatchLeg, OtherExpense, FuelTransaction, FuelStock, FuelRecord } from '../../types'
@@ -201,6 +201,7 @@ function CloseForm({
   const { data: allFuelRecs = [] } = useList<FuelRecord>('fuel_records')
   const insertFuelRec = useInsert<FuelRecord>('fuel_records')
   const updateFuelRec = useUpdate<FuelRecord>('fuel_records')
+  const deleteFuelRec = useDelete('fuel_records')
   const round = useMemo(() => dispatches.find(d => d.id === roundId), [dispatches, roundId])
   const vehicle = vehicles.find(v => v.id === round?.vehicleId)
   const driver = employees.find(e => e.id === round?.driverId)
@@ -469,10 +470,15 @@ function CloseForm({
   // fill being entered now so the net profit reflects it before saving.
   // Price for the closing fill: user-entered, else the latest ledger price.
   const closingPrice = parseFloat(closingFuelPrice) || ledgerFuelPrice || 0
+  // Exclude our own closing tx from the recorded sum — we recompute its cost
+  // fresh from the (possibly edited) closingL/closingPrice below. Leaving it in
+  // meant a re-close after editing the closing fill kept the STALE tx.total and
+  // persisted a wrong dispatch.cost. externalClosing fills stay counted (they're
+  // the fuel module's source of truth, shown read-only here).
   const recordedFuelCost = linkedFuelTxs
-    .filter(t => t.tripFuelRole !== 'TRIP_OPENING')
+    .filter(t => t.tripFuelRole !== 'TRIP_OPENING' && t.id !== ownClosingTx?.id)
     .reduce((s, t) => s + (t.total ?? t.liters * (t.pricePerL || 0)), 0)
-  const fuelCost = recordedFuelCost + (fuelClosing.length > 0 ? 0 : closingL * closingPrice)
+  const fuelCost = recordedFuelCost + closingL * closingPrice
   const profit = revenue - fuelCost - perDiemTotal - otherTotal
 
   const kmPerL = distance > 0 && totalFuelForKmpl > 0
@@ -600,6 +606,13 @@ function CloseForm({
               id: ownClosingTx.id,
               patch: { date: txDate, liters: closingL, pricePerL: closingPrice, total: closingL * closingPrice },
             })
+          } else if (closingL <= 0 && ownClosingTx) {
+            // Closing fuel was cleared on a re-close — reverse the orphaned ledger
+            // entry (restores factory stock) instead of leaving it deducted.
+            await updateFuelTx.mutateAsync({
+              id: ownClosingTx.id,
+              patch: { status: 'REVERSED', reversedAt: new Date().toISOString() },
+            })
           }
 
           // Mirror to fuel_records (legacy ledger that drives P&L + daily
@@ -629,6 +642,10 @@ function CloseForm({
                 ...recPayload,
               })
             }
+          } else if (existingRec) {
+            // Closing fuel cleared on re-close — remove the stale mirror so the
+            // P&L / factory summary don't keep a fuel expense the user removed.
+            await deleteFuelRec.mutateAsync(existingRec.id)
           }
         }
         // Final fuel = INTERMEDIATE + NORMAL + TRIP_CLOSING (NOT TRIP_OPENING)

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react'
 import { uid } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
+import { useAuth } from '../../context/AuthContext'
 import { Icon } from '../../components/ui/Icon'
 import { QuickOpenTripModal } from './QuickOpenTripModal'
 import type { CSSProperties } from 'react'
@@ -254,6 +255,10 @@ interface FloatingToast {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => void }) {
+  // Correcting an already-committed row (edit/reverse) rewrites the fuel ledger
+  // and can delete fuel_records — restrict to admin, matching FloatingFuel and
+  // FuelStockDashboard. Drivers can still key new (uncommitted) rows.
+  const { isAdmin } = useAuth()
   // แหล่งน้ำมันเริ่มต้นแบบรวม — ตั้งทีเดียวใช้กับทุกแถวที่ยังไม่บันทึก เพื่อคีย์เร็ว
   const [globalSource, setGlobalSource] = useState<FuelSource>('FACTORY_TANK')
   const [rows, setRows] = useState<GridRow[]>([makeRow()])
@@ -425,11 +430,21 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
       const vehicleId = foundVehicle?.id ?? row.vehicleId
       const liters = parseFloat(editDraft.liters)
       const pricePerL = parseFloat(editDraft.pricePerL) || 35
+      // Validate BEFORE persisting: a blank field gives NaN which otherwise
+      // slips through as liters:NaN/total:NaN and poisons every reduce.
+      if (!vehicleId) { alert('ไม่พบทะเบียนรถ'); return }
+      if (!Number.isFinite(liters) || liters <= 0) { alert('จำนวนลิตรไม่ถูกต้อง'); return }
       const total = liters * pricePerL
       // เลขไมล์เก็บบน fuel_records เท่านั้น (คอลัมน์ที่มีอยู่แล้ว)
       const odometer = editDraft.odometer.trim() !== '' ? Number(editDraft.odometer) : 0
 
       const result = autoRoute(vehicleId, editDraft.date, editDraft.source, liters, vehicles, dispatches, fuelStock, fuelRecords)
+      // autoRoute returns status 'ERROR' when it can't classify (e.g. insufficient
+      // factory stock). 'ERROR' is not a valid FuelTransactionStatus — never write it.
+      if (result.status === 'ERROR') {
+        alert('คำนวณสถานะไม่สำเร็จ (สต็อกโรงงานอาจไม่พอ) — ตรวจสอบจำนวนลิตร')
+        return
+      }
 
       // Update FuelTransaction
       if (row.txId) {
@@ -944,6 +959,9 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                           </button>
                         </div>
                       ) : row.committed && !row.reversed ? (
+                        !isAdmin ? (
+                          <span className="muted" style={{ fontSize: 11 }}>—</span>
+                        ) : (
                         <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
                           <button
                             onClick={() => startEdit(row)}
@@ -972,6 +990,7 @@ export function ExpressFuelLog({ setActive }: { setActive?: (page: string) => vo
                             🗑
                           </button>
                         </div>
+                        )
                       ) : row.reversed ? (
                         <span style={{ fontSize: 11, color: '#94A3B8' }}>ยกเลิกแล้ว</span>
                       ) : (
