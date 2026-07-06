@@ -7,7 +7,12 @@ import { Icon } from '../../components/ui'
 import { can } from '../../lib/permissions'
 import type { Vehicle, Maintenance, EditApprovalRequest, Dispatch, User } from '../../types'
 
-const TODAY = new Date('2026-05-17')
+// Local-midnight "today", recomputed on each call so it never drifts (was a
+// hardcoded 2026-05-17, which made every expiry countdown progressively wrong).
+const todayLocal = (): Date => {
+  const n = new Date()
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate())
+}
 const SOON_DAYS = 30
 const SOON_KM = 5000
 
@@ -43,7 +48,7 @@ function daysBetween(dateStr: string): number {
   if (!dateStr) return Infinity
   const d = new Date(dateStr)
   if (isNaN(d.getTime())) return Infinity
-  return Math.round((d.getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
+  return Math.round((d.getTime() - todayLocal().getTime()) / (1000 * 60 * 60 * 24))
 }
 
 function severityFromDays(days: number): 'red' | 'amber' | null {
@@ -151,7 +156,7 @@ function validateRenewal(alert: AlertItem, form: NextRoundForm): void {
   if (form.nextDate && (alert.kind === 'tax' || alert.kind === 'permit' || alert.kind === 'insurance')) {
     const d = new Date(form.nextDate)
     if (isNaN(d.getTime())) throw new Error('วันที่ไม่ถูกต้อง')
-    if (d.getTime() < TODAY.getTime()) throw new Error('วันที่รอบถัดไปต้องเป็นอนาคต')
+    if (d.getTime() < todayLocal().getTime()) throw new Error('วันที่รอบถัดไปต้องเป็นอนาคต')
   }
 }
 

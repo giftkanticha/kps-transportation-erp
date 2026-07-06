@@ -39,12 +39,18 @@ const buildStockDeltas = (
   sign: 1 | -1,
   stocks: StockItem[],
 ): { id: string; patch: Partial<StockItem> }[] => {
+  // Aggregate by stock item first — two lines referencing the same item must
+  // combine into one delta, otherwise the second patch (built from the same
+  // pre-write snapshot) overwrites the first and only its quantity survives.
+  const totalQty = new Map<string, number>()
+  for (const l of lines) {
+    if (!l.stockItemId) continue
+    totalQty.set(l.stockItemId, (totalQty.get(l.stockItemId) ?? 0) + (+l.qty || 0))
+  }
   const patches: { id: string; patch: Partial<StockItem> }[] = []
-  lines.forEach((l) => {
-    if (!l.stockItemId) return
-    const s = stocks.find((x) => x.id === l.stockItemId)
-    if (!s) return
-    const q = +l.qty || 0
+  for (const [id, q] of totalQty) {
+    const s = stocks.find((x) => x.id === id)
+    if (!s) continue
     patches.push({
       id: s.id,
       patch: {
@@ -52,7 +58,7 @@ const buildStockDeltas = (
         qtyOut: s.qtyOut - sign * q,
       },
     })
-  })
+  }
   return patches
 }
 
@@ -503,6 +509,22 @@ function ExpRecord() {
       alert('กรุณาเพิ่มรายการอย่างน้อย 1 รายการ')
       return
     }
+    // Block issuing more than the available quantity — stock must never go
+    // negative (it poisons the weighted-average cost on the next receipt).
+    if (isKPSPartner(hdr.partnerId, partners)) {
+      const want = new Map<string, number>()
+      for (const l of lines) {
+        if (!l.stockItemId) continue
+        want.set(l.stockItemId, (want.get(l.stockItemId) ?? 0) + (+l.qty || 0))
+      }
+      for (const [id, q] of want) {
+        const s = stocks.find((x) => x.id === id)
+        if (s && q > s.qty) {
+          alert(`สต็อก "${s.name}" ไม่พอ (ต้องการ ${q} มี ${s.qty})`)
+          return
+        }
+      }
+    }
     try {
       const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
       const h = await insertHeader.mutateAsync({
@@ -704,10 +726,23 @@ function ExpenseEditModal({
     try {
       const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
 
-      // Revert old stock impact
+      // Net stock impact = (revert old draws) + (apply new draws), combined per
+      // stock item and written ONCE. Doing revert and apply as two separate
+      // passes over the same `stocks` snapshot let the apply overwrite the
+      // revert (both read the pre-revert qty), silently corrupting inventory on
+      // every edit. This also collapses two lines that reference the same stock
+      // item into a single correct delta.
+      const stockDelta = new Map<string, number>()  // stockItemId → net qty change
       if (wasKPS) {
-        for (const d of buildStockDeltas(oldLines, +1, stocks)) {
-          await updateStock.mutateAsync(d)
+        for (const l of oldLines) {
+          if (!l.stockItemId) continue
+          stockDelta.set(l.stockItemId, (stockDelta.get(l.stockItemId) ?? 0) + (+l.qty || 0))
+        }
+      }
+      if (isKPSPartner(hdr.partnerId, partners)) {
+        for (const l of lines) {
+          if (!l.stockItemId) continue
+          stockDelta.set(l.stockItemId, (stockDelta.get(l.stockItemId) ?? 0) - (+l.qty || 0))
         }
       }
 
@@ -740,11 +775,15 @@ function ExpenseEditModal({
         })
       }
 
-      // Apply new stock impact
-      if (isKPSPartner(hdr.partnerId, partners)) {
-        for (const d of buildStockDeltas(lines, -1, stocks)) {
-          await updateStock.mutateAsync(d)
-        }
+      // Apply the combined net stock impact (one write per affected item)
+      for (const [stockItemId, delta] of stockDelta) {
+        if (delta === 0) continue
+        const s = stocks.find((x) => x.id === stockItemId)
+        if (!s) continue
+        await updateStock.mutateAsync({
+          id: stockItemId,
+          patch: { qty: s.qty + delta, qtyOut: s.qtyOut - delta },
+        })
       }
 
       alert('บันทึกการแก้ไขเรียบร้อย')

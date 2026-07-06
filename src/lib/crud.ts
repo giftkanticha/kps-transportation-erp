@@ -14,10 +14,27 @@ function toError(error: { message?: string; details?: string; hint?: string; cod
   return wrapped
 }
 
+// PostgREST caps a single response at its configured `max-rows` (default 1000).
+// Without pagination every full-table read (fuel ledgers, dispatch history, …)
+// silently truncates once a table passes that many rows, which quietly
+// overstates balances and defeats "insufficient stock" guards. Page through
+// with .range() until a short page is returned.
+const PAGE_SIZE = 1000
+
 export async function listAll<T>(table: string, orderBy = 'created_at', ascending = false): Promise<T[]> {
-  const { data, error } = await supabase.from(table).select('*').order(orderBy, { ascending })
-  if (error) throw toError(error)
-  return (data ?? []).map((r) => snakeToCamel<T>(r))
+  const rows: unknown[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .order(orderBy, { ascending })
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) throw toError(error)
+    const page = data ?? []
+    rows.push(...page)
+    if (page.length < PAGE_SIZE) break
+  }
+  return rows.map((r) => snakeToCamel<T>(r))
 }
 
 export async function getOne<T>(table: string, id: string): Promise<T | null> {

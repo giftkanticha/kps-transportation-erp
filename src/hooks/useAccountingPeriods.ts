@@ -74,6 +74,27 @@ export function useRoundsInPeriod(
 }
 
 /**
+ * All dispatch rounds that belong to a period (plain, non-hook).
+ * Membership: explicit accountingPeriodId wins; otherwise derived from the
+ * depart/date month. Kept identical to the logic closePeriod() uses to LOCK
+ * rounds so that reopenPeriod() unlocks exactly the same set.
+ */
+export function roundsForPeriod(
+  dispatches: Dispatch[],
+  period: AccountingPeriod,
+): Dispatch[] {
+  return dispatches.filter(d => {
+    if (d.accountingPeriodId === period.id) return true
+    if (d.accountingPeriodId) return false
+    const basis = (d.depart || d.date || '').slice(0, 10)
+    if (!basis) return false
+    const dt = new Date(basis)
+    if (isNaN(dt.getTime())) return false
+    return dt.getFullYear() === period.year && dt.getMonth() + 1 === period.month
+  })
+}
+
+/**
  * Rounds that need a decision before a period can close:
  * - depart falls in the period
  * - round is still DRAFT (not yet closed by the driver/operator)
