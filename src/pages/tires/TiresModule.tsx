@@ -1900,31 +1900,43 @@ function TiresManageFull() {
 
   const doSwap = async () => {
     if (!sw.vehicleId || !sw.fromPos || !sw.toPos) return
+    // Require at least one real tire to move — swapping two empty positions
+    // would otherwise write a tire_events row with an empty tireId.
+    if (!fromTire && !toTire) { alert('ตำแหน่งที่เลือกว่างทั้งคู่ — ไม่มียางให้สลับ'); return }
     const odometer = veh?.odometer ?? 0
     const userId = 'e10'
-    // Snapshot accumulated km for both tires before swapping
-    if (fromTire) {
-      const km = computeAccumKm(fromTire, vehicles)
-      await updateTire.mutateAsync({ id: fromTire.id, patch: { position: sw.toPos, accumulatedKm: km, installedOdometer: odometer } })
+    const today = new Date().toISOString().slice(0, 10)
+    const isSpare = (p: string) => p.startsWith('spare')
+    try {
+      // Snapshot accumulated km for both tires before swapping; keep status in
+      // sync with whether the destination is a spare slot.
+      if (fromTire) {
+        const km = computeAccumKm(fromTire, vehicles)
+        await updateTire.mutateAsync({ id: fromTire.id, patch: { position: sw.toPos, accumulatedKm: km, installedOdometer: odometer, status: isSpare(sw.toPos) ? 'spare' : 'in-use' } })
+      }
+      if (toTire) {
+        const km = computeAccumKm(toTire, vehicles)
+        await updateTire.mutateAsync({ id: toTire.id, patch: { position: sw.fromPos, accumulatedKm: km, installedOdometer: odometer, status: isSpare(sw.fromPos) ? 'spare' : 'in-use' } })
+      }
+      // Record an event for each tire that actually moved (correct tireId + direction).
+      if (fromTire) {
+        await insertEvent.mutateAsync({
+          tireId: fromTire.id, vehicleId: sw.vehicleId, eventType: 'swap', date: today,
+          odometer, fromPos: sw.fromPos, toPos: sw.toPos, note: sw.note || 'สลับยาง', userId,
+        })
+      }
+      if (toTire) {
+        await insertEvent.mutateAsync({
+          tireId: toTire.id, vehicleId: sw.vehicleId, eventType: 'swap', date: today,
+          odometer, fromPos: sw.toPos, toPos: sw.fromPos, note: sw.note || 'สลับยาง', userId,
+        })
+      }
+      alert('สลับยางสำเร็จ')
+      setSw({ vehicleId: sw.vehicleId, fromPos: '', toPos: '', note: '' })
+      setStep(1)
+    } catch (e) {
+      alert('สลับยางไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     }
-    if (toTire) {
-      const km = computeAccumKm(toTire, vehicles)
-      await updateTire.mutateAsync({ id: toTire.id, patch: { position: sw.fromPos, accumulatedKm: km, installedOdometer: odometer } })
-    }
-    await insertEvent.mutateAsync({
-      tireId: fromTire?.id ?? '',
-      vehicleId: sw.vehicleId,
-      eventType: 'swap',
-      date: new Date().toISOString().slice(0, 10),
-      odometer,
-      fromPos: sw.fromPos,
-      toPos: sw.toPos,
-      note: sw.note || 'สลับยาง',
-      userId,
-    })
-    alert('สลับยางสำเร็จ')
-    setSw({ vehicleId: sw.vehicleId, fromPos: '', toPos: '', note: '' })
-    setStep(1)
   }
 
   const steps = ['เลือกรถ', 'เลือกล้อเดิม', 'เลือกล้อใหม่', 'ยืนยัน']
