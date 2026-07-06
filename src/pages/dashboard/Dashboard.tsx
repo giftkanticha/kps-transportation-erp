@@ -320,10 +320,22 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const scheduled = useMemo(() => dispatch.filter(t => t.status === 'scheduled'), [dispatch])
   const delivered = useMemo(() => dispatch.filter(t => t.status === 'completed'), [dispatch])
 
-  const revenueThisMonth = useMemo(() => dispatch.reduce((s, t) => s + db.amountOf(t), 0), [dispatch])
+  // Current calendar month, string-compared to avoid timezone drift on
+  // 'YYYY-MM-DD' values. These KPIs are labelled "เดือนนี้" so they MUST be
+  // scoped to this month (they used to sum all-time and mislabel it).
+  const thisMonthPrefix = useMemo(() => {
+    const n = new Date()
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
+  }, [])
+  const inThisMonth = (iso: string | null | undefined) => !!iso && iso.slice(0, 7) === thisMonthPrefix
+  const revenueThisMonth = useMemo(
+    () => dispatch.filter(t => inThisMonth(t.depart || t.date)).reduce((s, t) => s + db.amountOf(t), 0),
+    [dispatch, thisMonthPrefix],
+  )
   const costThisMonth    = useMemo(
-    () => dispatch.reduce((s, t) => s + (t.cost || 0), 0) + expHeaders.reduce((s, h) => s + (h.total || 0), 0),
-    [dispatch, expHeaders],
+    () => dispatch.filter(t => inThisMonth(t.depart || t.date)).reduce((s, t) => s + (t.cost || 0), 0)
+        + expHeaders.filter(h => inThisMonth(h.date)).reduce((s, h) => s + (h.total || 0), 0),
+    [dispatch, expHeaders, thisMonthPrefix],
   )
 
   const idleVehicles        = vehicles.filter(v => v.status === 'available').length
@@ -429,6 +441,25 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const marginPct = revenueThisMonth > 0
     ? Math.round(((revenueThisMonth - costThisMonth) / revenueThisMonth) * 100) : 0
 
+  // Real month-over-month revenue change (was a hardcoded "+12.4%").
+  const prevMonthPrefix = useMemo(() => {
+    const n = new Date()
+    const d = new Date(n.getFullYear(), n.getMonth() - 1, 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  }, [])
+  const revenuePrevMonth = useMemo(
+    () => dispatch.filter(t => (t.depart || t.date || '').slice(0, 7) === prevMonthPrefix)
+      .reduce((s, t) => s + db.amountOf(t), 0),
+    [dispatch, prevMonthPrefix],
+  )
+  const revenueDelta = useMemo(() => {
+    if (revenuePrevMonth <= 0) {
+      return { text: 'ไม่มีข้อมูลเดือนก่อน', up: null as boolean | null }
+    }
+    const pct = Math.round(((revenueThisMonth - revenuePrevMonth) / revenuePrevMonth) * 100)
+    return { text: `${pct >= 0 ? '+' : ''}${pct}% จากเดือนก่อน`, up: pct >= 0 }
+  }, [revenueThisMonth, revenuePrevMonth])
+
   const canApprove    = user.role === 'admin' || user.role === 'manager'
 
   // Vehicle document renewals due within 60 days, computed from real data.
@@ -494,7 +525,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const kpiCards = [
     {
       label: 'รายได้เดือนนี้', value: db.thb(revenueThisMonth), unit: '',
-      delta: '+12.4% จากเดือนก่อน', deltaUp: true as boolean | null,
+      delta: revenueDelta.text, deltaUp: revenueDelta.up,
       icon: 'money', gradient: 'linear-gradient(135deg,#10B981,#059669)', iconBg: '#D1FAE5', iconColor: '#065F46',
     },
     {

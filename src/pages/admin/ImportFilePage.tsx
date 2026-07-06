@@ -107,7 +107,11 @@ function parseExcelToRows(buf: ArrayBuffer): { rows: SubDriverImportRow[]; warni
   // Prefer "รถร่วม" sheet, else fall back to the first.
   const sheetName = wb.SheetNames.find(n => n.includes('รถร่วม')) ?? wb.SheetNames[0]
   const ws = wb.Sheets[sheetName]
-  const matrix = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false, raw: true })
+  // raw:false returns the CELL'S DISPLAYED text, preserving leading zeros on
+  // phone / ID-card / bank-account columns. With raw:true those cells arrive as
+  // JS numbers and String() drops the leading 0 (0812… → "812…"), silently
+  // corrupting contact and payment data.
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false, raw: false })
   if (matrix.length < 2) return { rows: [], warnings: ['ไฟล์ไม่มีข้อมูล'] }
 
   const headers = (matrix[0] as unknown[]).map(h => (h ?? '').toString())

@@ -644,8 +644,9 @@ export function FinancePL() {
               const p = findPeriod(periods, year, month + 1)
               if (!p) return null
               if (p.status === 'CLOSED') return (
-                <span className="badge green" style={{ fontSize: 11, marginLeft: 8 }}>
-                  🔒 ปิดงวดแล้ว · ตัวเลขจาก snapshot
+                <span className="badge green" style={{ fontSize: 11, marginLeft: 8 }}
+                  title="รายได้และเบี้ยเลี้ยงถูกล็อกจาก snapshot ตอนปิดงวด · ต้นทุนอื่น (น้ำมัน/ซ่อม/ค่าใช้จ่าย/เงินเดือน) คำนวณจากข้อมูลปัจจุบัน">
+                  🔒 ปิดงวดแล้ว · รายได้/เบี้ยเลี้ยงล็อกจาก snapshot
                 </span>
               )
               return null
