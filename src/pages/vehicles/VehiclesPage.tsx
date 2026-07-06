@@ -206,6 +206,13 @@ function VehicleEditModal({
 
     const changeFields = buildChangeFields(vehicle, patch)
     if (changeFields.length === 0) { onError('ไม่มีการเปลี่ยนแปลงให้บันทึก'); setSaving(false); return }
+    // Store ONLY the fields that actually changed. Persisting the whole form
+    // meant that approving the request later re-applied a stale snapshot of
+    // every field (rolling back odometer/status others had edited meanwhile).
+    const changedPatch: Partial<Vehicle> = {}
+    for (const cf of changeFields) {
+      ;(changedPatch as Record<string, unknown>)[cf.key] = (patch as Record<string, unknown>)[cf.key]
+    }
     const reason = window.prompt('เหตุผลในการขอแก้ไข (ส่งให้ผู้จัดการอนุมัติ):', '')?.trim()
     if (!reason) { setSaving(false); return }
 
@@ -218,7 +225,7 @@ function VehicleEditModal({
         vehicleId: vehicle.id,
         vehiclePlate: vehicle.plate,
         reason,
-        changes: patch,
+        changes: changedPatch,
         changeFields,
         requestedAt: new Date().toISOString(),
         status: 'pending',

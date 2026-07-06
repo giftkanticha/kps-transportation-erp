@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useQueryClient } from '@tanstack/react-query'
 import { useList, useUpdate } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
 import { callRpc } from '../../lib/crud'
 import { Icon } from '../../components/ui'
 import { can } from '../../lib/permissions'
@@ -661,6 +662,7 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
   const updateApproval = useUpdate<EditApprovalRequest>('edit_approvals')
   const updateVehicle = useUpdate<Vehicle>('vehicles')
   const updateDispatch = useUpdate<Dispatch>('dispatch')
+  const { data: allDispatchesForGuard = [] } = useDispatches()
 
   const pendingApprovals = useMemo(() => {
     if (!can.reviewApprovals(user.role)) return []
@@ -681,6 +683,10 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
         // req.changes._kind when inserting from DispatchSummaryReport.
         const changesAsRecord = req.changes as Record<string, unknown>
         if (changesAsRecord?._kind === 'dispatch_reopen' && typeof changesAsRecord.roundId === 'string') {
+          const targetRound = allDispatchesForGuard.find(d => d.id === changesAsRecord.roundId)
+          if (targetRound?.locked === true) {
+            throw new Error('รอบนี้อยู่ในงวดบัญชีที่ปิดแล้ว — ต้องเปิดงวดก่อนจึงแก้ไขได้')
+          }
           await updateDispatch.mutateAsync({
             id: changesAsRecord.roundId,
             patch: { roundStatus: 'draft', status: 'in-progress' },

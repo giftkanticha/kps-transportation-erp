@@ -356,9 +356,12 @@ function InstallTireModal({ tire, onClose, onDone }: { tire: Tire; onClose: () =
     try {
       const odo = vehicle?.odometer ?? 0
       const today = new Date().toISOString().slice(0, 10)
+      // Installing into a spare slot keeps the tire as 'spare' so it doesn't
+      // accrue km while parked on the rack.
+      const status = position.startsWith('spare') ? 'spare' : 'in-use'
       await updateTire.mutateAsync({
         id: tire.id,
-        patch: { status: 'in-use', vehicleId, position, installedDate: today, installedOdometer: odo },
+        patch: { status, vehicleId, position, installedDate: today, installedOdometer: odo },
       })
       await insertEvent.mutateAsync({
         tireId: tire.id, vehicleId, eventType: 'install', date: today,
@@ -608,20 +611,23 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
   const kpiCounts = useMemo(
     () => ({
       total: allTires.length,
+      // Use the LIVE accumulated km (stored value + km driven since install) so
+      // the wear buckets reflect reality — the stored accumulatedKm only updates
+      // on swap/remove, so counting it directly left worn tires as "good".
       good: allTires.filter(
-        (t) => t.status === 'in-use' && (t.accumulatedKm ?? 0) < KM_WARN_T,
+        (t) => t.status === 'in-use' && computeAccumKm(t, vehicles) < KM_WARN_T,
       ).length,
       warn: allTires.filter(
         (t) =>
           t.status === 'in-use' &&
-          (t.accumulatedKm ?? 0) >= KM_WARN_T &&
-          (t.accumulatedKm ?? 0) < KM_CRIT_T,
+          computeAccumKm(t, vehicles) >= KM_WARN_T &&
+          computeAccumKm(t, vehicles) < KM_CRIT_T,
       ).length,
       crit: allTires.filter(
-        (t) => t.status === 'in-use' && (t.accumulatedKm ?? 0) >= KM_CRIT_T,
+        (t) => t.status === 'in-use' && computeAccumKm(t, vehicles) >= KM_CRIT_T,
       ).length,
     }),
-    [allTires],
+    [allTires, vehicles],
   )
 
   return (
@@ -766,7 +772,7 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
             <tbody>
               {filtered.map((t) => {
                 const v = vehicles.find((vv) => vv.id === t.vehicleId)
-                const km = t.accumulatedKm ?? 0
+                const km = computeAccumKm(t, vehicles)
                 const ks = kmStatus(km)
                 const isActive = t.status === 'in-use'
                 const posLabel = t.position
@@ -1666,23 +1672,48 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
     if (!toPos || toPos === fromPos) return
     try {
       const odometer = vehicle.odometer ?? 0
+      const today = new Date().toISOString().slice(0, 10)
+      // A tire sitting in a spare slot must be status 'spare' so it stops
+      // accumulating km (computeAccumKm only counts 'in-use'); moving back onto a
+      // wheel position flips it to 'in-use'.
+      const isSpare = (p: string) => p.startsWith('spare')
       const km1 = computeAccumKm(tire, allVehicles)
-      await updateTire.mutateAsync({ id: tire.id, patch: { position: toPos, accumulatedKm: km1, installedOdometer: odometer } })
+      await updateTire.mutateAsync({
+        id: tire.id,
+        patch: { position: toPos, accumulatedKm: km1, installedOdometer: odometer, status: isSpare(toPos) ? 'spare' : 'in-use' },
+      })
       if (toTire) {
         const km2 = computeAccumKm(toTire, allVehicles)
-        await updateTire.mutateAsync({ id: toTire.id, patch: { position: fromPos, accumulatedKm: km2, installedOdometer: odometer } })
+        await updateTire.mutateAsync({
+          id: toTire.id,
+          patch: { position: fromPos, accumulatedKm: km2, installedOdometer: odometer, status: isSpare(fromPos) ? 'spare' : 'in-use' },
+        })
       }
       await insertEvent.mutateAsync({
         tireId: tire.id,
         vehicleId: vehicle.id,
         eventType: 'swap',
-        date: new Date().toISOString().slice(0, 10),
+        date: today,
         odometer,
         fromPos,
         toPos,
         note: note.trim() || (toTire ? `สลับกับ ${toTire.serial}` : 'ย้ายไปตำแหน่งว่าง'),
         userId: 'e10',
       })
+      // Record the counterpart tire's move too, so its own timeline is accurate.
+      if (toTire) {
+        await insertEvent.mutateAsync({
+          tireId: toTire.id,
+          vehicleId: vehicle.id,
+          eventType: 'swap',
+          date: today,
+          odometer,
+          fromPos: toPos,
+          toPos: fromPos,
+          note: note.trim() || `สลับกับ ${tire.serial}`,
+          userId: 'e10',
+        })
+      }
       onDone()
     } catch (e) {
       alert('สลับยางไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
