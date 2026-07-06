@@ -756,7 +756,10 @@ export function FuelStockDashboard() {
   const { data: dispatches = [] } = useDispatches()
   const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const { data: allFuelStock = [] } = useList<FuelStock>('fuel_stock')
+  const { data: allExpenseLines = [] } = useList<ExpenseLine>('expense_lines')
   const deleteStock = useDelete('fuel_stock')
+  const deleteExpenseHdr = useDelete('expense_headers')
+  const deleteExpenseLine = useDelete('expense_lines')
   const factoryTxs = useMemo(
     () => allFuelTxs.filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED'),
     [allFuelTxs],
@@ -810,8 +813,24 @@ export function FuelStockDashboard() {
   const pumpTotalLiters = pumpTxs.reduce((s, t) => s + (t.liters ?? 0), 0)
 
   const deleteStockIn = async (id: string) => {
-    if (!confirm('ลบรายการน้ำมันเข้านี้?')) return
-    await deleteStock.mutateAsync(id)
+    const row = allFuelStock.find(s => s.id === id)
+    const hasAp = !!row?.expenseHeaderId
+    if (!confirm(hasAp
+      ? 'ลบรายการน้ำมันเข้านี้ พร้อมรายการเจ้าหนี้ (AP) ที่ผูกไว้?'
+      : 'ลบรายการน้ำมันเข้านี้?')) return
+    try {
+      // Remove the auto-created AP booking too, otherwise accounts payable stays
+      // overstated for an inventory row that no longer exists.
+      if (row?.expenseHeaderId) {
+        for (const l of allExpenseLines.filter(l => l.headerId === row.expenseHeaderId)) {
+          await deleteExpenseLine.mutateAsync(l.id)
+        }
+        await deleteExpenseHdr.mutateAsync(row.expenseHeaderId)
+      }
+      await deleteStock.mutateAsync(id)
+    } catch (e) {
+      alert('ลบไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
   }
 
   return (
