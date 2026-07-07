@@ -7,6 +7,7 @@ import { SearchInput } from '../../components/ui/SearchInput'
 import { Info } from '../../components/ui/Info'
 import { FontScaleControl } from '../../components/ui/FontScaleControl'
 import { usePrint } from '../../hooks/usePrint'
+import { useAuth } from '../../context/AuthContext'
 import type { Tire, TireEvent, TireScrapSale, Vehicle } from '../../types'
 
 // ── Thresholds ────────────────────────────────────────────────────
@@ -333,6 +334,7 @@ function TireMapSVG({ wc, tireMap, selectedPos, onSelect, selectable, showHoverT
 // ── Tab 1: All Tires ─────────────────────────────────────────────
 
 function InstallTireModal({ tire, onClose, onDone }: { tire: Tire; onClose: () => void; onDone: () => void }) {
+  const { profile } = useAuth()
   const vehicles = useFleetVehicles()
   const { data: tires = [] } = useList<Tire>('tires')
   const updateTire = useUpdate<Tire>('tires')
@@ -365,7 +367,7 @@ function InstallTireModal({ tire, onClose, onDone }: { tire: Tire; onClose: () =
       })
       await insertEvent.mutateAsync({
         tireId: tire.id, vehicleId, eventType: 'install', date: today,
-        odometer: odo, fromPos: null, toPos: position, note: 'ติดตั้งจากคลัง', userId: 'e10',
+        odometer: odo, fromPos: null, toPos: position, note: 'ติดตั้งจากคลัง', userId: profile?.id ?? 'e10',
       })
       onDone()
     } catch (e) {
@@ -416,6 +418,7 @@ function InstallTireModal({ tire, onClose, onDone }: { tire: Tire; onClose: () =
 }
 
 function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void }) {
+  const { profile } = useAuth()
   const [open, setOpen] = useState(false)
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null)
   const [modal, setModal] = useState<'history' | 'swap' | 'install' | null>(null)
@@ -454,7 +457,7 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
       tireId: tire.id, vehicleId: tire.vehicleId ?? '',
       eventType: 'scrap', date: new Date().toISOString().slice(0, 10),
       odometer: vehicle?.odometer ?? 0, fromPos: tire.position, toPos: null,
-      note: 'หมดสภาพ', userId: 'e10',
+      note: 'หมดสภาพ', userId: profile?.id ?? 'e10',
     })
     setOpen(false)
     onRefresh()
@@ -475,7 +478,7 @@ function TireActionMenu({ tire, onRefresh }: { tire: Tire; onRefresh: () => void
       tireId: tire.id, vehicleId: tire.vehicleId ?? '',
       eventType: 'remove', date: new Date().toISOString().slice(0, 10),
       odometer: vehicle?.odometer ?? 0, fromPos: tire.position, toPos: null,
-      note: 'ย้ายเข้าคลัง', userId: 'e10',
+      note: 'ย้ายเข้าคลัง', userId: profile?.id ?? 'e10',
     })
     setOpen(false)
     onRefresh()
@@ -888,6 +891,7 @@ function TiresAll({ setActive }: { setActive: (id: string) => void }) {
 
 // ── Add Tire Modal ────────────────────────────────────────────────
 function AddTireModal({ onClose }: { onClose: () => void }) {
+  const { profile } = useAuth()
   const { data: tires = [] } = useList<Tire>('tires')
   const vehicles = useFleetVehicles()
   const insertTire = useInsert<Tire>('tires')
@@ -951,7 +955,7 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
           fromPos: null,
           toPos: finalPosition,
           note: 'ยางใหม่',
-          userId: 'e10',
+          userId: profile?.id ?? 'e10',
         })
       }
       alert('เพิ่มยางเรียบร้อย')
@@ -1657,6 +1661,7 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
   onClose: () => void
   onDone: () => void
 }) {
+  const { profile } = useAuth()
   const allVehicles = useFleetVehicles()
   const updateTire = useUpdate<Tire>('tires')
   const insertEvent = useInsert<TireEvent>('tire_events')
@@ -1698,7 +1703,7 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
         fromPos,
         toPos,
         note: note.trim() || (toTire ? `สลับกับ ${toTire.serial}` : 'ย้ายไปตำแหน่งว่าง'),
-        userId: 'e10',
+        userId: profile?.id ?? 'e10',
       })
       // Record the counterpart tire's move too, so its own timeline is accurate.
       if (toTire) {
@@ -1711,7 +1716,7 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
           fromPos: toPos,
           toPos: fromPos,
           note: note.trim() || `สลับกับ ${tire.serial}`,
-          userId: 'e10',
+          userId: profile?.id ?? 'e10',
         })
       }
       onDone()
@@ -1796,6 +1801,7 @@ function TireSwapModal({ tire, vehicle, tireMap, onClose, onDone }: {
 
 // ── Move to Stock Panel ───────────────────────────────────────────
 function MoveToStockPanel() {
+  const { profile } = useAuth()
   const vehicles = useFleetVehicles()
   const { data: tires = [] } = useList<Tire>('tires')
   const updateTire = useUpdate<Tire>('tires')
@@ -1821,7 +1827,7 @@ function MoveToStockPanel() {
       tireId: tireAtPos.id, vehicleId,
       eventType: 'remove', date: new Date().toISOString().slice(0, 10),
       odometer: vehicles.find((v) => v.id === vehicleId)?.odometer ?? 0,
-      fromPos: pos, toPos: null, note: 'ย้ายเข้าคลัง', userId: 'e10',
+      fromPos: pos, toPos: null, note: 'ย้ายเข้าคลัง', userId: profile?.id ?? 'e10',
     })
     setDone(true)
     setPos('')
@@ -1874,6 +1880,7 @@ function MoveToStockPanel() {
 
 // ── Tab 3: Manage & Swap ──────────────────────────────────────────
 function TiresManageFull() {
+  const { profile } = useAuth()
   const vehicles = useFleetVehicles()
   const { data: tires = [] } = useList<Tire>('tires')
   const { data: tireEvents = [] } = useList<TireEvent>('tire_events')
@@ -1904,7 +1911,7 @@ function TiresManageFull() {
     // would otherwise write a tire_events row with an empty tireId.
     if (!fromTire && !toTire) { alert('ตำแหน่งที่เลือกว่างทั้งคู่ — ไม่มียางให้สลับ'); return }
     const odometer = veh?.odometer ?? 0
-    const userId = 'e10'
+    const userId = profile?.id ?? 'e10'
     const today = new Date().toISOString().slice(0, 10)
     const isSpare = (p: string) => p.startsWith('spare')
     try {
@@ -2738,6 +2745,7 @@ function TiresHistoryFull() {
 
 // ── Tab 5: Scrapped Tires ─────────────────────────────────────────
 function SellScrapModal({ tire, onClose, onSaved }: { tire: Tire; onClose: () => void; onSaved: () => void }) {
+  const { profile } = useAuth()
   const insertSale = useInsert<TireScrapSale>('tire_scrap_sales')
   const insertEvent = useInsert<TireEvent>('tire_events')
   const updateTire = useUpdate<Tire>('tires')
@@ -2753,14 +2761,14 @@ function SellScrapModal({ tire, onClose, onSaved }: { tire: Tire; onClose: () =>
       await insertSale.mutateAsync({
         tireId: tire.id, serial: tire.serial,
         buyer: buyer.trim(), price: priceNum,
-        date: today, userId: 'e10',
+        date: today, userId: profile?.id ?? 'e10',
       })
       // Record the sale on the tire's own timeline (the history views render a
       // 'sell' event; without this the timeline ended at 'scrap').
       await insertEvent.mutateAsync({
         tireId: tire.id, vehicleId: tire.vehicleId ?? '', eventType: 'sell',
         date: today, odometer: 0, fromPos: tire.position ?? null, toPos: null,
-        note: `ขายให้ ${buyer.trim()} · ${priceNum} บาท`, userId: 'e10',
+        note: `ขายให้ ${buyer.trim()} · ${priceNum} บาท`, userId: profile?.id ?? 'e10',
       })
       await updateTire.mutateAsync({ id: tire.id, patch: { status: 'sold' } })
       onSaved()
