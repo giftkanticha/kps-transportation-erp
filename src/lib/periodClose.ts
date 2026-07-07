@@ -41,7 +41,8 @@ export function computeVehicleSnapshots(
       const consumed = fr ? db.fuelRoundConsumed(fr) : (r.liters || 0)
       revenue  += db.roundRevenue(r)
       perDiem  += db.roundPerDiem(r)
-      other    += db.roundOtherExpenses(r)
+      // ค่านายหน้าขากลับรวมอยู่ในต้นทุน "อื่นๆ" ของงวด
+      other    += db.roundOtherExpenses(r) + db.roundCommission(r)
       fuelCost += fr ? db.fuelRoundCost(fr) : (r.cost || 0)
       distance += db.roundDistance(r)
       liters   += consumed

@@ -46,6 +46,7 @@ interface LegCloseState {
   perDiem: string
   notes: string
   price: string   // ราคา/เรท (฿/ตัน, ฿/กก. หรือยอดเหมา) — แก้ค่าบรรทุกที่ตั้งตอนเปิดขาได้
+  commission: string   // ค่านายหน้า (บาท) — ขากลับ. ว่าง = ยังไม่ระบุ (เตือนตอนปิดงาน)
   unloadDate: string   // วันที่ลงสินค้า (ปลายทาง) — เติม/แก้ได้ตอนกรอกน้ำหนักปลายทาง
 }
 
@@ -380,6 +381,7 @@ function CloseForm({
           perDiem: l.perDiem != null ? String(l.perDiem) : '',
           notes: l.notes || '',
           price: l.price != null ? String(l.price) : '',
+          commission: l.commission != null ? String(l.commission) : '',
           unloadDate: l.unloadDate ?? '',
         })),
       )
@@ -456,6 +458,15 @@ function CloseForm({
   const revenue = adjustedLegAmounts.reduce((s, a) => s + a, 0)
   const perDiemTotal = legStates.reduce((s, ls) => s + (Number(ls.perDiem) || 0), 0)
   const otherTotal = otherExp.reduce((s, e) => s + (Number(e.amount) || 0), 0)
+  // ค่านายหน้ารวมของขากลับ (backhaul/return) — เป็นต้นทุนของรอบ
+  const commissionTotal = legs.reduce((s, l, i) => {
+    if (l.legType === 'outbound') return s
+    return s + (Number(legStates[i]?.commission) || 0)
+  }, 0)
+  // ขากลับที่ยังไม่ได้ระบุค่านายหน้า (ว่าง) — ใช้เตือน/บังคับยืนยันก่อนปิดรอบ
+  const missingCommissionLegs = legs
+    .map((l, i) => ({ l, i }))
+    .filter(({ l, i }) => l.legType !== 'outbound' && (legStates[i]?.commission ?? '').trim() === '')
   const distance = endMileage && round.startOdometer != null
     ? Math.max(0, Number(endMileage) - round.startOdometer)
     : 0
@@ -473,7 +484,7 @@ function CloseForm({
     .filter(t => t.tripFuelRole !== 'TRIP_OPENING')
     .reduce((s, t) => s + (t.total ?? t.liters * (t.pricePerL || 0)), 0)
   const fuelCost = recordedFuelCost + (fuelClosing.length > 0 ? 0 : closingL * closingPrice)
-  const profit = revenue - fuelCost - perDiemTotal - otherTotal
+  const profit = revenue - fuelCost - perDiemTotal - otherTotal - commissionTotal
 
   const kmPerL = distance > 0 && totalFuelForKmpl > 0
     ? distance / totalFuelForKmpl
@@ -485,12 +496,17 @@ function CloseForm({
       const ls = legStates[i]
       const dwTon = ls?.deliveredWeight ? dwInputToTon(ls.deliveredWeight, l.priceMode) : null
       const pd = ls?.perDiem ? Number(ls.perDiem) : 0
+      // ค่านายหน้าเฉพาะขากลับ; ว่าง = null (ยังไม่ระบุ), มีค่า = number
+      const commission = l.legType === 'outbound'
+        ? null
+        : ((ls?.commission ?? '').trim() === '' ? null : Number(ls?.commission) || 0)
       const el = effLeg(l, ls)
       return {
         ...el,
         deliveredWeight: dwTon,
         amount: adjustedAmount(el, dwTon),
         perDiem: pd,
+        commission,
         notes: ls?.notes || l.notes,
         unloadDate: ls?.unloadDate || l.unloadDate || null,
         closed: markClosed && (l.legType === 'return' || dwTon != null),
@@ -542,6 +558,16 @@ function CloseForm({
         }
         const err = validateClose(newLegs)
         if (err) throw new Error(err)
+        // กันลืมค่านายหน้าขากลับ: ถ้ามีขากลับที่ยังไม่ได้ระบุค่านายหน้า (ว่าง)
+        // บังคับให้ยืนยันก่อน — ตอบ "ตกลง" = ยืนยันว่าไม่มีค่านายหน้า (บันทึกเป็น 0),
+        // ตอบ "ยกเลิก" = กลับไปกรอก. ไม่ปิดเงียบๆ ให้พลาด
+        if (missingCommissionLegs.length > 0) {
+          const lines = missingCommissionLegs.map(({ l, i }) => `ขา ${i + 1}: ${l.origin} → ${l.destination}`).join('\n')
+          if (!window.confirm(`💰 รอบนี้มีงานขากลับที่ยังไม่ได้กรอก "ค่านายหน้า":\n${lines}\n\nกด "ตกลง" ถ้ายืนยันว่าไม่มีค่านายหน้า (บันทึกเป็น 0)\nกด "ยกเลิก" เพื่อกลับไปกรอกค่านายหน้าก่อน`)) {
+            setSaving(false)
+            return
+          }
+        }
         // Over-threshold loss and overweight (delivered > loaded) are both allowed
         // but must be confirmed — they may be the real re-weighed delivery.
         const anomalyLines = newLegs.flatMap(l => {
@@ -644,6 +670,7 @@ function CloseForm({
             price: l.price,
             amount: l.amount,
             perDiem: l.perDiem,
+            commission: l.commission ?? null,
             notes: l.notes,
             closed: l.closed,
           }
@@ -741,6 +768,21 @@ function CloseForm({
 
       {/* Per-leg close form */}
       <h3 className="section-title" style={{ marginBottom: 10 }}>บันทึกข้อมูลปลายทางทุกขา</h3>
+      {!isClosed && missingCommissionLegs.length > 0 && (
+        <div
+          className="card pad"
+          style={{ marginBottom: 12, background: '#FFFBEB', border: '1px solid #FDE68A', display: 'flex', gap: 10, alignItems: 'flex-start' }}
+        >
+          <span style={{ fontSize: 18, lineHeight: 1.2 }}>💰</span>
+          <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+            <strong>รอบนี้มีงานขากลับ — อย่าลืมกรอก "ค่านายหน้า"</strong>
+            <div className="muted" style={{ marginTop: 2 }}>
+              {missingCommissionLegs.map(({ l, i }) => `ขา ${i + 1} (${l.origin} → ${l.destination})`).join(', ')}
+              {' '}ยังไม่ได้ระบุค่านายหน้า — กรอกจำนวน หรือใส่ 0 ถ้าไม่มี (ระบบจะถามยืนยันอีกครั้งตอนปิดงาน)
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
         {legs.map((l, i) => {
           const ls = legStates[i]
@@ -877,6 +919,26 @@ function CloseForm({
                     ใส่ 0 ถ้าไม่มี
                   </div>
                 </Field>
+                {l.legType !== 'outbound' && (
+                  <Field label="ค่านายหน้า (฿)">
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={ls.commission}
+                      onChange={e => updateLegState(i, { commission: e.target.value })}
+                      placeholder="0"
+                      disabled={isClosed}
+                      style={ls.commission.trim() === '' && !isClosed
+                        ? { borderColor: 'var(--amber)', background: '#FFFBEB' }
+                        : undefined}
+                    />
+                    <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                      {ls.commission.trim() === '' && !isClosed
+                        ? '⚠️ งานขากลับ — ใส่ 0 ถ้าไม่มีค่านายหน้า'
+                        : 'ค่านายหน้างานขากลับ — ใส่ 0 ถ้าไม่มี'}
+                    </div>
+                  </Field>
+                )}
                 {isManager && !isReturn && (
                   <Field label={isLump ? 'ค่าเหมา (฿)' : isPerKg ? 'ราคา (฿/กก.)' : 'ราคา (฿/ตัน)'}>
                     <input
@@ -1388,6 +1450,14 @@ function CloseForm({
                 <div className="muted" style={{ fontSize: 10.5 }}>อื่นๆ</div>
                 <div className="mono" style={{ fontSize: 14, fontWeight: 600 }}>{db.thb(otherTotal)}</div>
               </div>
+              {(commissionTotal > 0 || missingCommissionLegs.length > 0) && (
+                <div>
+                  <div className="muted" style={{ fontSize: 10.5 }}>ค่านายหน้า</div>
+                  <div className="mono" style={{ fontSize: 14, fontWeight: 600, color: missingCommissionLegs.length > 0 ? 'var(--amber)' : undefined }}>
+                    {missingCommissionLegs.length > 0 ? `${db.thb(commissionTotal)} ⚠️` : db.thb(commissionTotal)}
+                  </div>
+                </div>
+              )}
               <div style={{ borderLeft: '1px solid var(--line)', paddingLeft: 24 }}>
                 <div className="muted" style={{ fontSize: 10.5 }}>กำไรสุทธิ</div>
                 <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: profit >= 0 ? 'var(--green)' : 'var(--red)' }}>
