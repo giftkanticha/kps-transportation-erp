@@ -530,16 +530,19 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const colorMap: Record<string, string> = { alert: 'red', approve: 'green', fuel: 'amber' }
 
   const todayLabel = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
+  // Show WHICH month these month-scoped cards cover, so a zero reads as
+  // "no data this month yet" rather than "numbers vanished".
+  const thisMonthLabel = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'short' })
 
   // KPI card definitions
   const kpiCards = [
     {
-      label: 'รายได้เดือนนี้', value: db.thb(revenueThisMonth), unit: '',
+      label: `รายได้ ${thisMonthLabel}`, value: db.thb(revenueThisMonth), unit: '',
       delta: revenueDelta.text, deltaUp: revenueDelta.up,
       icon: 'money', gradient: 'linear-gradient(135deg,#10B981,#059669)', iconBg: '#D1FAE5', iconColor: '#065F46',
     },
     {
-      label: 'กำไรประมาณการ', value: db.thb(revenueThisMonth - costThisMonth), unit: '',
+      label: `กำไรประมาณการ ${thisMonthLabel}`, value: db.thb(revenueThisMonth - costThisMonth), unit: '',
       delta: `margin ~${marginPct}%`, deltaUp: true as boolean | null,
       icon: 'chart', gradient: 'linear-gradient(135deg,#0EA5E9,#0284C7)', iconBg: '#E0F2FE', iconColor: '#075985',
     },

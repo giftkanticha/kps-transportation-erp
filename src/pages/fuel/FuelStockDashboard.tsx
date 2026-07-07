@@ -3,7 +3,7 @@ import { db, uid } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
-import type { FuelStock, FuelTransaction, Vehicle, Partner, ExpenseHeader, ExpenseLine } from '../../types'
+import type { FuelStock, FuelTransaction, FuelRecord, Vehicle, Partner, ExpenseHeader, ExpenseLine } from '../../types'
 import { Icon, Field, PrintButton, FontScaleControl } from '../../components/ui'
 
 const FUEL_PARTNER_TYPE = 'ซัพพลายเออร์น้ำมัน'
@@ -453,9 +453,11 @@ interface HistoryModalProps {
   canSeeMoney?: boolean
   onEdit?: (stock: FuelStock) => void
   onDelete?: (id: string) => void
+  onEditTx?: (tx: FuelTransaction) => void
+  onReverseTx?: (tx: FuelTransaction) => void
 }
 
-function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canSeeMoney = true, onEdit, onDelete }: HistoryModalProps) {
+function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canSeeMoney = true, onEdit, onDelete, onEditTx, onReverseTx }: HistoryModalProps) {
   const [page, setPage] = useState(1)
   const [filterFrom, setFilterFrom] = useState('')
   const [filterTo, setFilterTo] = useState('')
@@ -568,14 +570,14 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
                   </>
                 )}
                 {type !== 'pump' && <th className="num right">ยอดสะสม</th>}
-                {type === 'in' && (canEdit || canDelete) && <th className="no-print" style={{ width: 80 }}></th>}
+                {(type === 'in' || type === 'out') && (canEdit || canDelete) && <th className="no-print" style={{ width: 80 }}></th>}
               </tr>
             </thead>
             <tbody className="hist-screen-only">
               {paginated.length === 0 ? (
                 <tr><td colSpan={type === 'in'
                   ? 5 + (canSeeMoney ? 2 : 0) + (canEdit || canDelete ? 1 : 0)
-                  : type === 'out' ? 7
+                  : type === 'out' ? 7 + (canEdit || canDelete ? 1 : 0)
                   : 5 + (canSeeMoney ? 2 : 0)} style={{ textAlign: 'center', padding: 32, color: 'var(--text-muted)' }}>ไม่พบข้อมูล</td></tr>
               ) : paginated.map(r => {
                 const balance = balanceMap[(r as { id: string }).id]
@@ -641,6 +643,22 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
                         {t.createdAt ? new Date(t.createdAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
                       </td>
                       <td className="num right mono" style={{ fontWeight: 600, color: 'var(--primary)' }}>{balance != null ? db.fmt(balance) : '—'}</td>
+                      {(canEdit || canDelete) && (
+                        <td className="no-print">
+                          <div style={{ display: 'flex', gap: 2 }}>
+                            {canEdit && onEditTx && (
+                              <button className="btn ghost icon sm" onClick={() => onEditTx(t)} title="แก้ไขจำนวน/ราคา/วันที่">
+                                <Icon name="edit" size={13} />
+                              </button>
+                            )}
+                            {canDelete && onReverseTx && (
+                              <button className="btn ghost icon sm" style={{ color: 'var(--red)' }} onClick={() => onReverseTx(t)} title="ยกเลิก (reverse) — คืนสต็อก">
+                                <Icon name="trash" size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   )
                 } else {
@@ -759,9 +777,38 @@ export function FuelStockDashboard() {
   const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const { data: allFuelStock = [] } = useList<FuelStock>('fuel_stock')
   const { data: allExpenseLines = [] } = useList<ExpenseLine>('expense_lines')
+  const { data: allFuelRecs = [] } = useList<FuelRecord>('fuel_records')
   const deleteStock = useDelete('fuel_stock')
   const deleteExpenseHdr = useDelete('expense_headers')
   const deleteExpenseLine = useDelete('expense_lines')
+  const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
+  const updateFuelRec = useUpdate<FuelRecord>('fuel_records')
+  const deleteFuelRec = useDelete('fuel_records')
+  const [editingTx, setEditingTx] = useState<FuelTransaction | null>(null)
+
+  // Legacy fuel_records mirror for an out-transaction (Express Fuel Log writes
+  // both tables with no FK), matched the same way FloatingFuel does.
+  const findTxMirror = (tx: FuelTransaction): FuelRecord | undefined =>
+    allFuelRecs.find(r =>
+      r.vehicleId === tx.vehicleId
+      && (r.date ?? '').slice(0, 10) === (tx.date ?? '').slice(0, 10)
+      && Math.abs(r.liters - tx.liters) < 0.01,
+    )
+
+  // Reverse a factory-out entry (admin): mark the tx REVERSED (restores stock,
+  // which the balance excludes) and drop the mirror so both ledgers agree.
+  const reverseFuelOut = async (tx: FuelTransaction) => {
+    const linked = tx.tripId ? ' รายการนี้ผูกกับรอบงาน — ควรแก้ที่หน้าปิดงานแทน' : ''
+    if (!confirm(`ยกเลิก (reverse) รายการน้ำมันออก ${db.fmt(tx.liters)} ลิตร?${linked}\nสต็อกจะถูกคืนกลับ`)) return
+    try {
+      await updateFuelTx.mutateAsync({ id: tx.id, patch: { status: 'REVERSED', reversedAt: new Date().toISOString() } })
+      const mirror = findTxMirror(tx)
+      if (mirror) { try { await deleteFuelRec.mutateAsync(mirror.id) } catch { /* mirror already gone */ } }
+    } catch (e) {
+      alert('ยกเลิกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
   const factoryTxs = useMemo(
     () => allFuelTxs.filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED'),
     [allFuelTxs],
@@ -1071,8 +1118,84 @@ export function FuelStockDashboard() {
           canSeeMoney={isManager}
           onEdit={(s) => { setHistoryType(null); setEditingStock(s) }}
           onDelete={(id) => { void deleteStockIn(id) }}
+          onEditTx={(t) => { setHistoryType(null); setEditingTx(t) }}
+          onReverseTx={(t) => { void reverseFuelOut(t) }}
         />
       )}
+      {editingTx && (
+        <EditFuelOutModal
+          tx={editingTx}
+          updateFuelTx={updateFuelTx}
+          updateFuelRec={updateFuelRec}
+          findMirror={findTxMirror}
+          onClose={() => setEditingTx(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// Edit a factory-out (dispensed) entry: date / liters / price. Updates the
+// fuel_transactions row and its legacy fuel_records mirror so both the tank
+// balance and the monthly summary stay in sync. Admin-only (gated by caller).
+function EditFuelOutModal({ tx, updateFuelTx, updateFuelRec, findMirror, onClose }: {
+  tx: FuelTransaction
+  updateFuelTx: ReturnType<typeof useUpdate<FuelTransaction>>
+  updateFuelRec: ReturnType<typeof useUpdate<FuelRecord>>
+  findMirror: (tx: FuelTransaction) => FuelRecord | undefined
+  onClose: () => void
+}) {
+  const [date, setDate] = useState(tx.date.slice(0, 10))
+  const [liters, setLiters] = useState(String(tx.liters))
+  const [pricePerL, setPricePerL] = useState(String(tx.pricePerL ?? ''))
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    const l = parseFloat(liters)
+    const p = parseFloat(pricePerL) || 0
+    if (!Number.isFinite(l) || l <= 0) { alert('จำนวนลิตรไม่ถูกต้อง'); return }
+    setSaving(true)
+    try {
+      const total = l * p
+      // Match the mirror against the ORIGINAL values before we change them.
+      const mirror = findMirror(tx)
+      await updateFuelTx.mutateAsync({ id: tx.id, patch: { date, liters: l, pricePerL: p, total } })
+      if (mirror) {
+        await updateFuelRec.mutateAsync({ id: mirror.id, patch: { date, liters: l, pricePerL: p, total } })
+      }
+      onClose()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2200 }} onClick={onClose}>
+      <div style={{ background: 'var(--card)', borderRadius: 14, padding: 24, width: '100%', maxWidth: 380 }} onClick={e => e.stopPropagation()}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>✏️ แก้ไขน้ำมันออกคลัง</h2>
+        {tx.tripId && (
+          <div style={{ marginTop: 8, fontSize: 12, color: '#B45309', background: '#FEF3C7', padding: '6px 10px', borderRadius: 8 }}>
+            ⚠️ รายการนี้ผูกกับรอบงาน — การแก้จะไม่อัปเดตยอดที่รอบเก็บไว้ตอนปิดงาน แนะนำแก้ที่หน้าปิดงานแทน
+          </div>
+        )}
+        <div style={{ marginTop: 14, display: 'grid', gap: 12 }}>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>วันที่
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ width: '100%', height: 34, marginTop: 4, padding: '0 10px', border: '1px solid var(--line)', borderRadius: 7 }} />
+          </label>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>จำนวน (ลิตร)
+            <input type="number" min="0" value={liters} onChange={e => setLiters(e.target.value)} style={{ width: '100%', height: 34, marginTop: 4, padding: '0 10px', border: '1px solid var(--line)', borderRadius: 7 }} />
+          </label>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>ราคา/ลิตร
+            <input type="number" min="0" step="0.01" value={pricePerL} onChange={e => setPricePerL(e.target.value)} style={{ width: '100%', height: 34, marginTop: 4, padding: '0 10px', border: '1px solid var(--line)', borderRadius: 7 }} />
+          </label>
+        </div>
+        <div style={{ marginTop: 18, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button className="btn ghost" onClick={onClose} disabled={saving}>ยกเลิก</button>
+          <button className="btn primary" onClick={save} disabled={saving}>{saving ? 'กำลังบันทึก…' : 'บันทึก'}</button>
+        </div>
+      </div>
     </div>
   )
 }
