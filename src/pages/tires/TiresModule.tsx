@@ -2474,7 +2474,13 @@ function TiresHistoryFull() {
   }, [])
 
   const tire = searched
-    ? tires.find((t) => t.serial.toLowerCase().includes(searched.toLowerCase()))
+    ? (() => {
+        const s = searched.toLowerCase()
+        // Prefer an exact serial match so e.g. "TIR001" doesn't silently resolve
+        // to "TIR0010"; fall back to substring only when nothing matches exactly.
+        return tires.find((t) => t.serial.toLowerCase() === s)
+          ?? tires.find((t) => t.serial.toLowerCase().includes(s))
+      })()
     : null
   const vehicle = tire?.vehicleId ? vehicles.find((v) => v.id === tire.vehicleId) : null
 
