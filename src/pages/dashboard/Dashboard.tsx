@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
-import { useList, useInsert } from '../../hooks/useTable'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner, EditApprovalRequest, BillingNote, Location, DispatchLeg } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
@@ -9,6 +9,7 @@ import { canAccessRoute } from '../../lib/permissions'
 // ─── Mock data ─────────────────────────────────────────────────────────────────
 interface RegItem {
   id: number; plate: string; label: string; type: string; dueDate: string; status: 'warning' | 'critical'
+  vehicleId: string; fieldKey: 'tax' | 'insurance' | 'dispatchPermit'
 }
 interface ReqItem {
   id: string; title: string; desc: string; time: string; priority: 'critical' | 'warning' | 'info'
@@ -58,6 +59,7 @@ function RegistrationModal({ reg, onClose }: { reg: RegItem; onClose: () => void
   })
   const [saving, setSaving] = useState(false)
   const insertReg = useInsert<{ data: Record<string, unknown> }>('vehicle_registrations')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const sectionStyle = { background: '#F8FAFC', borderRadius: 10, padding: '14px 16px', marginBottom: 14 }
@@ -85,6 +87,12 @@ function RegistrationModal({ reg, onClose }: { reg: RegItem; onClose: () => void
           nextNotes: form.nextNotes,
         },
       })
+      // Push the new expiry back onto the vehicle so the renewal alert clears —
+      // it's computed from vehicle.tax/insurance/dispatchPermit. Without this the
+      // critical alert survived its own completion (inviting duplicate payments).
+      if (form.nextDate) {
+        await updateVehicle.mutateAsync({ id: reg.vehicleId, patch: { [reg.fieldKey]: form.nextDate } })
+      }
       onClose()
     } catch (e) {
       alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
@@ -483,6 +491,8 @@ export function Dashboard({ user, setActive }: DashboardProps) {
           type: c.label,
           dueDate: days < 0 ? `หมดอายุแล้ว (${thaiShortDate(dateStr)})` : `${thaiShortDate(dateStr)} (${days} วัน)`,
           status: days <= 7 ? 'critical' : 'warning',
+          vehicleId: v.id,
+          fieldKey: c.key,
         })
       })
     })
