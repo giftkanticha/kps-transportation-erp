@@ -932,7 +932,20 @@ function AddTireModal({ onClose }: { onClose: () => void }) {
     }
     try {
       const finalVehicleId = (form.status === 'in-use' || form.status === 'spare') ? (form.vehicleId || null) : null
-      const finalPosition = form.status === 'in-use' ? (form.position || null) : null
+      // A spare must occupy a spare_* slot, otherwise the layout page (which finds
+      // spares by position, not status) never shows it. Pick the first free slot.
+      const finalPosition = form.status === 'in-use'
+        ? (form.position || null)
+        : form.status === 'spare' && finalVehicleId
+          ? (() => {
+              const occupied = new Set(
+                tires.filter(t => t.vehicleId === finalVehicleId && t.position).map(t => t.position),
+              )
+              return !occupied.has('spare_1') ? 'spare_1'
+                : !occupied.has('spare_2') ? 'spare_2'
+                : (form.position || 'spare_1')
+            })()
+          : null
       const newTire = await insertTire.mutateAsync({
         serial: form.serial,
         brand: form.brand === 'อื่นๆ' ? (form.customBrand.trim() || 'อื่นๆ') : form.brand,
