@@ -1,6 +1,6 @@
 import { db } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
-import { Icon, StatusBadge } from '../../components/ui'
+import { StatusBadge } from '../../components/ui'
 import type { Partner } from '../../types'
 
 export function PartnersPage() {
@@ -16,11 +16,8 @@ export function PartnersPage() {
             {partners.length} ราย • ยอดค้างจ่ายรวม {db.thb(totalBalance)}
           </div>
         </div>
-        <div className="actions">
-          <button className="btn primary">
-            <Icon name="plus" size={15} /> เพิ่มคู่ค้า
-          </button>
-        </div>
+        {/* Add/edit partners in ค่าใช้จ่าย → ทะเบียนร้านค้า/ช่าง (full CRUD).
+            This page is a read-only receivables summary. */}
       </div>
 
       <div className="tbl-wrap">
