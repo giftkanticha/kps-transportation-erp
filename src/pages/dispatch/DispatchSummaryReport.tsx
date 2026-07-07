@@ -88,7 +88,8 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
       const legs = round.legs ?? []
       const revenue = db.roundRevenue(round)
       const perDiemTotal = db.roundPerDiem(round)
-      const otherTotal = db.roundOtherExpenses(round)
+      // ค่านายหน้าขากลับรวมอยู่ในต้นทุน "อื่นๆ"
+      const otherTotal = db.roundOtherExpenses(round) + db.roundCommission(round)
       const fuelCost = fuelRound ? db.fuelRoundCost(fuelRound) : (round.cost || 0)
       const consumed = fuelRound ? db.fuelRoundConsumed(fuelRound) : (round.liters || 0)
       const distance = db.roundDistance(round)

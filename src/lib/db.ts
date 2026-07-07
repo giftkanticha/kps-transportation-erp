@@ -235,6 +235,16 @@ export const db = {
     return (d.legs ?? []).reduce((s, l) => s + (l.perDiem || 0), 0)
   },
 
+  // ── ค่านายหน้า (broker commission) ต่อขา — ต้นทุนของรอบ ─────────────────────
+  // NULL/undefined (ยังไม่ระบุ) นับเป็น 0 ในการคำนวณต้นทุน; หน้าปิดงานใช้ค่า null
+  // แยกต่างหากเพื่อเตือนให้กรอกก่อนปิดรอบ (กันลืมค่านายหน้าขากลับ)
+  legCommission(l: DispatchLeg): number {
+    return l.commission || 0
+  },
+  roundCommission(d: Dispatch): number {
+    return (d.legs ?? []).reduce((s, l) => s + db.legCommission(l), 0)
+  },
+
   roundOtherExpenses(d: Dispatch): number {
     return (d.otherExpenses ?? []).reduce((s, e) => s + (e.amount || 0), 0)
   },

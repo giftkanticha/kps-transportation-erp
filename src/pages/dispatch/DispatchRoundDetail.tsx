@@ -46,6 +46,7 @@ interface LegFormState {
   legType: 'outbound' | 'backhaul' | 'return'
   notes: string
   wht: boolean
+  commission: string
   noBill: boolean
   loadDate: string
   unloadDate: string
@@ -53,7 +54,7 @@ interface LegFormState {
 
 const EMPTY_LEG: LegFormState = {
   origin: '', destination: '', billToLocationId: '', cargo: '', cargoType: '',
-  priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '', wht: false, noBill: false,
+  priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '', wht: false, commission: '', noBill: false,
   loadDate: '', unloadDate: '',
 }
 
@@ -324,6 +325,20 @@ function LegModal({
               )}
             </div>
           )}
+          {f.legType !== 'outbound' && (
+            <Field label="ค่านายหน้า (บาท)">
+              <input
+                type="number"
+                step="0.01"
+                value={f.commission}
+                onChange={e => set('commission', e.target.value)}
+                placeholder="0"
+              />
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                ค่านายหน้าสำหรับงานขากลับ — เป็นต้นทุนของรอบ (เว้นว่างได้ แล้วเตือนให้กรอกตอนปิดงาน)
+              </div>
+            </Field>
+          )}
           <Field label="หมายเหตุ">
             <textarea value={f.notes} onChange={e => set('notes', e.target.value)} rows={2} style={{ resize: 'vertical', minHeight: 56 }} />
           </Field>
@@ -355,10 +370,11 @@ function ClosedSummary({ round, fuelRound, isManager }: { round: Dispatch; fuelR
   const revenue = db.roundRevenue(round)
   const perDiemTotal = db.roundPerDiem(round)
   const otherTotal = db.roundOtherExpenses(round)
+  const commissionTotal = db.roundCommission(round)
   const fuelCost = fuelRound ? db.fuelRoundCost(fuelRound) : (round.cost || 0)
   const consumed = fuelRound ? db.fuelRoundConsumed(fuelRound) : (round.liters || 0)
   const distance = db.roundDistance(round)
-  const profit = revenue - fuelCost - perDiemTotal - otherTotal
+  const profit = revenue - fuelCost - perDiemTotal - otherTotal - commissionTotal
   const margin = revenue > 0 ? (profit / revenue) * 100 : 0
   const kmPerL = consumed > 0 ? distance / consumed : null
   const isLow = kmPerL != null && kmPerL < DSP_KMPL_THRESHOLD
@@ -474,8 +490,11 @@ function ClosedSummary({ round, fuelRound, isManager }: { round: Dispatch; fuelR
               <div className="row" style={{ fontSize: 13 }}><span>ค่าน้ำมัน</span><span className="spacer" /><span className="mono">฿{db.fmt(fuelCost)}</span></div>
               <div className="row" style={{ fontSize: 13 }}><span>เบี้ยเลี้ยง</span><span className="spacer" /><span className="mono">฿{db.fmt(perDiemTotal)}</span></div>
               <div className="row" style={{ fontSize: 13 }}><span>ค่าใช้จ่ายอื่น</span><span className="spacer" /><span className="mono">฿{db.fmt(otherTotal)}</span></div>
+              {commissionTotal > 0 && (
+                <div className="row" style={{ fontSize: 13 }}><span>ค่านายหน้า</span><span className="spacer" /><span className="mono">฿{db.fmt(commissionTotal)}</span></div>
+              )}
               <div className="row" style={{ fontSize: 13, fontWeight: 600, borderTop: '1px dashed var(--line)', paddingTop: 4, marginTop: 4 }}>
-                <span>รวม</span><span className="spacer" /><span className="mono">฿{db.fmt(fuelCost + perDiemTotal + otherTotal)}</span>
+                <span>รวม</span><span className="spacer" /><span className="mono">฿{db.fmt(fuelCost + perDiemTotal + otherTotal + commissionTotal)}</span>
               </div>
             </div>
           </div>
@@ -662,6 +681,10 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       legType: form.legType,
       notes: form.notes.trim() || null,
       wht: form.legType !== 'outbound' ? form.wht : false,
+      // ค่านายหน้าเฉพาะขากลับ; ว่าง = null (ยังไม่ระบุ, เตือนตอนปิดงาน), มีค่า = number
+      commission: form.legType !== 'outbound'
+        ? (form.commission.trim() === '' ? null : Number(form.commission) || 0)
+        : null,
       noBill: form.noBill,
     } as Partial<DispatchLeg>
     // ส่งคอลัมน์วันที่เฉพาะเมื่อมีค่า — กัน error ถ้า DB ยังไม่ได้เพิ่มคอลัมน์ (migration 0041)
@@ -900,6 +923,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                                   legType: l.legType ?? 'outbound',
                                   notes: l.notes || '',
                                   wht: l.wht ?? false,
+                                  commission: l.commission != null ? String(l.commission) : '',
                                   loadDate: l.loadDate ?? '',
                                   unloadDate: l.unloadDate ?? '',
                                 },

@@ -159,7 +159,8 @@ export function DispatchVehicleMonthlyReport() {
       const consumed = fuelRound ? db.fuelRoundConsumed(fuelRound) : (r.liters || 0)
       revenue += db.roundRevenue(r)
       perDiem += db.roundPerDiem(r)
-      other += db.roundOtherExpenses(r)
+      // ค่านายหน้าขากลับรวมอยู่ในต้นทุน "อื่นๆ"
+      other += db.roundOtherExpenses(r) + db.roundCommission(r)
       fuelCost += fuelRound ? db.fuelRoundCost(fuelRound) : (r.cost || 0)
       distance += db.roundDistance(r)
       liters += consumed
