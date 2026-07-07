@@ -2472,6 +2472,9 @@ function TiresHistoryFull() {
     swap: { label: 'สลับตำแหน่ง', icon: '↔', color: '#2563eb', bg: '#dbeafe' },
     remove: { label: 'ถอดซ่อม / ปะยาง', icon: '🔧', color: '#d97706', bg: '#fef3c7' },
     sell: { label: 'ขายออก / จำหน่าย', icon: '💰', color: '#dc2626', bg: '#fee2e2' },
+    // Without this, scrap events fell back to EVT_CFG.install and rendered as a
+    // green "purchase/install" card on the tire's timeline.
+    scrap: { label: 'หมดสภาพ / คัดทิ้ง', icon: '🗑', color: '#64748b', bg: '#f1f5f9' },
   }
 
   return (
@@ -2736,17 +2739,28 @@ function TiresHistoryFull() {
 // ── Tab 5: Scrapped Tires ─────────────────────────────────────────
 function SellScrapModal({ tire, onClose, onSaved }: { tire: Tire; onClose: () => void; onSaved: () => void }) {
   const insertSale = useInsert<TireScrapSale>('tire_scrap_sales')
+  const insertEvent = useInsert<TireEvent>('tire_events')
   const updateTire = useUpdate<Tire>('tires')
   const [buyer, setBuyer] = useState('')
   const [price, setPrice] = useState('')
 
   const save = async () => {
     if (!buyer || !price) { alert('กรุณากรอกผู้ซื้อและราคา'); return }
+    const priceNum = +price
+    if (!Number.isFinite(priceNum) || priceNum < 0) { alert('ราคาต้องไม่ติดลบ'); return }
     try {
+      const today = new Date().toISOString().slice(0, 10)
       await insertSale.mutateAsync({
         tireId: tire.id, serial: tire.serial,
-        buyer: buyer.trim(), price: +price || 0,
-        date: new Date().toISOString().slice(0, 10), userId: 'e10',
+        buyer: buyer.trim(), price: priceNum,
+        date: today, userId: 'e10',
+      })
+      // Record the sale on the tire's own timeline (the history views render a
+      // 'sell' event; without this the timeline ended at 'scrap').
+      await insertEvent.mutateAsync({
+        tireId: tire.id, vehicleId: tire.vehicleId ?? '', eventType: 'sell',
+        date: today, odometer: 0, fromPos: tire.position ?? null, toPos: null,
+        note: `ขายให้ ${buyer.trim()} · ${priceNum} บาท`, userId: 'e10',
       })
       await updateTire.mutateAsync({ id: tire.id, patch: { status: 'sold' } })
       onSaved()

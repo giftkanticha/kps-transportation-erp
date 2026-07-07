@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { db, uid } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
@@ -303,7 +303,9 @@ function EditStockModal({ stock, onClose, onSaved }: { stock: FuelStock; onClose
   )
 
   // Resolve the supplierId from the stored supplier name once partners load.
-  useMemo(() => {
+  // Must be an effect, not a memo — updating state during render is a side effect
+  // that breaks under StrictMode/concurrent rendering.
+  useEffect(() => {
     if (!form.supplierId && fuelSuppliers.length > 0) {
       const match = fuelSuppliers.find(p => p.name === stock.supplier)
       if (match) setForm(f => ({ ...f, supplierId: match.id }))
@@ -785,7 +787,7 @@ export function FuelStockDashboard() {
   const todayISO = new Date().toISOString().slice(0, 10)
   const todayIn = allFuelStock.filter(s => s.date === todayISO).reduce((s, r) => s + r.liters, 0)
   const todayOut = factoryTxs.filter(t => t.date === todayISO).reduce((s, t) => s + t.liters, 0)
-  const totalStockValue = allFuelStock.reduce((s, r) => s + r.total, 0)
+  const totalStockValue = allFuelStock.reduce((s, r) => s + (r.total ?? 0), 0)
   const totalLitersEver = allFuelStock.reduce((s, r) => s + r.liters, 0)
   const avgPrice = totalLitersEver > 0 ? totalStockValue / totalLitersEver : 0
 
