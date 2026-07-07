@@ -366,7 +366,9 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
                       onClick={e => e.stopPropagation()}
                       style={{ whiteSpace: 'nowrap' }}
                     >
-                      {r.status === 'closed' && (
+                      {r.round.locked === true ? (
+                        <span className="badge" style={{ background: '#FEF3C7', color: '#92400E', fontSize: 11 }}>🔒 ปิดงวด</span>
+                      ) : r.status === 'closed' && (
                         isAdmin ? (
                           <button
                             className="btn sm"

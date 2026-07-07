@@ -290,6 +290,9 @@ export function CustomerBilling() {
         gross, whtAmount, net,
         legIds: selectedLegs.map(b => b.leg.id!),
         status: docType === 'receipt' ? 'paid' : 'issued',
+        // A receipt is a paid document — stamp the payment date so it shows up in
+        // the "รับเงิน" columns / aging (which only count notes that have paidAt).
+        paidAt: docType === 'receipt' ? new Date().toISOString() : null,
         notes: '',
       })
       setSelected(new Set())

@@ -43,7 +43,17 @@ const MANAGER_PLUS_ROUTES = new Set<string>([
   'dispatch.locations',  // master data — managers/admins curate it
   'dispatch.billing',    // money — billing notes & receivables
 
-  'expenses.finance', 'expenses.report',
+  // Direct vehicle-registry editing — drivers must go through the edit-approval
+  // flow on the vehicles list, not this page.
+  'vehicles.management',
+
+  // Tire module — manager/admin only (matches Sidebar roles config)
+  'tires', 'tires.layout', 'tires.manage', 'tires.history', 'tires.scrapped',
+  // Subcontractor module — manager/admin only (exposes payment amounts)
+  'subcontractors', 'subcontractors.close', 'subcontractors.history',
+  'subcontractors.drivers', 'subcontractors.jobs',
+  // Expenses — manager/admin only (vendor bank data, AP status)
+  'expenses', 'expenses.finance', 'expenses.stock', 'expenses.report', 'expenses.vendors',
 ])
 const ADMIN_ONLY_TOP = new Set<string>(['settings', 'admin'])
 

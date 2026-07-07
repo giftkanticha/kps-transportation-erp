@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase, type UserProfile, type UserRole } from '../lib/supabase'
+import { queryClient } from '../lib/queryClient'
 import type { User, KPSRole } from '../types'
 
 // ─── DEV BYPASS ─────────────────────────────────────────────────────────────
@@ -150,6 +151,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return
     }
     await supabase.auth.signOut()
+    // Drop all cached query data (in memory + the persisted localStorage copy)
+    // so the next user on a shared device can't see the previous user's
+    // financial data lingering for the persister's 24h maxAge.
+    queryClient.clear()
+    try { localStorage.removeItem('kps_query_cache_v1') } catch { /* ignore */ }
   }, [])
 
   const exitRecovery = useCallback(() => setRecovery(false), [])

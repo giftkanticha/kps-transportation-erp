@@ -70,7 +70,10 @@ export function FuelReconciliation() {
   const legacyOnly = legacyRecords.filter(lr => {
     return !fuelTxs.some(t =>
       t.vehicleId === lr.vehicleId &&
-      t.date === lr.date &&
+      // Compare date part only — legacy records may carry a time suffix while
+      // tx dates are 'YYYY-MM-DD'. Exact '===' flagged already-migrated rows as
+      // unsynced, so each sync run inserted another duplicate stock-out.
+      (t.date ?? '').slice(0, 10) === (lr.date ?? '').slice(0, 10) &&
       Math.abs(t.liters - lr.liters) < 0.01,
     )
   })
@@ -90,6 +93,7 @@ export function FuelReconciliation() {
       const source = isFactoryFuel ? 'FACTORY_TANK' : 'EXTERNAL_PUMP'
       const group = vehicle?.groupKind ?? 'TRANSPORT'
       let status: FuelTransaction['status'] = 'FLOATING'
+      let tripId: string | null = null
 
       if (group === 'INTERNAL') {
         status = 'INTERNAL_DEDUCTED'
@@ -99,7 +103,10 @@ export function FuelReconciliation() {
           d.date?.slice(0, 10) === lr.date?.slice(0, 10) &&
           (d.status === 'scheduled' || d.status === 'in-progress' || d.status === 'completed'),
         )
-        if (match) status = 'TRIP_LINKED'
+        // Actually link to the matched round — marking TRIP_LINKED while leaving
+        // tripId null made the fuel unreachable from both the trip cost and the
+        // floating-fuel workflow (cost attribution was silently lost).
+        if (match) { status = 'TRIP_LINKED'; tripId = match.id }
       }
 
       try {
@@ -111,7 +118,7 @@ export function FuelReconciliation() {
           pricePerL: lr.pricePerL || 35,
           total: lr.total || lr.liters * 35,
           source,
-          tripId: null,
+          tripId,
           status,
           tripFuelRole: 'NORMAL',
           entryMethod: 'MANUAL_ADMIN',

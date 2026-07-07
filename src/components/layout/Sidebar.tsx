@@ -188,7 +188,7 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
       </div>
 
       <nav className="nav">
-        {MENU.filter(m => canAccessRoute(m.id, user.role)).map(m => {
+        {MENU.filter(m => (!m.roles || m.roles.includes(user.role)) && canAccessRoute(m.id, user.role)).map(m => {
           const visibleSub = m.sub?.filter(s => canAccessRoute(s.id, user.role)) ?? []
           // A section with sub-items but none accessible to this role is hidden.
           if (m.sub && visibleSub.length === 0) return null

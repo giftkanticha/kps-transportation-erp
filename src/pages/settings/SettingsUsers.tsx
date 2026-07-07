@@ -62,7 +62,7 @@ const rolePillStyle = (role: string, disabled: boolean) => {
 }
 
 export function SettingsUsers() {
-  const { profile, isAdmin } = useAuth()
+  const { profile, isAdmin, isSuperAdmin } = useAuth()
   const { data: users = [], isLoading } = useList<Profile>('user_profiles')
   const updateProfile = useUpdate<Profile>('user_profiles')
   const qc = useQueryClient()
@@ -70,6 +70,12 @@ export function SettingsUsers() {
   const [editing, setEditing] = useState<Profile | null>(null)
 
   const act = async (id: string, patch: Partial<Profile>) => {
+    // Only a super-admin may grant (or revoke) the SUPER_ADMIN role — a plain
+    // admin must not be able to escalate an account to the top tier.
+    if (patch.role === 'SUPER_ADMIN' && !isSuperAdmin) {
+      alert('เฉพาะผู้ดูแลระบบสูงสุดเท่านั้นที่กำหนดสิทธิ์ SUPER_ADMIN ได้')
+      return
+    }
     setBusy(id)
     try { await updateProfile.mutateAsync({ id, patch }) }
     catch (e) { alert(e instanceof Error ? e.message : 'ดำเนินการไม่สำเร็จ') }
@@ -172,7 +178,8 @@ export function SettingsUsers() {
                       onChange={e => act(u.id, { role: e.target.value })}
                       style={rolePillStyle(u.role, disabled)}
                     >
-                      {ROLES.map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
+                      {ROLES.filter(r => r !== 'SUPER_ADMIN' || isSuperAdmin || u.role === 'SUPER_ADMIN')
+                        .map(r => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                     </select>
                   </td>
                   <td>

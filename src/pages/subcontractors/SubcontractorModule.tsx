@@ -269,11 +269,26 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
 // ─── Tab 1: เปิดงาน ──────────────────────────────────────────────────────────
 
 function SubOpenForm() {
-  const today = new Date().toISOString().slice(0, 10)
+  const now = new Date()
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
   const { data: allSubDrivers = [] } = useList<SubDriver>('sub_drivers')
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allJobs = [] } = useList<SubJob>('sub_jobs')
   const insertJob = useInsert<SubJob>('sub_jobs')
   const subDrivers = allSubDrivers.filter(d => d.status === 'active')
+
+  // Deterministic per-day sequence instead of a random 2-digit suffix, which
+  // collided against the UNIQUE code column ~37% of days at ~10 jobs/day.
+  const nextJobCode = (): string => {
+    const prefix = 'SUB-' + today.slice(2).replace(/-/g, '') + '-'
+    const maxSeq = allJobs
+      .filter(j => j.code?.startsWith(prefix))
+      .reduce((max, j) => {
+        const n = parseInt(j.code.slice(prefix.length), 10)
+        return Number.isNaN(n) ? max : Math.max(max, n)
+      }, 0)
+    return prefix + String(maxSeq + 1).padStart(3, '0')
+  }
 
   const blank = {
     date: today,
@@ -330,7 +345,7 @@ function SubOpenForm() {
     if (!picked) return
     try {
       await insertJob.mutateAsync({
-        code: 'SUB-' + new Date().toISOString().slice(2, 10).replace(/-/g, '') + String(Math.floor(Math.random() * 100)).padStart(2, '0'),
+        code: nextJobCode(),
         date: form.date,
         subId: picked.subId,
         driverId: picked.id,

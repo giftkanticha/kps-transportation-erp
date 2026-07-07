@@ -73,7 +73,10 @@ export function DispatchMonthlyReport() {
         const distance = d.distance ?? 0
         const liters = d.liters ?? 0
         const kmPerL = liters > 0 ? Math.round((distance / liters) * 10) / 10 : 0
-        const costPerKm = distance > 0 ? Math.round(((liters * DEFAULT_LITER_PRICE) / distance) * 100) / 100 : 0
+        // Use the round's ACTUAL recorded fuel cost; fall back to the reference
+        // price only when a round has no cost yet (was always the ฿32 estimate).
+        const fuelCost = d.cost != null && d.cost > 0 ? d.cost : liters * DEFAULT_LITER_PRICE
+        const costPerKm = distance > 0 ? Math.round((fuelCost / distance) * 100) / 100 : 0
         g.rows.push({
           date: (d.depart || d.date || '').slice(0, 10),
           cargo: d.legs?.[0]?.cargo ?? '—',
@@ -84,12 +87,12 @@ export function DispatchMonthlyReport() {
         })
         g.totalDistance += distance
         g.totalLiters += liters
+        g.totalFuelCost += fuelCost
       })
 
     return Array.from(map.values()).map(g => {
       g.rows.sort((a, b) => a.date.localeCompare(b.date))
       g.avgKmPerL = g.totalLiters > 0 ? Math.round((g.totalDistance / g.totalLiters) * 10) / 10 : 0
-      g.totalFuelCost = g.totalLiters * DEFAULT_LITER_PRICE
       return g
     }).sort((a, b) => a.plate.localeCompare(b.plate))
   }, [month, year, vehicleId, vehicles, dispatches, employees])
@@ -101,7 +104,7 @@ export function DispatchMonthlyReport() {
       distance: d,
       liters: l,
       avgKmPerL: l > 0 ? Math.round((d / l) * 10) / 10 : 0,
-      fuelCost: l * DEFAULT_LITER_PRICE,
+      fuelCost: groups.reduce((s, g) => s + g.totalFuelCost, 0),
     }
   }, [groups])
 

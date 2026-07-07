@@ -2,12 +2,18 @@ import { useState, useMemo, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useQueryClient } from '@tanstack/react-query'
 import { useList, useUpdate } from '../../hooks/useTable'
+import { useDispatches } from '../../hooks/useDispatches'
 import { callRpc } from '../../lib/crud'
 import { Icon } from '../../components/ui'
 import { can } from '../../lib/permissions'
 import type { Vehicle, Maintenance, EditApprovalRequest, Dispatch, User } from '../../types'
 
-const TODAY = new Date('2026-05-17')
+// Local-midnight "today", recomputed on each call so it never drifts (was a
+// hardcoded 2026-05-17, which made every expiry countdown progressively wrong).
+const todayLocal = (): Date => {
+  const n = new Date()
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate())
+}
 const SOON_DAYS = 30
 const SOON_KM = 5000
 
@@ -43,7 +49,7 @@ function daysBetween(dateStr: string): number {
   if (!dateStr) return Infinity
   const d = new Date(dateStr)
   if (isNaN(d.getTime())) return Infinity
-  return Math.round((d.getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
+  return Math.round((d.getTime() - todayLocal().getTime()) / (1000 * 60 * 60 * 24))
 }
 
 function severityFromDays(days: number): 'red' | 'amber' | null {
@@ -87,7 +93,9 @@ function buildAlerts(vehicles: Vehicle[], maintenance: Maintenance[]): AlertItem
     if (ins) out.push(ins)
 
     const kmLeft = v.nextServiceKm - v.odometer
-    const mileSev = severityFromKm(kmLeft)
+    // Skip vehicles with no service target set — otherwise nextServiceKm=0 on a
+    // truck at 250,000 km yields kmLeft=-250000 and a false "overdue" alert.
+    const mileSev = v.nextServiceKm > 0 && v.odometer > 0 ? severityFromKm(kmLeft) : null
     if (mileSev) {
       out.push({
         id: `mileage-${v.id}`,
@@ -151,7 +159,7 @@ function validateRenewal(alert: AlertItem, form: NextRoundForm): void {
   if (form.nextDate && (alert.kind === 'tax' || alert.kind === 'permit' || alert.kind === 'insurance')) {
     const d = new Date(form.nextDate)
     if (isNaN(d.getTime())) throw new Error('วันที่ไม่ถูกต้อง')
-    if (d.getTime() < TODAY.getTime()) throw new Error('วันที่รอบถัดไปต้องเป็นอนาคต')
+    if (d.getTime() < todayLocal().getTime()) throw new Error('วันที่รอบถัดไปต้องเป็นอนาคต')
   }
 }
 
@@ -656,6 +664,7 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
   const updateApproval = useUpdate<EditApprovalRequest>('edit_approvals')
   const updateVehicle = useUpdate<Vehicle>('vehicles')
   const updateDispatch = useUpdate<Dispatch>('dispatch')
+  const { data: allDispatchesForGuard = [] } = useDispatches()
 
   const pendingApprovals = useMemo(() => {
     if (!can.reviewApprovals(user.role)) return []
@@ -676,6 +685,10 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
         // req.changes._kind when inserting from DispatchSummaryReport.
         const changesAsRecord = req.changes as Record<string, unknown>
         if (changesAsRecord?._kind === 'dispatch_reopen' && typeof changesAsRecord.roundId === 'string') {
+          const targetRound = allDispatchesForGuard.find(d => d.id === changesAsRecord.roundId)
+          if (targetRound?.locked === true) {
+            throw new Error('รอบนี้อยู่ในงวดบัญชีที่ปิดแล้ว — ต้องเปิดงวดก่อนจึงแก้ไขได้')
+          }
           await updateDispatch.mutateAsync({
             id: changesAsRecord.roundId,
             patch: { roundStatus: 'draft', status: 'in-progress' },

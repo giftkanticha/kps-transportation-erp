@@ -25,7 +25,10 @@ export function computeVehicleSnapshots(
   fuelRounds: FuelRound[],
 ): VehicleSnapshotInput[] {
   const groups = new Map<string, { plate: string; rounds: Dispatch[] }>()
-  rounds.forEach(r => {
+  // Cancelled rounds must not inflate the frozen snapshot — the live P&L only
+  // counts closed/completed rounds, so the snapshot has to match or the numbers
+  // jump the moment the period closes.
+  rounds.filter(r => r.status !== 'cancelled').forEach(r => {
     const key = r.vehicleId ?? ''
     if (!groups.has(key)) {
       const v = vehicles.find(x => x.id === r.vehicleId)
@@ -151,11 +154,19 @@ export async function carryForwardRound(
  *   - status → OPEN
  *   - clear locked on all dispatches in the period
  * Snapshots are kept (read-only history). A fresh close will overwrite them.
+ *
+ * IMPORTANT: closePeriod() locks rounds by explicit id (membership derived from
+ * the depart/date fallback, because DispatchRoundOpen never sets
+ * accounting_period_id). Unlocking must use the SAME id list, otherwise
+ * normally-created rounds — whose accounting_period_id is NULL — stay locked
+ * forever. We unlock by both id list AND accounting_period_id so carried-forward
+ * rounds (the only ones with an explicit period id) are covered too.
  */
 export async function reopenPeriod(
   periodId: string,
   reopenedById: string | null,
   reason: string,
+  roundIds: string[] = [],
 ): Promise<void> {
   {
     const { error } = await supabase
@@ -168,6 +179,13 @@ export async function reopenPeriod(
       }))
       .eq('id', periodId)
     if (error) throw new Error(`reopen period failed: ${error.message}`)
+  }
+  if (roundIds.length > 0) {
+    const { error } = await supabase
+      .from('dispatch')
+      .update({ locked: false })
+      .in('id', roundIds)
+    if (error) throw new Error(`unlock dispatches failed: ${error.message}`)
   }
   {
     const { error } = await supabase

@@ -123,7 +123,11 @@ function FilterCheckGroup({ label, options, state, onChange }: FilterCheckGroupP
   )
 }
 
-const TODAY = new Date('2026-05-17')
+// Local-midnight "today", recomputed per call (was hardcoded 2026-05-17).
+const todayLocal = (): Date => {
+  const n = new Date()
+  return new Date(n.getFullYear(), n.getMonth(), n.getDate())
+}
 
 function LicenseLabel({ status, expire }: { status: string; expire: string }) {
   if (status === 'ok') {
@@ -143,7 +147,7 @@ function LicenseLabel({ status, expire }: { status: string; expire: string }) {
     )
   }
   const d = new Date(expire)
-  const days = Math.round((d.getTime() - TODAY.getTime()) / (1000 * 60 * 60 * 24))
+  const days = Math.round((d.getTime() - todayLocal().getTime()) / (1000 * 60 * 60 * 24))
   return (
     <span className="badge amber">
       <span className="sdot amber" />

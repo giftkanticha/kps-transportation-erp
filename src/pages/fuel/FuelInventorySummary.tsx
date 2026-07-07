@@ -38,14 +38,19 @@ export function FuelInventorySummary() {
   const monthStartISO = isoDate(year, month, 1)
 
   const dailyRows = useMemo(() => {
-    const carryIn = allStocks.filter(s => s.date < monthStartISO).reduce((sum, s) => sum + s.liters, 0)
-    const carryOut = factoryFuelings.filter(f => f.date < monthStartISO).reduce((sum, f) => sum + f.liters, 0)
+    // Normalise to the date part — some legacy fuel_records carry a 'YYYY-MM-DD
+    // HH:mm' value. Comparing with '===' against a bare 'YYYY-MM-DD' silently
+    // dropped those rows from their own day (they'd reappear as next month's
+    // carry-in), making the printed report look like stock had gone missing.
+    const dayOf = (s: string) => (s ?? '').slice(0, 10)
+    const carryIn = allStocks.filter(s => dayOf(s.date) < monthStartISO).reduce((sum, s) => sum + s.liters, 0)
+    const carryOut = factoryFuelings.filter(f => dayOf(f.date) < monthStartISO).reduce((sum, f) => sum + f.liters, 0)
     let balance = carryIn - carryOut
     const rows = []
     for (let d = 1; d <= days; d++) {
       const iso = isoDate(year, month, d)
-      const dayIn = allStocks.filter(s => s.date === iso).reduce((sum, s) => sum + s.liters, 0)
-      const dayOut = factoryFuelings.filter(f => f.date === iso).reduce((sum, f) => sum + f.liters, 0)
+      const dayIn = allStocks.filter(s => dayOf(s.date) === iso).reduce((sum, s) => sum + s.liters, 0)
+      const dayOut = factoryFuelings.filter(f => dayOf(f.date) === iso).reduce((sum, f) => sum + f.liters, 0)
       const brought = balance
       balance = brought + dayIn - dayOut
       rows.push({ day: d, date: `${String(d).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year + 543}`, brought, in: dayIn, out: dayOut, balance })

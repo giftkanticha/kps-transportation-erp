@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
-import { useList, useInsert } from '../../hooks/useTable'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner, EditApprovalRequest, BillingNote, Location, DispatchLeg } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
@@ -9,9 +9,10 @@ import { canAccessRoute } from '../../lib/permissions'
 // ─── Mock data ─────────────────────────────────────────────────────────────────
 interface RegItem {
   id: number; plate: string; label: string; type: string; dueDate: string; status: 'warning' | 'critical'
+  vehicleId: string; fieldKey: 'tax' | 'insurance' | 'dispatchPermit'
 }
 interface ReqItem {
-  id: number; title: string; desc: string; time: string; priority: 'critical' | 'warning' | 'info'
+  id: string; title: string; desc: string; time: string; priority: 'critical' | 'warning' | 'info'
 }
 
 // Renewals + employee requests used to be hard-coded demo data — kept the
@@ -58,6 +59,7 @@ function RegistrationModal({ reg, onClose }: { reg: RegItem; onClose: () => void
   })
   const [saving, setSaving] = useState(false)
   const insertReg = useInsert<{ data: Record<string, unknown> }>('vehicle_registrations')
+  const updateVehicle = useUpdate<Vehicle>('vehicles')
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }))
 
   const sectionStyle = { background: '#F8FAFC', borderRadius: 10, padding: '14px 16px', marginBottom: 14 }
@@ -85,6 +87,12 @@ function RegistrationModal({ reg, onClose }: { reg: RegItem; onClose: () => void
           nextNotes: form.nextNotes,
         },
       })
+      // Push the new expiry back onto the vehicle so the renewal alert clears —
+      // it's computed from vehicle.tax/insurance/dispatchPermit. Without this the
+      // critical alert survived its own completion (inviting duplicate payments).
+      if (form.nextDate) {
+        await updateVehicle.mutateAsync({ id: reg.vehicleId, patch: { [reg.fieldKey]: form.nextDate } })
+      }
       onClose()
     } catch (e) {
       alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
@@ -294,7 +302,7 @@ interface DashboardProps {
 export function Dashboard({ user, setActive }: DashboardProps) {
   const [regModal, setRegModal]         = useState<RegItem | null>(null)
   const [approvalModal, setApprovalModal] = useState<ReqItem | null>(null)
-  const [dismissedReqs, setDismissedReqs] = useState<Set<number>>(new Set())
+  const [dismissedReqs, setDismissedReqs] = useState<Set<string>>(new Set())
   const [showExport, setShowExport]       = useState(false)
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -320,10 +328,22 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const scheduled = useMemo(() => dispatch.filter(t => t.status === 'scheduled'), [dispatch])
   const delivered = useMemo(() => dispatch.filter(t => t.status === 'completed'), [dispatch])
 
-  const revenueThisMonth = useMemo(() => dispatch.reduce((s, t) => s + db.amountOf(t), 0), [dispatch])
+  // Current calendar month, string-compared to avoid timezone drift on
+  // 'YYYY-MM-DD' values. These KPIs are labelled "เดือนนี้" so they MUST be
+  // scoped to this month (they used to sum all-time and mislabel it).
+  const thisMonthPrefix = useMemo(() => {
+    const n = new Date()
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
+  }, [])
+  const inThisMonth = (iso: string | null | undefined) => !!iso && iso.slice(0, 7) === thisMonthPrefix
+  const revenueThisMonth = useMemo(
+    () => dispatch.filter(t => inThisMonth(t.depart || t.date)).reduce((s, t) => s + db.amountOf(t), 0),
+    [dispatch, thisMonthPrefix],
+  )
   const costThisMonth    = useMemo(
-    () => dispatch.reduce((s, t) => s + (t.cost || 0), 0) + expHeaders.reduce((s, h) => s + (h.total || 0), 0),
-    [dispatch, expHeaders],
+    () => dispatch.filter(t => inThisMonth(t.depart || t.date)).reduce((s, t) => s + (t.cost || 0), 0)
+        + expHeaders.filter(h => inThisMonth(h.date)).reduce((s, h) => s + (h.total || 0), 0),
+    [dispatch, expHeaders, thisMonthPrefix],
   )
 
   const idleVehicles        = vehicles.filter(v => v.status === 'available').length
@@ -413,7 +433,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
         bills: 0,
         earliestDue: null,
       }
-      cur.total += h.total
+      cur.total += h.total || 0
       cur.bills += 1
       if (h.dueDate && (cur.earliestDue == null || h.dueDate < cur.earliestDue)) cur.earliestDue = h.dueDate
       map.set(key, cur)
@@ -428,6 +448,25 @@ export function Dashboard({ user, setActive }: DashboardProps) {
 
   const marginPct = revenueThisMonth > 0
     ? Math.round(((revenueThisMonth - costThisMonth) / revenueThisMonth) * 100) : 0
+
+  // Real month-over-month revenue change (was a hardcoded "+12.4%").
+  const prevMonthPrefix = useMemo(() => {
+    const n = new Date()
+    const d = new Date(n.getFullYear(), n.getMonth() - 1, 1)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  }, [])
+  const revenuePrevMonth = useMemo(
+    () => dispatch.filter(t => (t.depart || t.date || '').slice(0, 7) === prevMonthPrefix)
+      .reduce((s, t) => s + db.amountOf(t), 0),
+    [dispatch, prevMonthPrefix],
+  )
+  const revenueDelta = useMemo(() => {
+    if (revenuePrevMonth <= 0) {
+      return { text: 'ไม่มีข้อมูลเดือนก่อน', up: null as boolean | null }
+    }
+    const pct = Math.round(((revenueThisMonth - revenuePrevMonth) / revenuePrevMonth) * 100)
+    return { text: `${pct >= 0 ? '+' : ''}${pct}% จากเดือนก่อน`, up: pct >= 0 }
+  }, [revenueThisMonth, revenuePrevMonth])
 
   const canApprove    = user.role === 'admin' || user.role === 'manager'
 
@@ -452,6 +491,8 @@ export function Dashboard({ user, setActive }: DashboardProps) {
           type: c.label,
           dueDate: days < 0 ? `หมดอายุแล้ว (${thaiShortDate(dateStr)})` : `${thaiShortDate(dateStr)} (${days} วัน)`,
           status: days <= 7 ? 'critical' : 'warning',
+          vehicleId: v.id,
+          fieldKey: c.key,
         })
       })
     })
@@ -464,9 +505,9 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const pendingRequests: ReqItem[] = useMemo(() => {
     if (!canApprove) return []
     return editApprovals
-      .filter(r => r.status === 'pending' && !dismissedReqs.has(Number(r.id)))
+      .filter(r => r.status === 'pending' && !dismissedReqs.has(r.id))
       .sort((a, b) => (b.requestedAt || '').localeCompare(a.requestedAt || ''))
-      .map((r, i) => {
+      .map((r) => {
         const changes = r.changes as Record<string, unknown> | undefined
         const isReopen = changes?._kind === 'dispatch_reopen'
         const roundCode = isReopen ? String(changes?.roundCode ?? '') : ''
@@ -476,7 +517,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
           : `ขอแก้ไข ${r.vehiclePlate}`
         const ageHrs = Math.max(0, Math.floor((Date.now() - new Date(r.requestedAt).getTime()) / 3_600_000))
         return {
-          id: typeof r.id === 'number' ? r.id : Number(i + 1),
+          id: r.id,
           title,
           desc: `${r.requesterName}${fields.length > 0 ? ' · ' + fields.join(', ') : ''}${r.reason ? ' — ' + r.reason : ''}`,
           time: ageHrs < 1 ? 'ไม่กี่นาที' : ageHrs < 24 ? `${ageHrs} ชม.` : `${Math.floor(ageHrs / 24)} วัน`,
@@ -489,16 +530,19 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const colorMap: Record<string, string> = { alert: 'red', approve: 'green', fuel: 'amber' }
 
   const todayLabel = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' })
+  // Show WHICH month these month-scoped cards cover, so a zero reads as
+  // "no data this month yet" rather than "numbers vanished".
+  const thisMonthLabel = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'short' })
 
   // KPI card definitions
   const kpiCards = [
     {
-      label: 'รายได้เดือนนี้', value: db.thb(revenueThisMonth), unit: '',
-      delta: '+12.4% จากเดือนก่อน', deltaUp: true as boolean | null,
+      label: `รายได้ ${thisMonthLabel}`, value: db.thb(revenueThisMonth), unit: '',
+      delta: revenueDelta.text, deltaUp: revenueDelta.up,
       icon: 'money', gradient: 'linear-gradient(135deg,#10B981,#059669)', iconBg: '#D1FAE5', iconColor: '#065F46',
     },
     {
-      label: 'กำไรประมาณการ', value: db.thb(revenueThisMonth - costThisMonth), unit: '',
+      label: `กำไรประมาณการ ${thisMonthLabel}`, value: db.thb(revenueThisMonth - costThisMonth), unit: '',
       delta: `margin ~${marginPct}%`, deltaUp: true as boolean | null,
       icon: 'chart', gradient: 'linear-gradient(135deg,#0EA5E9,#0284C7)', iconBg: '#E0F2FE', iconColor: '#075985',
     },
@@ -863,7 +907,7 @@ export function Dashboard({ user, setActive }: DashboardProps) {
                     <div className="body">
                       <div className="who">{a.who}</div>
                       <div className="txt">{a.text}</div>
-                      <div className="when">{a.at.slice(11)}</div>
+                      <div className="when">{(a.at ?? '').slice(11)}</div>
                     </div>
                   </div>
                 ))}

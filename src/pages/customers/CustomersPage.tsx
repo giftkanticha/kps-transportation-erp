@@ -137,7 +137,12 @@ export function CustomersPage() {
           phone: form.phone,
           industry: form.industry,
           address: form.address,
-          code: 'CUS-' + (1000 + customers.length + 1),
+          // Max existing sequence + 1 (not list length, which collides with the
+          // UNIQUE code column after any deletion or concurrent create).
+          code: 'CUS-' + (customers.reduce((max, c) => {
+            const n = parseInt(String(c.code).replace(/^CUS-/, ''), 10)
+            return Number.isNaN(n) ? max : Math.max(max, n)
+          }, 1000) + 1),
           totalJobs: 0,
           openInvoice: 0,
           status: 'active',
