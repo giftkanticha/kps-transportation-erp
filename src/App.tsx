@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from './context/AuthContext'
-import { canAccessRoute } from './lib/permissions'
+import { canAccessRoute, firstAllowedPath } from './lib/permissions'
 import { LoginScreen } from './pages/auth/LoginScreen'
 import { ResetPasswordScreen } from './pages/auth/ResetPasswordScreen'
 import { Sidebar } from './components/layout/Sidebar'
@@ -96,7 +96,7 @@ const crumbMap: Record<string, string> = {
 }
 
 export default function App() {
-  const { legacyUser, logout, isAdmin, loading, recoveryMode } = useAuth()
+  const { legacyUser, logout, isAdmin, menuKeys, loading, recoveryMode } = useAuth()
   const [active, setActive] = useState('dashboard')
   const [subject, setSubject] = useState<unknown>(null)
   const [collapsed, setCollapsed] = useState(false)
@@ -105,6 +105,18 @@ export default function App() {
   useEffect(() => {
     if (legacyUser?.role === 'driver') setActive('dispatch')
   }, [legacyUser?.id])
+
+  // Landing on a route this user can't open (e.g. a restricted user whose
+  // menu access excludes the default 'dashboard') → bounce to their first
+  // allowed menu. Runs when the user or their menu grants change, not on every
+  // navigation, so it never fights a manual click.
+  useEffect(() => {
+    if (!legacyUser) return
+    if (!canAccessRoute(active, legacyUser.role, menuKeys)) {
+      setActive(firstAllowedPath(legacyUser.role, menuKeys))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legacyUser?.id, menuKeys])
 
   if (loading) {
     return (
@@ -120,7 +132,7 @@ export default function App() {
   const handleLogout = () => logout()
 
   const renderPage = () => {
-    if (!canAccessRoute(active, legacyUser.role)) {
+    if (!canAccessRoute(active, legacyUser.role, menuKeys)) {
       return (
         <div className="page-head">
           <div>
@@ -264,6 +276,7 @@ export default function App() {
         active={active}
         setActive={setActive}
         user={legacyUser}
+        allowedKeys={menuKeys}
         onLogout={handleLogout}
         closeMobile={() => setMobileOpen(false)}
       />

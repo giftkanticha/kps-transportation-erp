@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useList, useUpdate } from '../../hooks/useTable'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
+import { ASSIGNABLE_MENUS } from '../../lib/permissions'
 import { Icon } from '../../components/ui'
 
 interface Profile {
@@ -64,6 +65,7 @@ const rolePillStyle = (role: string, disabled: boolean) => {
 export function SettingsUsers() {
   const { profile, isAdmin } = useAuth()
   const { data: users = [], isLoading } = useList<Profile>('user_profiles')
+  const { data: menuPerms = [] } = useList<{ userId: string; menuKey: string }>('user_menu_permissions', 'menu_key', true)
   const updateProfile = useUpdate<Profile>('user_profiles')
   const qc = useQueryClient()
   const [busy, setBusy] = useState<string | null>(null)
@@ -234,12 +236,119 @@ export function SettingsUsers() {
         </table>
       </div>
 
+      {/* ── สิทธิ์การเข้าเมนู (per-user menu access) ─────────────────────── */}
+      <div className="card" style={{ marginTop: 20, padding: 0, overflow: 'hidden' }}>
+        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--line)' }}>
+          <div style={{ fontWeight: 600 }}>สิทธิ์การเข้าเมนู</div>
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>
+            เลือกเมนูที่ผู้ใช้แต่ละคนเข้าถึงได้ — “ทุกเมนู” = เห็นทั้งหมดตามสิทธิ์ปกติ,
+            “จำกัดสิทธิ์” = เห็นเฉพาะเมนูที่ติ๊ก (ผู้ดูแลระบบเห็นทุกเมนูเสมอ)
+          </div>
+        </div>
+        <div style={{ padding: 16, display: 'grid', gap: 12 }}>
+          {users
+            .filter(u => u.role !== 'SUPER_ADMIN' && u.role !== 'ADMIN')
+            .map(u => (
+              <MenuPermissionRow
+                key={u.id}
+                user={u}
+                currentKeys={menuPerms.filter(m => m.userId === u.id).map(m => m.menuKey)}
+                onSaved={() => qc.invalidateQueries({ queryKey: ['user_menu_permissions'] })}
+              />
+            ))}
+          {users.filter(u => u.role !== 'SUPER_ADMIN' && u.role !== 'ADMIN').length === 0 && (
+            <div className="muted" style={{ fontSize: 13 }}>
+              ยังไม่มีผู้ใช้ที่กำหนดสิทธิ์เมนูได้ (ผู้ดูแลระบบเห็นทุกเมนูเสมอ)
+            </div>
+          )}
+        </div>
+      </div>
+
       {editing && (
         <EditProfileModal
           user={editing}
           isSelf={editing.id === profile?.id}
           onClose={() => setEditing(null)}
         />
+      )}
+    </div>
+  )
+}
+
+// ── แถวกำหนดสิทธิ์เมนูต่อผู้ใช้ ──────────────────────────────────────────
+// restricted = โหมดจำกัดสิทธิ์ (มีแถวใน DB) / ไม่งั้น = ทุกเมนู (ไม่มีแถว)
+function MenuPermissionRow({ user, currentKeys, onSaved }: {
+  user: Profile
+  currentKeys: string[]
+  onSaved: () => void
+}) {
+  const [restricted, setRestricted] = useState(currentKeys.length > 0)
+  const [selected, setSelected] = useState<Set<string>>(new Set(currentKeys))
+  const [saving, setSaving] = useState(false)
+
+  // sync เมื่อข้อมูลจาก store เปลี่ยน (หลัง fetch ใหม่)
+  useEffect(() => {
+    setRestricted(currentKeys.length > 0)
+    setSelected(new Set(currentKeys))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentKeys.join(',')])
+
+  const toggle = (key: string) => setSelected(prev => {
+    const next = new Set(prev)
+    if (next.has(key)) next.delete(key)
+    else next.add(key)
+    return next
+  })
+
+  const save = async () => {
+    // ไม่จำกัด → ส่ง array ว่าง (ลบแถวหมด) / จำกัด → ส่งเมนูที่ติ๊ก
+    const keys = restricted ? ASSIGNABLE_MENUS.filter(m => selected.has(m.key)).map(m => m.key) : []
+    setSaving(true)
+    try {
+      const { error } = await supabase.rpc('replace_user_menu_permissions', {
+        p_user_id: user.id,
+        p_menu_keys: keys,
+      })
+      if (error) throw new Error(error.message)
+      onSaved()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--line)', borderRadius: 'var(--r-md)', padding: 12 }}>
+      <div className="row" style={{ justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontWeight: 500 }}>{user.displayName}</div>
+          <div className="muted" style={{ fontSize: 11.5 }}>สิทธิ์หลัก: {ROLE_LABEL[user.role] ?? user.role}</div>
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <select
+            value={restricted ? 'restricted' : 'all'}
+            onChange={e => setRestricted(e.target.value === 'restricted')}
+            style={{ height: 34, padding: '0 10px', border: '1px solid var(--line-strong)', borderRadius: 'var(--r-sm)', background: '#fff', fontFamily: 'inherit', fontSize: 13 }}
+          >
+            <option value="all">ทุกเมนู (ค่าเริ่มต้น)</option>
+            <option value="restricted">จำกัดสิทธิ์</option>
+          </select>
+          <button className="btn primary sm" disabled={saving} onClick={save}>
+            {saving ? 'กำลังบันทึก…' : 'บันทึก'}
+          </button>
+        </div>
+      </div>
+
+      {restricted && (
+        <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8 }}>
+          {ASSIGNABLE_MENUS.map(m => (
+            <label key={m.key} className="row" style={{ gap: 6, fontSize: 13, cursor: 'pointer' }}>
+              <input type="checkbox" checked={selected.has(m.key)} onChange={() => toggle(m.key)} />
+              {m.label}
+            </label>
+          ))}
+        </div>
       )}
     </div>
   )
