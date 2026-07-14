@@ -3,6 +3,7 @@ import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info, SearchInput, FontScaleControl } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
+import { useAuth } from '../../context/AuthContext'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
 interface ExpensesModuleProps {
@@ -2298,6 +2299,7 @@ function VendorEditModal({
 }
 
 function ExpVendors() {
+  const { isAdmin, isManager } = useAuth()
   const { data: partners = [] } = useList<Partner>('partners')
   const deletePartner = useDelete('partners')
   const [q, setQ] = useState('')
@@ -2379,12 +2381,16 @@ function ExpVendors() {
                 <td className="mono muted">{p.taxId || '—'}</td>
                 <td>
                   <div className="row" style={{ gap: 4 }}>
-                    <button className="btn ghost icon sm" onClick={() => setEditing(p)} title="แก้ไข">
-                      <Icon name="edit" size={13} />
-                    </button>
-                    <button className="btn ghost icon sm danger" onClick={() => handleDelete(p)} title="ลบ">
-                      <Icon name="trash" size={13} />
-                    </button>
+                    {isManager && (
+                      <button className="btn ghost icon sm" onClick={() => setEditing(p)} title="แก้ไข">
+                        <Icon name="edit" size={13} />
+                      </button>
+                    )}
+                    {isAdmin && (
+                      <button className="btn ghost icon sm danger" onClick={() => handleDelete(p)} title="ลบ">
+                        <Icon name="trash" size={13} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
