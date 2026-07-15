@@ -31,7 +31,6 @@ import { FinancePL } from './pages/finance/FinancePL'
 import { FinanceFixed } from './pages/finance/FinanceFixed'
 import { FinanceSummary } from './pages/finance/FinanceSummary'
 import { PeriodClosePage } from './pages/finance/PeriodClosePage'
-import { VehicleManagement } from './pages/vehicles/VehicleManagement'
 import { MaintenancePage } from './pages/maintenance/MaintenancePage'
 import { LocationsPage } from './pages/locations/LocationsPage'
 import { CustomerBilling } from './pages/dispatch/CustomerBilling'
@@ -45,7 +44,6 @@ const crumbMap: Record<string, string> = {
   vehicles: 'จัดการรถ',
   'vehicles.add': 'เพิ่มรถใหม่',
   'vehicles.detail': 'รายละเอียดรถ',
-  'vehicles.management': 'จัดการทะเบียนรถ',
   employees: 'ข้อมูลพนักงาน',
   'employees.add': 'เพิ่มพนักงานใหม่',
   tires: 'ระบบยาง • รายการทั้งหมด',
@@ -141,9 +139,6 @@ export default function App() {
         return <VehicleAdd setActive={setActive} />
       case 'vehicles.detail':
         return <VehicleDetail setActive={setActive} subject={subject} user={legacyUser} />
-      case 'vehicles.management':
-        return <VehicleManagement />
-
       case 'employees':
         return <EmployeesPage setActive={setActive} setSubject={setSubject} />
       case 'employees.add':
