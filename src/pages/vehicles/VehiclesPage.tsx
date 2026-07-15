@@ -3,6 +3,7 @@ import { db, uid } from '../../lib/db'
 import { useList, useUpdate, useDelete, useInsert } from '../../hooks/useTable'
 import { useRealtimeTable } from '../../hooks/useRealtime'
 import { can } from '../../lib/permissions'
+import { logActivity } from '../../lib/activityLog'
 import type { Vehicle, Employee, User, EditApprovalRequest, VehicleChangeField } from '../../types'
 import { Icon, StatusBadge, Field, SearchInput } from '../../components/ui'
 
@@ -132,7 +133,7 @@ function VehicleEditModal({
   onError: (msg: string) => void
 }) {
   const { data: employees = [] } = useList<Employee>('employees')
-  const updateVehicle = useUpdate<Vehicle>('vehicles')
+  const updateVehicle = useUpdate<Vehicle>('vehicles', { activity: v => `แก้ไขข้อมูลรถ ${v.plate}` })
   const insertApproval = useInsert<EditApprovalRequest>('edit_approvals')
   const isCustomType = !VEHICLE_TYPES.includes(vehicle.type)
   const [form, setForm] = useState<VehicleEditForm>({
@@ -588,6 +589,7 @@ export function VehiclesPage({ setActive, setSubject, user }: VehiclesPageProps)
       onSuccess: () => {
         setDeletingVehicle(null)
         setToast({ kind: 'success', msg: `✅ ลบรถ ${v.plate} เรียบร้อย` })
+        logActivity(user.name, 'vehicles', `ลบรถ ${v.plate}`)
       },
       onError: (err) => {
         setToast({ kind: 'error', msg: err instanceof Error ? err.message : 'ลบไม่สำเร็จ' })
