@@ -30,10 +30,14 @@ export function MaintenancePage() {
   const { isManager } = useAuth()
   const { data: all = [] } = useList<Maintenance>('maintenance')
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
-  const insertMaintenance = useInsert<Maintenance>('maintenance')
-  const updateMaintenance = useUpdate<Maintenance>('maintenance')
-
   const plateOf = (id: string) => vehicles.find(v => v.id === id)?.plate ?? '—'
+  const insertMaintenance = useInsert<Maintenance>('maintenance', {
+    activity: m => `สั่งบำรุงรักษา ${m.code} (${plateOf(m.vehicleId)})`,
+  })
+  const updateMaintenance = useUpdate<Maintenance>('maintenance', {
+    activity: m => `แก้ไขงานบำรุงรักษา ${m.code} (${plateOf(m.vehicleId)})`,
+  })
+
   const inProgress = all.filter(m => m.status === 'in-progress')
   const scheduled  = all.filter(m => m.status === 'scheduled')
   const thisMonth  = todayISO().slice(0, 7)

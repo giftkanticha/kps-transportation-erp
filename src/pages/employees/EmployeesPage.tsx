@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useList, useUpdate, useDelete } from '../../hooks/useTable'
 import { useAuth } from '../../context/AuthContext'
+import { logActivity } from '../../lib/activityLog'
 import type { Employee, Vehicle } from '../../types'
 import { Icon, StatusBadge, Field, SearchInput } from '../../components/ui'
 
@@ -505,7 +506,7 @@ function StatusChangeDialog({ employee, onClose, onChanged }: StatusChangeDialog
 }
 
 export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
-  const { isAdmin } = useAuth()
+  const { isAdmin, legacyUser } = useAuth()
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [statusChangingId, setStatusChangingId] = useState<string | null>(null)
@@ -539,11 +540,13 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
   const deletingEmployee = deletingId ? allEmployees.find(e => e.id === deletingId) : null
 
   const handleDelete = () => {
-    if (!deletingId) return
+    if (!deletingId || !deletingEmployee) return
+    const name = deletingEmployee.name
     deleteEmployee.mutate(deletingId, {
       onSuccess: () => {
         setDeletingId(null)
         setToast({ kind: 'success', msg: 'ลบพนักงานเรียบร้อยแล้ว' })
+        logActivity(legacyUser?.name ?? 'ไม่ทราบผู้ใช้', 'employees', `ลบพนักงาน "${name}"`)
       },
       onError: (err) => setToast({ kind: 'error', msg: err instanceof Error ? err.message : 'ลบไม่สำเร็จ' }),
     })

@@ -4,6 +4,7 @@ import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info, SearchInput, FontScaleControl } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
 import { useAuth } from '../../context/AuthContext'
+import { logActivity } from '../../lib/activityLog'
 import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
 interface ExpensesModuleProps {
@@ -2149,8 +2150,8 @@ function VendorEditModal({
 }) {
   const isNew = !partner
   const { data: partners = [] } = useList<Partner>('partners')
-  const insertPartner = useInsert<Partner>('partners')
-  const updatePartner = useUpdate<Partner>('partners')
+  const insertPartner = useInsert<Partner>('partners', { activity: p => `เพิ่มคู่ค้า/ร้านค้า "${p.name}"` })
+  const updatePartner = useUpdate<Partner>('partners', { activity: p => `แก้ไขคู่ค้า/ร้านค้า "${p.name}"` })
   const nextCode = isNew
     ? 'VND-' + String(
         partners.reduce((max, p) => {
@@ -2299,7 +2300,7 @@ function VendorEditModal({
 }
 
 function ExpVendors() {
-  const { isAdmin, isManager } = useAuth()
+  const { isAdmin, isManager, legacyUser } = useAuth()
   const { data: partners = [] } = useList<Partner>('partners')
   const deletePartner = useDelete('partners')
   const [q, setQ] = useState('')
@@ -2318,6 +2319,7 @@ function ExpVendors() {
   const handleDelete = async (p: Partner) => {
     if (!confirm(`ต้องการลบ "${p.name}" หรือไม่?`)) return
     await deletePartner.mutateAsync(p.id)
+    logActivity(legacyUser?.name ?? 'ไม่ทราบผู้ใช้', 'partners', `ลบคู่ค้า/ร้านค้า "${p.name}"`)
   }
 
   return (

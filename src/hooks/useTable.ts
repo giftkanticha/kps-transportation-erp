@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { listAll, getOne, insertOne, updateOne, deleteOne } from '../lib/crud'
+import { logActivity } from '../lib/activityLog'
+import { useAuth } from '../context/AuthContext'
 
 export function useList<T>(table: string, orderBy = 'created_at', ascending = false) {
   return useQuery({
@@ -16,19 +18,32 @@ export function useOne<T>(table: string, id: string | null | undefined) {
   })
 }
 
-export function useInsert<T>(table: string) {
+interface MutationOpts<T> {
+  /** When provided, logged to activity_logs on success as { who: current user, type: table, text: activity(result) } */
+  activity?: (result: T) => string
+}
+
+export function useInsert<T>(table: string, opts?: MutationOpts<T>) {
   const qc = useQueryClient()
+  const { legacyUser } = useAuth()
   return useMutation({
     mutationFn: (row: Partial<T>) => insertOne<T>(table, row),
-    onSuccess:  () => { qc.invalidateQueries({ queryKey: [table] }) },
+    onSuccess:  (result) => {
+      qc.invalidateQueries({ queryKey: [table] })
+      if (opts?.activity) logActivity(legacyUser?.name ?? 'ไม่ทราบผู้ใช้', table, opts.activity(result))
+    },
   })
 }
 
-export function useUpdate<T>(table: string) {
+export function useUpdate<T>(table: string, opts?: MutationOpts<T>) {
   const qc = useQueryClient()
+  const { legacyUser } = useAuth()
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: Partial<T> }) => updateOne<T>(table, id, patch),
-    onSuccess:  () => { qc.invalidateQueries({ queryKey: [table] }) },
+    onSuccess:  (result) => {
+      qc.invalidateQueries({ queryKey: [table] })
+      if (opts?.activity) logActivity(legacyUser?.name ?? 'ไม่ทราบผู้ใช้', table, opts.activity(result))
+    },
   })
 }
 
