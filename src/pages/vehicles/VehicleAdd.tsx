@@ -28,7 +28,7 @@ interface VehicleForm {
 
 export function VehicleAdd({ setActive }: VehicleAddProps) {
   const { data: employees = [] } = useList<Employee>('employees')
-  const insertVehicle = useInsert<Vehicle>('vehicles')
+  const insertVehicle = useInsert<Vehicle>('vehicles', { activity: v => `เพิ่มรถใหม่ ${v.plate}` })
   const [form, setForm] = useState<VehicleForm>({
     plate: '',
     brand: '',

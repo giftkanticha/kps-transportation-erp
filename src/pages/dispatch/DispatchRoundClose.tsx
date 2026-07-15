@@ -192,7 +192,9 @@ function CloseForm({
   const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const { data: allFuelStock = [] } = useList<FuelStock>('fuel_stock')
   const updateLeg = useUpdate<DispatchLeg>('dispatch_legs')
-  const updateDispatch = useUpdate<Dispatch>('dispatch')
+  const updateDispatch = useUpdate<Dispatch>('dispatch', {
+    activity: d => `${d.roundStatus === 'closed' ? 'ปิดงานขนส่ง' : 'บันทึกร่างงานขนส่ง'} ${d.code}`,
+  })
   const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
   const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
   // Mirror the TRIP_CLOSING into fuel_records too — that's the legacy table

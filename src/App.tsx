@@ -31,9 +31,7 @@ import { FinancePL } from './pages/finance/FinancePL'
 import { FinanceFixed } from './pages/finance/FinanceFixed'
 import { FinanceSummary } from './pages/finance/FinanceSummary'
 import { PeriodClosePage } from './pages/finance/PeriodClosePage'
-import { VehicleManagement } from './pages/vehicles/VehicleManagement'
 import { MaintenancePage } from './pages/maintenance/MaintenancePage'
-import { PartnersPage } from './pages/customers/PartnersPage'
 import { LocationsPage } from './pages/locations/LocationsPage'
 import { CustomerBilling } from './pages/dispatch/CustomerBilling'
 import { CompanyBankAccountsPage } from './pages/settings/CompanyBankAccountsPage'
@@ -46,7 +44,6 @@ const crumbMap: Record<string, string> = {
   vehicles: 'จัดการรถ',
   'vehicles.add': 'เพิ่มรถใหม่',
   'vehicles.detail': 'รายละเอียดรถ',
-  'vehicles.management': 'จัดการทะเบียนรถ',
   employees: 'ข้อมูลพนักงาน',
   'employees.add': 'เพิ่มพนักงานใหม่',
   tires: 'ระบบยาง • รายการทั้งหมด',
@@ -83,7 +80,6 @@ const crumbMap: Record<string, string> = {
   'expenses.stock': 'สต็อคคลัง KPS',
   'expenses.report': 'ค่าใช้จ่าย • รายงานสรุป',
   'expenses.vendors': 'ทะเบียนร้านค้า/ช่าง',
-  partners: 'คู่ค้า / ช่าง',
   maintenance: 'การบำรุงรักษา',
   finance: 'การเงิน • P&L รายคัน',
   'finance.periodClose': 'การเงิน • ปิดงวดบัญชี',
@@ -143,9 +139,6 @@ export default function App() {
         return <VehicleAdd setActive={setActive} />
       case 'vehicles.detail':
         return <VehicleDetail setActive={setActive} subject={subject} user={legacyUser} />
-      case 'vehicles.management':
-        return <VehicleManagement />
-
       case 'employees':
         return <EmployeesPage setActive={setActive} setSubject={setSubject} />
       case 'employees.add':
@@ -228,8 +221,6 @@ export default function App() {
       case 'maintenance':
         return <MaintenancePage />
 
-      case 'partners':
-        return <PartnersPage />
       case 'dispatch.locations':
         return <LocationsPage />
       case 'dispatch.billing':

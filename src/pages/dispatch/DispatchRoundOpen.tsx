@@ -43,7 +43,9 @@ export function DispatchRoundOpen({ setActive, setSubject, user }: Props) {
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: dispatches = [] } = useDispatches()
-  const insertDispatch = useInsert<Dispatch>('dispatch')
+  const insertDispatch = useInsert<Dispatch>('dispatch', {
+    activity: d => `เปิดงานขนส่ง ${d.code} (${vehicles.find(v => v.id === d.vehicleId)?.plate ?? '—'})`,
+  })
   const drafts = useMemo(
     () => dispatches.filter(d => d.roundStatus === 'draft'),
     [dispatches],

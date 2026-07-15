@@ -110,7 +110,9 @@ function CloseForm({
   const { data: allRounds = [] } = useList<FuelRound>('fuel_rounds')
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: dispatches = [] } = useDispatches()
-  const updateRound = useUpdate<FuelRound>('fuel_rounds')
+  const updateRound = useUpdate<FuelRound>('fuel_rounds', {
+    activity: r => `ปิดรอบน้ำมัน ${r.code} (${vehicles.find(v => v.id === r.vehicleId)?.plate ?? '—'})`,
+  })
   const updateDispatch = useUpdate<Dispatch>('dispatch')
   const round = allRounds.find(r => r.id === roundId)
   const vehicle = round ? vehicles.find(v => v.id === round.vehicleId) : undefined

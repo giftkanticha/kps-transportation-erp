@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { db } from '../../lib/db'
-import { useList, useInsert } from '../../hooks/useTable'
+import { useList, useInsert, useUpdate } from '../../hooks/useTable'
+import { useAuth } from '../../context/AuthContext'
 import { Icon, StatusBadge, Field } from '../../components/ui'
 import type { Maintenance, Vehicle } from '../../types'
 
@@ -26,17 +27,24 @@ function nextCode(existing: Maintenance[]): string {
 }
 
 export function MaintenancePage() {
+  const { isManager } = useAuth()
   const { data: all = [] } = useList<Maintenance>('maintenance')
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
-  const insertMaintenance = useInsert<Maintenance>('maintenance')
-
   const plateOf = (id: string) => vehicles.find(v => v.id === id)?.plate ?? '—'
+  const insertMaintenance = useInsert<Maintenance>('maintenance', {
+    activity: m => `สั่งบำรุงรักษา ${m.code} (${plateOf(m.vehicleId)})`,
+  })
+  const updateMaintenance = useUpdate<Maintenance>('maintenance', {
+    activity: m => `แก้ไขงานบำรุงรักษา ${m.code} (${plateOf(m.vehicleId)})`,
+  })
+
   const inProgress = all.filter(m => m.status === 'in-progress')
   const scheduled  = all.filter(m => m.status === 'scheduled')
   const thisMonth  = todayISO().slice(0, 7)
   const thisMontCost = all.filter(m => (m.startDate ?? '').startsWith(thisMonth)).reduce((s, m) => s + (m.cost || 0), 0)
 
   const [showAdd, setShowAdd] = useState(false)
+  const [editing, setEditing] = useState<Maintenance | null>(null)
 
   return (
     <div>
@@ -90,11 +98,12 @@ export function MaintenancePage() {
               <th>วันที่</th>
               <th className="right">ค่าใช้จ่าย</th>
               <th>สถานะ</th>
+              {isManager && <th></th>}
             </tr>
           </thead>
           <tbody>
             {all.length === 0 && (
-              <tr><td colSpan={8} style={{ textAlign: 'center', padding: 36, color: 'var(--text-2)' }}>
+              <tr><td colSpan={isManager ? 9 : 8} style={{ textAlign: 'center', padding: 36, color: 'var(--text-2)' }}>
                 ยังไม่มีรายการบำรุงรักษา — กด "สั่งบำรุงรักษา" เพื่อเพิ่ม
               </td></tr>
             )}
@@ -108,6 +117,13 @@ export function MaintenancePage() {
                 <td className="num muted">{m.startDate}</td>
                 <td className="num right" style={{ fontWeight: 600 }}>{m.cost > 0 ? db.thb(m.cost) : '—'}</td>
                 <td><StatusBadge status={m.status} /></td>
+                {isManager && (
+                  <td>
+                    <button className="btn ghost icon sm" title="แก้ไข / รายละเอียด" onClick={() => setEditing(m)}>
+                      <Icon name="edit" size={14} />
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -115,7 +131,7 @@ export function MaintenancePage() {
       </div>
 
       {showAdd && (
-        <AddMaintenanceModal
+        <MaintenanceFormModal
           vehicles={vehicles}
           existing={all}
           onClose={() => setShowAdd(false)}
@@ -129,25 +145,44 @@ export function MaintenancePage() {
           }}
         />
       )}
+
+      {editing && (
+        <MaintenanceFormModal
+          vehicles={vehicles}
+          existing={all}
+          initial={editing}
+          onClose={() => setEditing(null)}
+          onSave={async row => {
+            try {
+              await updateMaintenance.mutateAsync({ id: editing.id, patch: row })
+              setEditing(null)
+            } catch (e) {
+              alert(e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ')
+            }
+          }}
+        />
+      )}
     </div>
   )
 }
 
-function AddMaintenanceModal({
-  vehicles, existing, onClose, onSave,
+function MaintenanceFormModal({
+  vehicles, existing, initial, onClose, onSave,
 }: {
   vehicles: Vehicle[]
   existing: Maintenance[]
+  initial?: Maintenance
   onClose: () => void
   onSave: (row: Partial<Maintenance>) => Promise<void>
 }) {
-  const [vehicleId, setVehicleId] = useState(vehicles[0]?.id ?? '')
-  const [type, setType] = useState(TYPES[0])
-  const [items, setItems] = useState('')
-  const [workshop, setWorkshop] = useState('')
-  const [startDate, setStartDate] = useState(todayISO())
-  const [cost, setCost] = useState('')
-  const [status, setStatus] = useState<string>('scheduled')
+  const [vehicleId, setVehicleId] = useState(initial?.vehicleId ?? vehicles[0]?.id ?? '')
+  const [type, setType] = useState(initial?.type ?? TYPES[0])
+  const [items, setItems] = useState((initial?.items ?? []).join('\n'))
+  const [workshop, setWorkshop] = useState(initial?.workshop ?? '')
+  const [startDate, setStartDate] = useState(initial?.startDate ?? todayISO())
+  const [endDate, setEndDate] = useState(initial?.endDate ?? '')
+  const [cost, setCost] = useState(initial ? String(initial.cost || '') : '')
+  const [status, setStatus] = useState<string>(initial?.status ?? 'scheduled')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
@@ -160,17 +195,16 @@ function AddMaintenanceModal({
     try {
       const v = vehicles.find(x => x.id === vehicleId)
       await onSave({
-        id: 'mnt_' + Date.now().toString(36),
-        code: nextCode(existing),
+        ...(initial ? {} : { id: 'mnt_' + Date.now().toString(36), code: nextCode(existing) }),
         vehicleId,
         type,
         workshop: workshop.trim(),
-        partnerId: null,
+        partnerId: initial?.partnerId ?? null,
         status,
         cost: Number(cost) || 0,
         startDate,
-        endDate: null,
-        odometer: v?.odometer ?? 0,
+        endDate: endDate || null,
+        odometer: initial?.odometer ?? v?.odometer ?? 0,
         items: items.split('\n').map(s => s.trim()).filter(Boolean),
       })
     } catch (e) {
@@ -183,7 +217,7 @@ function AddMaintenanceModal({
   return (
     <div className="modal-bg" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="head"><h3>สั่งบำรุงรักษา</h3></div>
+        <div className="head"><h3>{initial ? `แก้ไขงานบำรุงรักษา · ${initial.code}` : 'สั่งบำรุงรักษา'}</h3></div>
         <div className="body">
           <div className="grid-2" style={{ gap: 14 }}>
             <Field label="รถ *">
@@ -198,8 +232,11 @@ function AddMaintenanceModal({
                 {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </Field>
-            <Field label="วันที่ *">
+            <Field label="วันที่เริ่ม *">
               <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+            </Field>
+            <Field label="วันที่เสร็จ">
+              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
             </Field>
             <Field label="สถานะ">
               <select value={status} onChange={e => setStatus(e.target.value)}>

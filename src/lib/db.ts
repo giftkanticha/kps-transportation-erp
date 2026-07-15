@@ -285,24 +285,6 @@ export const db = {
     return r.refills.find(x => x.type === 'end')?.liters ?? 0
   },
 
-  // Current tank level (only meaningful for open rounds, before close)
-  fuelRoundCurrentLevel(r: FuelRound): number {
-    // We assume tank is full at start. Each refill brings tank back toward full.
-    // For UI estimation, we don't know real-time consumption, so we estimate
-    // by assuming the truck always uses fuel that's currently in the tank.
-    // Simplest approximation: level after intermediates = capacity (since
-    // intermediates are usually only done when tank is low enough to need fuel).
-    // But we want to show a useful level for the refill UI's "available capacity".
-    // We'll show capacity - intermediate liters added (assuming each intermediate
-    // brings level partway back). This is an estimate.
-    const cap = r.tankCapacity || DEFAULT_TANK_CAPACITY
-    // Estimate consumption between refills: assume each refill brought tank to full,
-    // so level right before each refill = cap - refill.liters. After refill = cap.
-    // After most recent refill, level = cap. This is the simplest model.
-    if (!r.refills.length) return cap
-    return cap // assume always brought to full
-  },
-
   fuelRoundConsumed(r: FuelRound): number {
     // Consumed = intermediates + end-fill (when tank starts and ends at full)
     if (r.status !== 'closed') return 0

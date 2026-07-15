@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { db } from '../../lib/db'
 import { useList, useUpdate, useDelete } from '../../hooks/useTable'
 import { useAuth } from '../../context/AuthContext'
+import { logActivity } from '../../lib/activityLog'
 import type { Employee, Vehicle } from '../../types'
 import { Icon, StatusBadge, Field, SearchInput } from '../../components/ui'
 
@@ -157,9 +158,10 @@ interface ActionMenuProps {
   onEdit: () => void
   onChangeStatus: () => void
   onDelete: () => void
+  canDelete: boolean
 }
 
-function ActionMenu({ onClose, onEdit, onChangeStatus, onDelete }: ActionMenuProps) {
+function ActionMenu({ onClose, onEdit, onChangeStatus, onDelete, canDelete }: ActionMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -200,7 +202,8 @@ function ActionMenu({ onClose, onEdit, onChangeStatus, onDelete }: ActionMenuPro
       >
         <Icon name="refresh" size={14} /> เปลี่ยนสถานะ
       </button>
-      <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0' }} />
+      {canDelete && <div style={{ borderTop: '1px solid var(--line)', margin: '4px 0' }} />}
+      {canDelete && (
       <button
         className="btn ghost"
         style={{ width: '100%', borderRadius: 0, justifyContent: 'flex-start', padding: '8px 14px', fontSize: 13, color: '#A32D2D' }}
@@ -208,6 +211,7 @@ function ActionMenu({ onClose, onEdit, onChangeStatus, onDelete }: ActionMenuPro
       >
         <Icon name="close" size={14} /> ลบพนักงาน
       </button>
+      )}
     </div>
   )
 }
@@ -502,6 +506,7 @@ function StatusChangeDialog({ employee, onClose, onChanged }: StatusChangeDialog
 }
 
 export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
+  const { isAdmin, legacyUser } = useAuth()
   const [openMenuId, setOpenMenuId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [statusChangingId, setStatusChangingId] = useState<string | null>(null)
@@ -535,11 +540,13 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
   const deletingEmployee = deletingId ? allEmployees.find(e => e.id === deletingId) : null
 
   const handleDelete = () => {
-    if (!deletingId) return
+    if (!deletingId || !deletingEmployee) return
+    const name = deletingEmployee.name
     deleteEmployee.mutate(deletingId, {
       onSuccess: () => {
         setDeletingId(null)
         setToast({ kind: 'success', msg: 'ลบพนักงานเรียบร้อยแล้ว' })
+        logActivity(legacyUser?.name ?? 'ไม่ทราบผู้ใช้', 'employees', `ลบพนักงาน "${name}"`)
       },
       onError: (err) => setToast({ kind: 'error', msg: err instanceof Error ? err.message : 'ลบไม่สำเร็จ' }),
     })
@@ -667,6 +674,7 @@ export function EmployeesPage({ setActive, setSubject }: EmployeesPageProps) {
                           onEdit={() => setEditingId(e.id)}
                           onChangeStatus={() => setStatusChangingId(e.id)}
                           onDelete={() => setDeletingId(e.id)}
+                          canDelete={isAdmin}
                         />
                       )}
                     </div>
