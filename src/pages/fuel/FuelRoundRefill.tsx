@@ -111,7 +111,9 @@ function RefillForm({
 }: { roundId: string; setActive: (id: string) => void; setSubject: (s: unknown) => void }) {
   const { data: allRounds = [] } = useList<FuelRound>('fuel_rounds')
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
-  const updateRound = useUpdate<FuelRound>('fuel_rounds')
+  const updateRound = useUpdate<FuelRound>('fuel_rounds', {
+    activity: r => `เติมน้ำมันระหว่างทาง ${r.code} (${vehicles.find(v => v.id === r.vehicleId)?.plate ?? '—'})`,
+  })
   const round = allRounds.find(r => r.id === roundId)
   const vehicle = round ? vehicles.find(v => v.id === round.vehicleId) : undefined
 

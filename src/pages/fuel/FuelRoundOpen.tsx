@@ -42,7 +42,9 @@ export function FuelRoundOpen({ setActive, setSubject }: Props) {
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: dispatches = [] } = useDispatches()
   const { data: allRounds = [] } = useList<FuelRound>('fuel_rounds')
-  const insertRound = useInsert<FuelRound>('fuel_rounds')
+  const insertRound = useInsert<FuelRound>('fuel_rounds', {
+    activity: r => `เปิดรอบน้ำมัน ${r.code} (${vehicles.find(v => v.id === r.vehicleId)?.plate ?? '—'})`,
+  })
   const openRounds = allRounds.filter(r => r.status === 'open')
 
   const [vehicleId, setVehicleId] = useState('')
