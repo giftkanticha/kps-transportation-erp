@@ -893,6 +893,24 @@ function SubHistoryTab() {
     return <span className={`badge ${s?.cls ?? 'gray'}`}>{s?.label ?? status}</span>
   }
 
+  // สรุปยอดจ่าย + ภาษีหัก ณ ที่จ่าย 1% ต่อคนขับ/ผู้รับจ้าง (ตามตัวกรองปัจจุบัน)
+  // ใช้ยื่นแบบ ภ.ง.ด.53 / กระทบยอดว่าหักภาษีไว้เท่าไรต้องนำส่งสรรพากร
+  const whtRows = (() => {
+    const m = new Map<string, { name: string; jobs: number; gross: number; wht: number; net: number }>()
+    for (const j of filtered) {
+      const key = j.driverName || j.driverId || '—'
+      const gross = j.total || 0
+      const wht = j.wht ? gross * 0.01 : 0
+      const cur = m.get(key) ?? { name: j.driverName || '—', jobs: 0, gross: 0, wht: 0, net: 0 }
+      cur.jobs += 1; cur.gross += gross; cur.wht += wht; cur.net += gross - wht
+      m.set(key, cur)
+    }
+    return [...m.values()].sort((a, b) => b.gross - a.gross)
+  })()
+  const totGross = whtRows.reduce((s, r) => s + r.gross, 0)
+  const totWht = whtRows.reduce((s, r) => s + r.wht, 0)
+  const totNet = totGross - totWht
+
   return (
     <div className="card">
       {/* Print-only KPS header */}
@@ -936,6 +954,65 @@ function SubHistoryTab() {
           </Field>
         </div>
       </div>
+
+      {/* สรุปยอดจ่าย + ภาษีหัก ณ ที่จ่าย (ตามตัวกรอง) */}
+      {whtRows.length > 0 && (
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
+          <div className="row" style={{ marginBottom: 12, gap: 8, alignItems: 'baseline' }}>
+            <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>สรุปยอดจ่าย & ภาษีหัก ณ ที่จ่าย</h4>
+            <span className="muted" style={{ fontSize: 12 }}>({filtered.length} งาน · ตามตัวกรอง — ใช้กระทบยอด ภ.ง.ด.53)</span>
+          </div>
+          <div className="grid-3" style={{ gap: 12, marginBottom: 14 }}>
+            <div className="card" style={{ padding: '12px 16px' }}>
+              <div className="muted" style={{ fontSize: 12 }}>ค่าขนส่งรวม (ก่อนหัก)</div>
+              <div className="mono" style={{ fontSize: 20, fontWeight: 700 }}>{db.thb(totGross)}</div>
+            </div>
+            <div className="card" style={{ padding: '12px 16px' }}>
+              <div className="muted" style={{ fontSize: 12 }}>ภาษีหัก ณ ที่จ่าย 1% (นำส่งสรรพากร)</div>
+              <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: 'var(--red, #dc2626)' }}>{db.thb(totWht)}</div>
+            </div>
+            <div className="card" style={{ padding: '12px 16px' }}>
+              <div className="muted" style={{ fontSize: 12 }}>ยอดจ่ายสุทธิ</div>
+              <div className="mono" style={{ fontSize: 20, fontWeight: 700, color: 'var(--primary)' }}>{db.thb(totNet)}</div>
+            </div>
+          </div>
+          <div className="tbl-wrap" style={{ border: '1px solid var(--line)', borderRadius: 8, overflowX: 'auto' }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>ผู้รับจ้าง / คนขับ</th>
+                  <th className="right">งาน</th>
+                  <th className="right">ค่าขนส่งรวม</th>
+                  <th className="right">หัก ณ ที่จ่าย 1%</th>
+                  <th className="right">สุทธิจ่าย</th>
+                </tr>
+              </thead>
+              <tbody>
+                {whtRows.map(r => (
+                  <tr key={r.name}>
+                    <td>{r.name}</td>
+                    <td className="num right">{r.jobs}</td>
+                    <td className="num right mono">{db.thb(r.gross)}</td>
+                    <td className="num right mono" style={{ color: r.wht > 0 ? 'var(--red, #dc2626)' : 'var(--text-muted)' }}>
+                      {r.wht > 0 ? db.thb(r.wht) : '—'}
+                    </td>
+                    <td className="num right mono" style={{ fontWeight: 600 }}>{db.thb(r.net)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ fontWeight: 700, borderTop: '2px solid var(--line)' }}>
+                  <td>รวม</td>
+                  <td className="num right">{filtered.length}</td>
+                  <td className="num right mono">{db.thb(totGross)}</td>
+                  <td className="num right mono" style={{ color: 'var(--red, #dc2626)' }}>{db.thb(totWht)}</td>
+                  <td className="num right mono">{db.thb(totNet)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
         <table className="tbl">
