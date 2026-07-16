@@ -367,7 +367,12 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
                       style={{ whiteSpace: 'nowrap' }}
                     >
                       {r.status === 'closed' && (
-                        isAdmin ? (
+                        r.round.locked ? (
+                          // งวดปิดแล้ว → ล็อก ห้าม reopen (กัน snapshot P&L เพี้ยน)
+                          <span className="muted" style={{ fontSize: 11 }} title="รอบอยู่ในงวดบัญชีที่ปิดแล้ว — ปลดล็อกงวดก่อน">
+                            🔒 ล็อก
+                          </span>
+                        ) : isAdmin ? (
                           <button
                             className="btn sm"
                             title="เปิดรอบนี้กลับมาแก้ไข"
@@ -490,6 +495,11 @@ export function DispatchSummaryReport({ setActive, setSubject }: Props) {
           round={reopenTarget}
           onClose={() => setReopenTarget(null)}
           onConfirm={async () => {
+            if (reopenTarget.locked) {
+              setReopenTarget(null)
+              setToastMsg({ kind: 'err', text: '🔒 รอบอยู่ในงวดที่ปิดแล้ว — ปลดล็อกงวดก่อน' })
+              return
+            }
             try {
               await updateDispatch.mutateAsync({
                 id: reopenTarget.id,

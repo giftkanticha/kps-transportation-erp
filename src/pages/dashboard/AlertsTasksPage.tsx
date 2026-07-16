@@ -653,6 +653,8 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
   const { data: editApprovals = [] } = useList<EditApprovalRequest>('edit_approvals')
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: maintenance = [] } = useList<Maintenance>('maintenance')
+  // ใช้เช็คว่ารอบที่ขอเปิดแก้ ยังอยู่ในงวดที่ปิด (locked) หรือไม่ — ถ้าล็อกห้ามอนุมัติ
+  const { data: dispatches = [] } = useList<Dispatch>('dispatch')
   const updateApproval = useUpdate<EditApprovalRequest>('edit_approvals')
   const updateVehicle = useUpdate<Vehicle>('vehicles')
   const updateDispatch = useUpdate<Dispatch>('dispatch')
@@ -676,6 +678,12 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
         // req.changes._kind when inserting from DispatchSummaryReport.
         const changesAsRecord = req.changes as Record<string, unknown>
         if (changesAsRecord?._kind === 'dispatch_reopen' && typeof changesAsRecord.roundId === 'string') {
+          // งวดปิดแล้ว → รอบ locked: อนุมัติเปิดแก้ไม่ได้ จะทำให้ snapshot P&L เพี้ยน
+          // ต้องปลดล็อกงวดก่อน (การเงิน › ปิดงวดบัญชี) แล้วค่อยอนุมัติ
+          const target = dispatches.find(d => d.id === changesAsRecord.roundId)
+          if (target?.locked) {
+            throw new Error('รอบนี้อยู่ในงวดบัญชีที่ปิดแล้ว — ปลดล็อกงวดก่อน (การเงิน › ปิดงวดบัญชี) จึงจะอนุมัติเปิดแก้ได้')
+          }
           await updateDispatch.mutateAsync({
             id: changesAsRecord.roundId,
             patch: { roundStatus: 'draft', status: 'in-progress' },
