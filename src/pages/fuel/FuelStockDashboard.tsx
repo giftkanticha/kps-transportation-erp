@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { db, uid } from '../../lib/db'
+import { db, uid, DEFAULT_TANK_CAPACITY } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
@@ -829,6 +829,43 @@ export function FuelStockDashboard() {
           )}
         </div>
       </div>
+
+      {/* น้ำมันคลังต่ำ/ติดลบ — เตือนให้สั่งเติมก่อนของหมด (น้ำมันหมด = งานหยุด)
+          เกณฑ์เตือน ≤ 20% ของถัง (DEFAULT_TANK_CAPACITY); ≤ 0 = หมด/จ่ายเกินยอด */}
+      {currentBalance <= DEFAULT_TANK_CAPACITY * 0.2 && (
+        <div
+          className="card pad"
+          style={{
+            marginBottom: 16,
+            borderLeft: `4px solid ${currentBalance <= 0 ? 'var(--red, #dc2626)' : '#d97706'}`,
+            background: currentBalance <= 0 ? '#fef2f2' : '#fffbeb',
+          }}
+        >
+          <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+            <span style={{ fontSize: 18, lineHeight: 1 }}>{currentBalance <= 0 ? '⛔' : '⚠️'}</span>
+            <div style={{ fontSize: 13 }}>
+              {currentBalance <= 0 ? (
+                <>
+                  <strong>น้ำมันคลังหมด{currentBalance < 0 ? ' — จ่ายออกเกินยอดคงเหลือ' : ''}</strong>
+                  <div className="muted" style={{ marginTop: 2 }}>
+                    ยอดคงเหลือจริง <strong className="mono" style={{ color: 'var(--red, #dc2626)' }}>{db.fmt(currentBalance)}</strong> ลิตร
+                    {currentBalance < 0 && ' — มีการจ่ายน้ำมันออกมากกว่าที่รับเข้า ตรวจสอบรายการรับ/จ่าย'}
+                    {' '}· ควรรับน้ำมันเข้าคลังก่อนเปิดงานเพิ่ม
+                  </div>
+                </>
+              ) : (
+                <>
+                  <strong>น้ำมันคลังใกล้หมด — ควรสั่งเติม</strong>
+                  <div className="muted" style={{ marginTop: 2 }}>
+                    เหลือ <strong className="mono">{db.fmt(currentBalance)}</strong> ลิตร
+                    {' '}(~{Math.round((currentBalance / DEFAULT_TANK_CAPACITY) * 100)}% ของถัง {DEFAULT_TANK_CAPACITY} ลิตร)
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid-4" style={{ marginBottom: 20, gap: 14 }}>
