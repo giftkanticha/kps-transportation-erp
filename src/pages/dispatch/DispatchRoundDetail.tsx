@@ -632,6 +632,9 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   }
 
   const isClosed = round.roundStatus === 'closed'
+  // งวดบัญชีปิดแล้ว → รอบถูกล็อก: ห้าม reopen/ลบ เพราะจะทำให้ snapshot P&L
+  // ที่แช่แข็งไว้เพี้ยน ต้องให้ admin ปลดล็อกงวดก่อน (การเงิน › ปิดงวดบัญชี)
+  const isLocked = round.locked === true
   const vehicle = vehicles.find(v => v.id === round.vehicleId)
   const driver = employees.find(e => e.id === round.driverId)
   const legs = round.legs ?? []
@@ -737,7 +740,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
               <Icon name="edit" size={14} /> แก้ไขรอบ
             </button>
           )}
-          {isAdmin && (
+          {isAdmin && !isLocked && (
             <button
               className="btn"
               style={{ color: 'var(--red)', borderColor: '#fecaca' }}
@@ -760,7 +763,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
               <Icon name="check" size={15} /> ไปปิดงาน →
             </button>
           )}
-          {isClosed && isAdmin && (
+          {isClosed && isAdmin && !isLocked && (
             <button
               className="btn"
               onClick={() => setShowReopenConfirm(true)}
@@ -769,7 +772,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
               <Icon name="edit" size={14} /> เปิดเพื่อแก้ไข
             </button>
           )}
-          {isClosed && !isAdmin && (
+          {isClosed && !isAdmin && !isLocked && (
             <button
               className="btn"
               onClick={() => setShowRequestEdit(true)}
@@ -785,6 +788,24 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
           )}
         </div>
       </div>
+
+      {isLocked && (
+        <div
+          className="card pad no-print"
+          style={{ marginBottom: 16, borderLeft: '4px solid var(--amber, #d97706)', background: '#fffbeb' }}
+        >
+          <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+            <span style={{ fontSize: 18, lineHeight: 1 }}>🔒</span>
+            <div style={{ fontSize: 13 }}>
+              <strong>รอบนี้อยู่ในงวดบัญชีที่ปิดแล้ว — ล็อกการแก้ไข</strong>
+              <div className="muted" style={{ marginTop: 2 }}>
+                ดูข้อมูลได้อย่างเดียว แก้ไข/เปิดรอบ/ลบไม่ได้ เพื่อกันไม่ให้ตัวเลขงบที่ปิดไปแล้วเปลี่ยน
+                — ต้องให้ admin ปลดล็อกงวดก่อน (เมนู <strong>การเงิน › ปิดงวดบัญชี</strong>)
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Round info */}
       <div className="card pad" style={{ marginBottom: 16 }}>
@@ -991,7 +1012,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
         />
       )}
 
-      {showReopenConfirm && isClosed && isAdmin && (
+      {showReopenConfirm && isClosed && isAdmin && !isLocked && (
         <div className="modal-bg" onClick={() => setShowReopenConfirm(false)}>
           <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
             <div className="head"><h3>เปิดรอบเพื่อแก้ไข</h3></div>
@@ -1009,6 +1030,11 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
               <button
                 className="btn primary"
                 onClick={async () => {
+                  if (round.locked) {
+                    setShowReopenConfirm(false)
+                    setToast({ kind: 'error', msg: '🔒 รอบอยู่ในงวดที่ปิดแล้ว — ปลดล็อกงวดก่อน' })
+                    return
+                  }
                   try {
                     await updateDispatch.mutateAsync({
                       id: round.id,
@@ -1066,13 +1092,18 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
         />
       )}
 
-      {showDeleteRound && isAdmin && (
+      {showDeleteRound && isAdmin && !isLocked && (
         <DeleteRoundModal
           round={round}
           linkedFuelTxs={allFuelTxs.filter(t => t.tripId === round.id)}
           mirrorFuelRecs={allFuelRecs.filter(r => r.code?.startsWith(`TRIP-${round.code}-`))}
           onClose={() => setShowDeleteRound(false)}
           onConfirm={async () => {
+            if (round.locked) {
+              setShowDeleteRound(false)
+              setToast({ kind: 'error', msg: '🔒 รอบอยู่ในงวดที่ปิดแล้ว — ปลดล็อกงวดก่อนจึงจะลบได้' })
+              return
+            }
             try {
               // 1) Unlink fuel transactions so they don't dangle as TRIP_LINKED
               //    with a null trip_id (FK is ON DELETE SET NULL).

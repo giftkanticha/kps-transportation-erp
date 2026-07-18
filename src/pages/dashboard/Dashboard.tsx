@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { db } from '../../lib/db'
 import { useList, useInsert } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
-import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner, EditApprovalRequest, BillingNote, Location, DispatchLeg } from '../../types'
+import type { User, Vehicle, Employee, Tire, ActivityLog, StockItem, Customer, SubJob, ExpenseHeader, Partner, EditApprovalRequest, BillingNote, Location, Dispatch, DispatchLeg } from '../../types'
 import { Icon, StatusBadge } from '../../components/ui'
 import { canAccessRoute } from '../../lib/permissions'
 
@@ -320,10 +320,30 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const scheduled = useMemo(() => dispatch.filter(t => t.status === 'scheduled'), [dispatch])
   const delivered = useMemo(() => dispatch.filter(t => t.status === 'completed'), [dispatch])
 
-  const revenueThisMonth = useMemo(() => dispatch.reduce((s, t) => s + db.amountOf(t), 0), [dispatch])
-  const costThisMonth    = useMemo(
-    () => dispatch.reduce((s, t) => s + (t.cost || 0), 0) + expHeaders.reduce((s, h) => s + (h.total || 0), 0),
-    [dispatch, expHeaders],
+  // "เดือนนี้" = กรองตาม dispatch.date / expense.date จริง (local time ไม่ใช่ UTC)
+  // เทียบเดือนก่อนเพื่อคำนวณ delta จริง แทนข้อความ hardcode เดิม
+  const ymOf = (offset: number) => {
+    const d = new Date()
+    d.setDate(1)
+    d.setMonth(d.getMonth() + offset)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  }
+  const thisYm = ymOf(0)
+  const prevYm = ymOf(-1)
+  // รายได้ของรอบ: ใช้ยอดรวมรายขา (ตัด noBill แล้ว) ถ้ามีขา, ไม่งั้น fallback ยอดรวมเดิม
+  const roundAmount = (t: Dispatch) => (t.legs?.length ? db.roundRevenue(t) : db.amountOf(t))
+  const revenueOfMonth = (ym: string) =>
+    dispatch.reduce((s, t) => s + ((t.date ?? '').slice(0, 7) === ym ? roundAmount(t) : 0), 0)
+  const revenueThisMonth = useMemo(() => revenueOfMonth(thisYm), [dispatch, thisYm]) // eslint-disable-line react-hooks/exhaustive-deps
+  const revenuePrevMonth = useMemo(() => revenueOfMonth(prevYm), [dispatch, prevYm]) // eslint-disable-line react-hooks/exhaustive-deps
+  const revenueDeltaPct = revenuePrevMonth > 0
+    ? ((revenueThisMonth - revenuePrevMonth) / revenuePrevMonth) * 100
+    : null
+  const costThisMonth = useMemo(
+    () =>
+      dispatch.reduce((s, t) => s + ((t.date ?? '').slice(0, 7) === thisYm ? (t.cost || 0) : 0), 0) +
+      expHeaders.reduce((s, h) => s + ((h.date ?? '').slice(0, 7) === thisYm ? (h.total || 0) : 0), 0),
+    [dispatch, expHeaders, thisYm],
   )
 
   const idleVehicles        = vehicles.filter(v => v.status === 'available').length
@@ -331,9 +351,17 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const maintenanceVehicles = vehicles.filter(v => v.status === 'maintenance').length
 
   // Real notification feed — only items that actually exist in the DB.
+  // ยางใกล้หมด = ยาง in-use ที่ km สะสม (รวมระยะวิ่งสดจาก odometer รถ) ≥ 150,000 กม.
+  // เกณฑ์เดียวกับ KM_CRIT_T ใน TiresModule — เดิมเช็ค status==='critical' ซึ่งไม่มีอยู่จริง
   const criticalTireVehicles = useMemo(() => {
+    const TIRE_KM_CRIT = 150000
     const ids = new Set<string>()
-    tires.forEach(t => { if ((t.status as string) === 'critical' && t.vehicleId) ids.add(t.vehicleId) })
+    for (const t of tires) {
+      if (t.status !== 'in-use' || !t.vehicleId) continue
+      const v = vehicles.find(vv => vv.id === t.vehicleId)
+      const km = (t.accumulatedKm ?? 0) + (v ? Math.max(0, v.odometer - (t.installedOdometer ?? 0)) : 0)
+      if (km >= TIRE_KM_CRIT) ids.add(t.vehicleId)
+    }
     return vehicles.filter(v => ids.has(v.id)).map(v => v.plate)
   }, [tires, vehicles])
   const maintenanceDueVehicles = useMemo(() => {
@@ -494,7 +522,10 @@ export function Dashboard({ user, setActive }: DashboardProps) {
   const kpiCards = [
     {
       label: 'รายได้เดือนนี้', value: db.thb(revenueThisMonth), unit: '',
-      delta: '+12.4% จากเดือนก่อน', deltaUp: true as boolean | null,
+      delta: revenueDeltaPct == null
+        ? 'เดือนก่อนไม่มีข้อมูล'
+        : `${revenueDeltaPct >= 0 ? '+' : ''}${revenueDeltaPct.toFixed(1)}% จากเดือนก่อน`,
+      deltaUp: (revenueDeltaPct == null ? null : revenueDeltaPct >= 0) as boolean | null,
       icon: 'money', gradient: 'linear-gradient(135deg,#10B981,#059669)', iconBg: '#D1FAE5', iconColor: '#065F46',
     },
     {
