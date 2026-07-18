@@ -7,7 +7,9 @@ import { Icon } from '../../components/ui'
 import { can } from '../../lib/permissions'
 import type { Vehicle, Maintenance, EditApprovalRequest, Dispatch, User } from '../../types'
 
-const TODAY = new Date('2026-05-17')
+// วันนี้จริง normalize เป็นเที่ยงคืน — daysTo นับเป็น "วัน" เต็มไม่คลาดตามเวลาในวัน
+const TODAY = new Date()
+TODAY.setHours(0, 0, 0, 0)
 const SOON_DAYS = 30
 const SOON_KM = 5000
 
