@@ -16,6 +16,23 @@ interface VehicleSnapshotInput {
 }
 
 /**
+ * The rounds that fall under a period: those explicitly assigned to it
+ * (accountingPeriodId), plus unassigned rounds whose depart/date lands in the
+ * period's month. This MUST match on both close (which rounds get locked) and
+ * reopen (which rounds get unlocked) — otherwise locked rows get orphaned.
+ */
+export function roundsInPeriod(dispatches: Dispatch[], period: AccountingPeriod): Dispatch[] {
+  return dispatches.filter(d => {
+    if (d.accountingPeriodId === period.id) return true
+    if (d.accountingPeriodId) return false
+    const basis = (d.depart || d.date || '').slice(0, 10)
+    if (!basis) return false
+    const dt = new Date(basis)
+    return dt.getFullYear() === period.year && dt.getMonth() + 1 === period.month
+  })
+}
+
+/**
  * Aggregate per-vehicle P&L for a set of rounds. Used both to display the
  * pre-close preview and to persist snapshots on actual close.
  */
@@ -151,11 +168,16 @@ export async function carryForwardRound(
  *   - status → OPEN
  *   - clear locked on all dispatches in the period
  * Snapshots are kept (read-only history). A fresh close will overwrite them.
+ *
+ * `roundIds` MUST be the same set closePeriod locked (via roundsInPeriod).
+ * Unlocking only by accounting_period_id misses normal rounds (that column is
+ * NULL for them), leaving them locked forever — pass the ids to avoid that.
  */
 export async function reopenPeriod(
   periodId: string,
   reopenedById: string | null,
   reason: string,
+  roundIds: string[] = [],
 ): Promise<void> {
   {
     const { error } = await supabase
@@ -169,11 +191,20 @@ export async function reopenPeriod(
       .eq('id', periodId)
     if (error) throw new Error(`reopen period failed: ${error.message}`)
   }
+  // Unlock carried-forward rounds (keyed by accounting_period_id)…
   {
     const { error } = await supabase
       .from('dispatch')
       .update({ locked: false })
       .eq('accounting_period_id', periodId)
     if (error) throw new Error(`unlock dispatches failed: ${error.message}`)
+  }
+  // …and the by-date rounds whose accounting_period_id is NULL.
+  if (roundIds.length > 0) {
+    const { error } = await supabase
+      .from('dispatch')
+      .update({ locked: false })
+      .in('id', roundIds)
+    if (error) throw new Error(`unlock dispatches (by id) failed: ${error.message}`)
   }
 }
