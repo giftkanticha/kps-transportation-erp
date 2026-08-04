@@ -123,7 +123,9 @@ function FilterCheckGroup({ label, options, state, onChange }: FilterCheckGroupP
   )
 }
 
-const TODAY = new Date('2026-05-17')
+// วันนี้จริง normalize เป็นเที่ยงคืน ให้จำนวนวันคงเหลือนับเต็มวัน
+const TODAY = new Date()
+TODAY.setHours(0, 0, 0, 0)
 
 function LicenseLabel({ status, expire }: { status: string; expire: string }) {
   if (status === 'ok') {

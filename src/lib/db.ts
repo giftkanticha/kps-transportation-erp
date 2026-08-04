@@ -213,8 +213,10 @@ export const db = {
     return prefix + String(maxSeq + 1).padStart(3, '0')
   },
 
+  // ขา noBill (งานภายใน/ไม่มีลูกค้า — migration 0040) ไม่ใช่รายได้จริง
+  // จึงไม่นับใน revenue/WHT ทุกตัว (P&L, ปิดงวด, รายงานรายเดือน)
   roundRevenue(d: Dispatch): number {
-    return (d.legs ?? []).reduce((s, l) => s + (l.amount || 0), 0)
+    return (d.legs ?? []).reduce((s, l) => s + (l.noBill ? 0 : (l.amount || 0)), 0)
   },
 
   // ── Withholding tax (ภาษีหัก ณ ที่จ่าย 1% — ฝั่งลูกค้า) ─────────────────────
@@ -225,10 +227,10 @@ export const db = {
     return l.wht ? Math.round((l.amount || 0) * 0.01 * 100) / 100 : 0
   },
   roundWht(d: Dispatch): number {
-    return (d.legs ?? []).reduce((s, l) => s + db.legWht(l), 0)
+    return (d.legs ?? []).reduce((s, l) => s + (l.noBill ? 0 : db.legWht(l)), 0)
   },
   roundNetRevenue(d: Dispatch): number {
-    return (d.legs ?? []).reduce((s, l) => s + (l.amount || 0) - db.legWht(l), 0)
+    return (d.legs ?? []).reduce((s, l) => s + (l.noBill ? 0 : (l.amount || 0) - db.legWht(l)), 0)
   },
 
   roundPerDiem(d: Dispatch): number {

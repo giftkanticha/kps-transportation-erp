@@ -37,6 +37,8 @@ interface AuthContextValue {
   session:    Session | null
   profile:    UserProfile | null
   legacyUser: User | null
+  /** Per-user menu restriction (top-level menu ids). null = unrestricted (see all). */
+  menuKeys:   string[] | null
   loading:    boolean
   recoveryMode: boolean
   login:      (email: string, password: string) => Promise<void>
@@ -82,9 +84,27 @@ async function fetchProfile(userId: string): Promise<UserProfile | null> {
   return data as UserProfile | null
 }
 
+// Load a user's per-menu access (migration 0042). Admins are unrestricted, so
+// we skip the query and return null. No rows for a non-admin → null (see all,
+// backward-compatible). On error we fail open (null) so a transient RLS/network
+// hiccup never locks a user out of every menu.
+async function fetchMenuKeys(profile: UserProfile | null): Promise<string[] | null> {
+  if (!profile) return null
+  const role = ROLE_MAP[profile.role] ?? 'driver'
+  if (role === 'admin') return null
+  const { data, error } = await supabase
+    .from('user_menu_permissions')
+    .select('menu_key')
+    .eq('user_id', profile.id)
+  if (error) return null
+  const keys = (data ?? []).map((r: { menu_key: string }) => r.menu_key)
+  return keys.length > 0 ? keys : null
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession]       = useState<Session | null>(null)
   const [profile, setProfile]       = useState<UserProfile | null>(BYPASS_AUTH ? BYPASS_PROFILE : null)
+  const [menuKeys, setMenuKeys]     = useState<string[] | null>(null)
   const [loading, setLoading]       = useState(!BYPASS_AUTH)
   const [recoveryMode, setRecovery] = useState(false)
 
@@ -95,12 +115,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const loadProfile = async (s: Session | null) => {
       if (!mounted) return
       setSession(s)
-      if (!s) { setProfile(null); return }
+      if (!s) { setProfile(null); setMenuKeys(null); return }
       try {
-        setProfile(await fetchProfile(s.user.id))
+        const p = await fetchProfile(s.user.id)
+        if (!mounted) return
+        setProfile(p)
+        setMenuKeys(await fetchMenuKeys(p))
       } catch {
         // Network/RLS hiccup — keep the session, don't hard-kick the user
         setProfile(null)
+        setMenuKeys(null)
       }
     }
 
@@ -141,6 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error('บัญชีของคุณถูกระงับการใช้งาน')
     }
     setProfile(p)
+    setMenuKeys(await fetchMenuKeys(p))
   }, [])
 
   const logout = useCallback(async () => {
@@ -162,7 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      session, profile, legacyUser, loading, recoveryMode, login, logout, exitRecovery,
+      session, profile, legacyUser, menuKeys, loading, recoveryMode, login, logout, exitRecovery,
       isAdmin:      BYPASS_AUTH || profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN',
       isManager:    BYPASS_AUTH || profile?.role === 'SUPER_ADMIN' || profile?.role === 'ADMIN' || profile?.role === 'MANAGER',
       isSuperAdmin: BYPASS_AUTH || profile?.role === 'SUPER_ADMIN',

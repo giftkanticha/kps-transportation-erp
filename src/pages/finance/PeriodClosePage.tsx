@@ -15,6 +15,7 @@ import {
   carryForwardRound,
   reopenPeriod,
   computeVehicleSnapshots,
+  roundsInPeriod,
 } from '../../lib/periodClose'
 import type {
   AccountingPeriod,
@@ -114,7 +115,7 @@ export function PeriodClosePage() {
                               if (!confirm(`ปลดล็อก ${formatPeriodLabel(p)} ตามคำขอของ ${req.requesterName}?`)) return
                               setBusy(true)
                               try {
-                                await reopenPeriod(p.id, profile?.id ?? null, req.reason)
+                                await reopenPeriod(p.id, profile?.id ?? null, req.reason, roundsInPeriod(dispatches, p).map(r => r.id))
                                 await updateUnlockReq.mutateAsync({
                                   id: req.id,
                                   patch: {
@@ -241,7 +242,7 @@ export function PeriodClosePage() {
             onSubmit={async (reason) => {
               try {
                 if (isAdmin) {
-                  await reopenPeriod(unlockTarget.id, profile?.id ?? null, reason)
+                  await reopenPeriod(unlockTarget.id, profile?.id ?? null, reason, roundsInPeriod(dispatches, unlockTarget).map(r => r.id))
                   setToast({ kind: 'ok', text: 'ปลดล็อกงวดเรียบร้อย' })
                 } else {
                   await insertUnlockReq.mutateAsync({
@@ -269,14 +270,7 @@ export function PeriodClosePage() {
 
   // ── Workspace: close a specific period ───────────────────────────────────
   const pending = pendingDecisionRounds(dispatches, activePeriod)
-  const allRoundsInPeriod = dispatches.filter(d => {
-    if (d.accountingPeriodId === activePeriod.id) return true
-    if (d.accountingPeriodId) return false
-    const basis = (d.depart || d.date || '').slice(0, 10)
-    if (!basis) return false
-    const dt = new Date(basis)
-    return dt.getFullYear() === activePeriod.year && dt.getMonth() + 1 === activePeriod.month
-  })
+  const allRoundsInPeriod = roundsInPeriod(dispatches, activePeriod)
   const nextPeriod = periods.find(p =>
     (activePeriod.month === 12)
       ? (p.year === activePeriod.year + 1 && p.month === 1)

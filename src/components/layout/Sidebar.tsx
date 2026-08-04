@@ -90,6 +90,7 @@ const MENU: MenuItem[] = [
     id: 'finance', label: 'การเงิน', icon: 'chart', roles: ['admin', 'manager'],
     sub: [
       { id: 'finance', label: 'P&L รายคัน', icon: 'chart' },
+      { id: 'finance.aging', label: 'ลูกหนี้/เจ้าหนี้ (AR/AP)', icon: 'money' },
       { id: 'finance.periodClose', label: 'ปิดงวดบัญชี', icon: 'check' },
     ],
   },
@@ -116,12 +117,14 @@ interface SidebarProps {
   active: string
   setActive: (id: string) => void
   user: User
+  /** Per-user menu restriction (top-level menu ids). null = unrestricted. */
+  allowedKeys?: string[] | null
   onLogout?: () => void
   /** Close the off-canvas drawer on mobile after navigating. No-op on desktop. */
   closeMobile?: () => void
 }
 
-export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLogout, closeMobile }: SidebarProps) {
+export function Sidebar({ collapsed, setCollapsed, active, setActive, user, allowedKeys, onLogout, closeMobile }: SidebarProps) {
   // Navigate + close the mobile drawer in one call.
   const go = (id: string) => {
     setActive(id)
@@ -188,8 +191,8 @@ export function Sidebar({ collapsed, setCollapsed, active, setActive, user, onLo
       </div>
 
       <nav className="nav">
-        {MENU.filter(m => canAccessRoute(m.id, user.role)).map(m => {
-          const visibleSub = m.sub?.filter(s => canAccessRoute(s.id, user.role)) ?? []
+        {MENU.filter(m => canAccessRoute(m.id, user.role, allowedKeys)).map(m => {
+          const visibleSub = m.sub?.filter(s => canAccessRoute(s.id, user.role, allowedKeys)) ?? []
           // A section with sub-items but none accessible to this role is hidden.
           if (m.sub && visibleSub.length === 0) return null
           const sec = sectionActive(m)

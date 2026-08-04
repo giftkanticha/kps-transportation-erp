@@ -276,9 +276,17 @@ export function CustomerBilling() {
     if (!customerId || selectedLegs.length === 0) { alert('เลือกลูกค้าและขาอย่างน้อย 1 รายการ'); return }
     if (insertNote.isPending) return
     const [y, m] = month.split('-').map(Number)
-    const seq = notes.filter(n => n.year === y && n.month === m).length + 1
+    // ใช้ max-seq + 1 (ไม่ใช่ length+1) — บิลถูกลบ/void แล้วออกใหม่ หรือกดพร้อมกัน
+    // 2 คน จะไม่ได้เลขซ้ำกับใบที่ยังอยู่ (แนวเดียวกับ db.nextRoundCode / genExpCode)
+    // BN กับ RC ใช้ pool เลขร่วมกันต่อเดือนตามพฤติกรรมเดิม
+    const maxSeq = notes
+      .filter(n => n.year === y && n.month === m)
+      .reduce((max, n) => {
+        const tail = parseInt((n.code ?? '').split('-').pop() ?? '', 10)
+        return Number.isNaN(tail) ? max : Math.max(max, tail)
+      }, 0)
     const prefix = docType === 'receipt' ? 'RC' : 'BN'
-    const code = `${prefix}-${y}-${String(m).padStart(2, '0')}-${String(seq).padStart(4, '0')}`
+    const code = `${prefix}-${y}-${String(m).padStart(2, '0')}-${String(maxSeq + 1).padStart(4, '0')}`
     try {
       const created = await insertNote.mutateAsync({
         code, docType,
