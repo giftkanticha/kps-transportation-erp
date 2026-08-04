@@ -39,8 +39,11 @@ export function FloatingFuel() {
   const deleteFuelTx  = useDelete('fuel_transactions')
   const deleteFuelRec = useDelete('fuel_records')
 
+  // รถกลุ่มโรงงาน (INTERNAL) ไม่ต้องผูกรอบตามกติกาเติมน้ำมัน — กันไว้อีกชั้นไม่ให้
+  // โผล่หน้านี้แม้จะมีข้อมูลเก่าที่ยังค้างสถานะ FLOATING อยู่ก็ตาม
   const floatingTxs = [...allFuelTxs]
     .filter(t => t.status === 'FLOATING')
+    .filter(t => vehicles.find(v => v.id === t.vehicleId)?.groupKind !== 'INTERNAL')
     .sort((a, b) => b.date.localeCompare(a.date))
 
   const openLinkModal = (tx: FuelTransaction) => {
