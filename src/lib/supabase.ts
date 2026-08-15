@@ -6,7 +6,9 @@ const key  = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || 'placeholder-
 // Real Supabase client is still constructed (so non-bypass code paths work
 // when env vars ARE provided). The DEV BYPASS in AuthContext short-circuits
 // before any Supabase call happens, so placeholder values are never hit.
-export const supabase = createClient(url, key)
+export const supabase = createClient(url, key, {
+  db: { schema: 'kps' }
+})
 
 export type UserRole   = 'SUPER_ADMIN' | 'ADMIN' | 'MANAGER' | 'EMPLOYEE'
 export type UserStatus = 'PENDING_APPROVAL' | 'ACTIVE' | 'INACTIVE' | 'LOCKED'
