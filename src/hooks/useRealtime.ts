@@ -7,7 +7,7 @@ export function useRealtimeTable(table: string) {
   useEffect(() => {
     const channel = supabase
       .channel(`realtime:${table}`)
-      .on('postgres_changes', { event: '*', schema: 'kps', table }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table }, () => {
         qc.invalidateQueries({ queryKey: [table] })
       })
       .subscribe()
