@@ -26,9 +26,24 @@ const inlineInput: React.CSSProperties = {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
+const normalizeKPSValue = (value: string): string => value.replace(/\s+/g, '').toLocaleLowerCase()
+
+const isKPSPartnerRecord = (partner: Partner): boolean => {
+  const name = normalizeKPSValue(partner.name)
+  const type = normalizeKPSValue(partner.type)
+
+  // The KPS warehouse's display name/code can be edited. Its business type is
+  // the primary identifier, with known names kept for legacy records.
+  return type === 'kps'
+    || type === 'คลังkps'
+    || name === 'kps'
+    || name === 'ร้านค้าkps'
+    || name === normalizeKPSValue(KPS_WAREHOUSE_NAME)
+}
+
 const isKPSPartner = (partnerId: string, partners: Partner[]): boolean => {
   const p = partners.find((x) => x.id === partnerId)
-  return !!p && p.name.replace(/\s+/g, '') === KPS_WAREHOUSE_NAME.replace(/\s+/g, '')
+  return !!p && isKPSPartnerRecord(p)
 }
 
 // Build stock movement patches for KPS warehouse expense lines.
@@ -1341,7 +1356,7 @@ function ExpStock() {
   const insertStock = useInsert<StockItem>('stock_items')
   const insertReceipt = useInsert<StockReceipt>('stock_receipts')
   const insertPartner = useInsert<Partner>('partners')
-  const partners = allPartners.filter((p) => p.name !== KPS_WAREHOUSE_NAME)
+  const partners = allPartners.filter((p) => !isKPSPartnerRecord(p))
 
   const total = stock.reduce((s, r) => s + r.qty * r.unitCost, 0)
   const low = stock.filter((s) => s.qty <= s.reorderAt)
@@ -2409,3 +2424,4 @@ function ExpVendors() {
     </div>
   )
 }
+
