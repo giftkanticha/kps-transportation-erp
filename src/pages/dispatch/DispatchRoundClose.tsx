@@ -263,15 +263,13 @@ function CloseForm({
   // หา odometer ของ tx จาก fuel_records ที่ตรงกัน (vehicleId + date + liters + total)
   // เลือกรายการที่สร้างล่าสุดในกรณีมีรายการซ้ำวันเดียวกัน
   const odoForTx = (t: FuelTransaction): number => {
-    const matching = allFuelRecs
-      .filter(r =>
-        r.vehicleId === t.vehicleId &&
-        r.date?.slice(0, 10) === t.date?.slice(0, 10) &&
-        Math.abs((r.liters || 0) - (t.liters || 0)) < 0.01 &&
-        Math.abs((r.total || 0) - (t.total || 0)) < 0.01,
-      )
-      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-    return matching[0]?.odometer ?? 0
+    const matching = allFuelRecs.find(r =>
+      r.vehicleId === t.vehicleId &&
+      r.date?.slice(0, 10) === t.date?.slice(0, 10) &&
+      Math.abs((r.liters || 0) - (t.liters || 0)) < 0.01 &&
+      Math.abs((r.total || 0) - (t.total || 0)) < 0.01,
+    )
+    return matching?.odometer ?? 0
   }
 
   // เลขไมล์ปลายของงานย้อนหลังต้องมาจาก "รายการเติมล่าสุดที่ผูกกับรอบนี้"
