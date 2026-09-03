@@ -41,8 +41,16 @@ export async function updateOne<T>(table: string, id: string, patch: Partial<T>)
 }
 
 export async function deleteOne(table: string, id: string): Promise<void> {
-  const { error } = await supabase.from(table).delete().eq('id', id)
+  // Return the deleted id so an RLS-filtered DELETE (0 affected rows, no
+  // PostgREST error) cannot be mistaken for a successful deletion.
+  const { data, error } = await supabase
+    .from(table)
+    .delete()
+    .eq('id', id)
+    .select('id')
+    .maybeSingle()
   if (error) throw toError(error)
+  if (!data) throw new Error('ลบข้อมูลไม่ได้: ไม่พบรายการหรือบัญชีนี้ไม่มีสิทธิ์ลบ')
 }
 
 export async function callRpc<T = unknown>(fn: string, args: Record<string, unknown>): Promise<T> {
