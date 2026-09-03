@@ -260,31 +260,35 @@ function CloseForm({
     setReturnAt(prev => `${d}T${prev.slice(11) || '00:00'}`)
   }
 
-  // หา odometer ของ tx จาก fuel_records ที่ตรงกัน (vehicleId + date + liters) แบบ
-  // best-effort — ใช้ทั้งแนะนำไมล์ปลายรอบ และโชว์ป้ายเลขไมล์ในวิดเจ็ตน้ำมันลอย
+  // หา odometer ของ tx จาก fuel_records ที่ตรงกัน (vehicleId + date + liters + total)
+  // เลือกรายการที่สร้างล่าสุดในกรณีมีรายการซ้ำวันเดียวกัน
   const odoForTx = (t: FuelTransaction): number => {
-    const rec = allFuelRecs.find(r =>
-      r.vehicleId === t.vehicleId &&
-      r.date?.slice(0, 10) === t.date?.slice(0, 10) &&
-      Math.abs((r.liters || 0) - (t.liters || 0)) < 0.01,
-    )
-    return rec?.odometer ?? 0
+    const matching = allFuelRecs
+      .filter(r =>
+        r.vehicleId === t.vehicleId &&
+        r.date?.slice(0, 10) === t.date?.slice(0, 10) &&
+        Math.abs((r.liters || 0) - (t.liters || 0)) < 0.01 &&
+        Math.abs((r.total || 0) - (t.total || 0)) < 0.01,
+      )
+      .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    return matching[0]?.odometer ?? 0
   }
 
-  // แนะนำไมล์ "ปลายรอบ" จากเลขไมล์ที่คีย์ไว้ตอนคีย์ด่วน = เลขไมล์ "สูงสุด" (การเติม
-  // ตอนจบทริป) และต้อง > ไมล์ต้นรอบเสมอ — กันไม่ให้ไปหยิบไมล์ต้นรอบ (เช่นน้ำมัน
-  // ต้นรอบที่วันใกล้วันเปิดรอบ) มาแนะนำผิด
+  // เลขไมล์ปลายของงานย้อนหลังต้องมาจาก "รายการเติมล่าสุดที่ผูกกับรอบนี้"
+  // เท่านั้น ไม่ fallback ไปหารายการสูงสุดของรถ เพราะอาจเป็นน้ำมันของรอบถัดไป
+  // TRIP_OPENING เป็นน้ำมันปิดของรอบก่อน จึงไม่ใช่ปลายรอบปัจจุบัน
   const suggestedMileage = useMemo<number | null>(() => {
     if (!round?.vehicleId) return null
     const start = round.startOdometer ?? 0
-    // (1) น้ำมันที่ผูกรอบนี้ — เลขไมล์สูงสุดที่ > ต้นรอบ
-    const linkedOdos = linkedFuelTxs.map(t => odoForTx(t)).filter(o => o > start)
-    if (linkedOdos.length > 0) return Math.max(...linkedOdos)
-    // (2) fallback — เลขไมล์สูงสุดของรถคันนี้ที่ > ต้นรอบ
-    const recOdos = allFuelRecs
-      .filter(r => r.vehicleId === round.vehicleId && (r.odometer ?? 0) > start)
-      .map(r => r.odometer as number)
-    return recOdos.length > 0 ? Math.max(...recOdos) : null
+    const latest = linkedFuelTxs
+      .filter(t => t.tripFuelRole !== 'TRIP_OPENING')
+      .map(t => ({ tx: t, odometer: odoForTx(t) }))
+      .filter(x => x.odometer > start)
+      .sort((a, b) =>
+        (b.tx.date || '').localeCompare(a.tx.date || '') ||
+        (b.tx.createdAt || '').localeCompare(a.tx.createdAt || ''),
+      )[0]
+    return latest?.odometer ?? null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkedFuelTxs, allFuelRecs, round?.vehicleId, round?.startOdometer])
 
@@ -394,20 +398,16 @@ function CloseForm({
     }
   }, [round])
 
-  // เติมช่อง "เลขไมล์ปลายรอบ" อัตโนมัติจากที่แนะนำ (ครั้งเดียวต่อรอบ) เมื่อรอบยังไม่มี
-  // ไมล์ปลายที่บันทึกไว้ และผู้ใช้ยังไม่ได้พิมพ์เอง. แยกจาก init effect เพราะ
-  // suggestedMileage มาช้ากว่า (fuel_records โหลด async หลังตัวรอบ). ref กันเขียนทับ
-  // หลังผู้ใช้แก้/ล้างค่า และตอน background refetch
+  // เมื่อข้อมูลน้ำมันที่ผูกโหลดเสร็จ ให้แก้ค่าที่ค้างในร่างด้วยเลขไมล์จาก
+  // รายการล่าสุดหนึ่งครั้งต่อ (รอบ + ค่าแนะนำ). ผู้ใช้ยังแก้เองได้หลังจากนั้น
+  // และถ้าผูก/ปลดน้ำมันจนค่าแนะนำเปลี่ยน ระบบจะ sync ใหม่
   useEffect(() => {
-    if (!round) return
-    if (mileageAutoFilledRef.current === round.id) return
-    if (round.endOdometer != null) { mileageAutoFilledRef.current = round.id; return }
-    if (endMileage !== '') return
-    if (suggestedMileage == null) return
-    mileageAutoFilledRef.current = round.id
+    if (!round || round.roundStatus !== 'draft' || suggestedMileage == null) return
+    const syncKey = `${round.id}|${suggestedMileage}`
+    if (mileageAutoFilledRef.current === syncKey) return
+    mileageAutoFilledRef.current = syncKey
     setEndMileage(String(suggestedMileage))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [round?.id, round?.endOdometer, endMileage, suggestedMileage])
+  }, [round?.id, round?.roundStatus, suggestedMileage])
 
   if (!round) {
     return (
@@ -567,7 +567,13 @@ function CloseForm({
           }
         }
       }
-      const em = endMileage ? Number(endMileage) : null
+      const enteredEndMileage = endMileage ? Number(endMileage) : null
+      // ถ้ากรอกน้ำมันปิดรอบใหม่ในฟอร์ม รายการนั้นยังไม่ถูกสร้าง จึงใช้ไมล์ที่กรอก
+      // นอกนั้นบังคับใช้ไมล์จากน้ำมันล่าสุดที่ผูกไว้ เพื่อกันบันทึกค่าค้าง/รอบถัดไป
+      const hasNewManualClosingFill = closingL > 0 && !hasExternalClosing && !ownClosingTx
+      const em = hasNewManualClosingFill
+        ? enteredEndMileage
+        : (suggestedMileage ?? enteredEndMileage)
       const dist = em != null && round.startOdometer != null ? Math.max(0, em - round.startOdometer) : null
 
       let finalLiters: number | null = round.liters
