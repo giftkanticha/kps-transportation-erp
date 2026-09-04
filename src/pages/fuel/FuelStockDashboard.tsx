@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react'
 import { db, uid, DEFAULT_TANK_CAPACITY } from '../../lib/db'
+import { callRpc } from '../../lib/crud'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
@@ -90,6 +91,7 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
   const canRecordExpense = total > 0  // need a price to book AP
 
   const save = async () => {
+    if (saving) return
     if (!form.liters || Number(form.liters) <= 0) return setErr('กรุณาระบุจำนวนลิตร (> 0)')
     if (!form.supplierId)                          return setErr('กรุณาเลือกผู้จำหน่าย')
     if (isNewSupplier && !form.newSupplierName.trim())
@@ -97,6 +99,8 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
     if (form.date > todayISO)                       return setErr('วันที่เกิดเหตุไม่สามารถเป็นอนาคตได้')
 
     setSaving(true)
+    let createdExpenseHeaderId: string | null = null
+    let stockSaved = false
     try {
       // 1) Resolve partner — create a new one inline if requested.
       let partnerId = form.supplierId
@@ -115,7 +119,6 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
       }
 
       // 2) Optionally book the purchase as an AP expense, linked back to fuel_stock.
-      let expenseHeaderId: string | null = null
       if (form.recordExpense && canRecordExpense) {
         const header = await insertExpenseHdr.mutateAsync({
           code: genExpCode(expenseHeaders),
@@ -136,7 +139,7 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
           unitPrice: Number(form.pricePerL),
           amount: total,
         })
-        expenseHeaderId = header.id
+        createdExpenseHeaderId = header.id
       }
 
       // 3) Write the fuel_stock entry, linked to the expense if one was created.
@@ -149,10 +152,22 @@ function AddStockModal({ onClose, onSaved }: AddModalProps) {
         pricePerL: Number(form.pricePerL) || 0,
         invoiceNo: form.invoiceNo,
         total,
-        expenseHeaderId,
+        expenseHeaderId: createdExpenseHeaderId,
       })
+      stockSaved = true
       onSaved()
     } catch (e) {
+      // If fuel_stock fails after its expense was created, remove the orphan
+      // so retrying the same stock receipt cannot duplicate the expense.
+      if (createdExpenseHeaderId && !stockSaved) {
+        try {
+          await callRpc<boolean>('delete_expense_with_stock', {
+            p_header_id: createdExpenseHeaderId,
+          })
+        } catch {
+          // Preserve the original save error for the user.
+        }
+      }
       setErr('บันทึกไม่สำเร็จ: ' + (e as Error).message)
     } finally {
       setSaving(false)
@@ -822,7 +837,7 @@ export function FuelStockDashboard() {
           <div className="page-sub">ยอดคงเหลือ · ประวัติรับเข้า-จ่ายออก</div>
         </div>
         <div className="actions">
-          {canAdd && (
+          {canAdd && isAdmin && (
             <button className="btn primary" onClick={() => setShowAddModal(true)}>
               <Icon name="plus" size={15} /> เพิ่มน้ำมันเข้าคลัง
             </button>
@@ -1075,7 +1090,7 @@ export function FuelStockDashboard() {
         )}
       </div>
 
-      {showAddModal && <AddStockModal onClose={() => setShowAddModal(false)} onSaved={() => setShowAddModal(false)} />}
+      {showAddModal && isAdmin && <AddStockModal onClose={() => setShowAddModal(false)} onSaved={() => setShowAddModal(false)} />}
       {editingStock && <EditStockModal stock={editingStock} onClose={() => setEditingStock(null)} onSaved={() => setEditingStock(null)} />}
       {historyType && (
         <StockHistoryModal
@@ -1092,3 +1107,4 @@ export function FuelStockDashboard() {
     </div>
   )
 }
+
