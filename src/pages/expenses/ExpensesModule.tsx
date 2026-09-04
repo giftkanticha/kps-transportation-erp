@@ -1,9 +1,12 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
-import { db } from '../../lib/db'
+import { useQueryClient } from '@tanstack/react-query'
+import { db, uid } from '../../lib/db'
+import { callRpc } from '../../lib/crud'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
+import { useAuth } from '../../context/AuthContext'
 import { Icon, Field, Info, SearchInput, FontScaleControl } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
-import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
+import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt, EditApprovalRequest } from '../../types'
 
 interface ExpensesModuleProps {
   tab: string
@@ -494,6 +497,8 @@ function ExpenseFormBody({
 }
 
 function ExpRecord() {
+  const { isAdmin, profile, legacyUser } = useAuth()
+  const qc = useQueryClient()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: partners = [] } = useList<Partner>('partners')
   const { data: stocks = [] } = useList<StockItem>('stock_items')
@@ -501,6 +506,8 @@ function ExpRecord() {
   const insertHeader = useInsert<ExpenseHeader>('expense_headers')
   const insertLine = useInsert<ExpenseLine>('expense_lines')
   const updateStock = useUpdate<StockItem>('stock_items')
+  const { data: editApprovals = [] } = useList<EditApprovalRequest>('edit_approvals')
+  const insertApproval = useInsert<EditApprovalRequest>('edit_approvals')
 
   const recent = useMemo(() => allHeaders.slice(0, 8), [allHeaders])
 
@@ -508,8 +515,11 @@ function ExpRecord() {
   const [lines, setLines] = useState<LineItem[]>([emptyLine()])
   const [editing, setEditing] = useState<ExpenseHeader | null>(null)
   const [docCode] = useState(() => genExpCode(allHeaders))
+  const [saving, setSaving] = useState(false)
+  const [actingId, setActingId] = useState<string | null>(null)
 
   const handleSave = async () => {
+    if (saving) return
     if (!hdr.vehicleId || !hdr.partnerId) {
       alert('กรุณาเลือกรถและช่าง/ร้านค้า')
       return
@@ -518,6 +528,7 @@ function ExpRecord() {
       alert('กรุณาเพิ่มรายการอย่างน้อย 1 รายการ')
       return
     }
+    setSaving(true)
     try {
       const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
       const h = await insertHeader.mutateAsync({
@@ -552,6 +563,86 @@ function ExpRecord() {
       setLines([emptyLine()])
     } catch (e) {
       alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const deleteOrRequest = async (h: ExpenseHeader) => {
+    if (actingId) return
+    if (isAdmin) {
+      if (!confirm(`ลบรายการ ${toBeCode(h.code)} จำนวน ${db.fmt(h.total)} บาท?\nการลบจะคืนสต๊อกคลัง KPS ที่ผูกกับรายการนี้ให้ด้วย`)) return
+      setActingId(h.id)
+      try {
+        const deleted = await callRpc<boolean>('delete_expense_with_stock', { p_header_id: h.id })
+        if (!deleted) throw new Error('ไม่พบรายการหรือรายการถูกลบไปแล้ว')
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: ['expense_headers'] }),
+          qc.invalidateQueries({ queryKey: ['expense_lines'] }),
+          qc.invalidateQueries({ queryKey: ['stock_items'] }),
+          qc.invalidateQueries({ queryKey: ['fuel_stock'] }),
+        ])
+        alert('ลบรายการเรียบร้อย')
+      } catch (e) {
+        alert('ลบไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+      } finally {
+        setActingId(null)
+      }
+      return
+    }
+
+    if (!legacyUser || !profile) {
+      alert('ไม่พบข้อมูลผู้ใช้งาน กรุณาออกจากระบบแล้วเข้าสู่ระบบใหม่')
+      return
+    }
+    const alreadyPending = editApprovals.some((r) => {
+      const changes = r.changes as Record<string, unknown>
+      return r.status === 'pending'
+        && changes?._kind === 'expense_delete'
+        && changes.expenseHeaderId === h.id
+    })
+    if (alreadyPending) {
+      alert('รายการนี้มีคำขอลบรออนุมัติอยู่แล้ว')
+      return
+    }
+    const reason = prompt(`เหตุผลที่ต้องการลบ ${toBeCode(h.code)}:`, '')?.trim()
+    if (!reason) return
+    setActingId(h.id)
+    try {
+      const plate = vehicles.find((v) => v.id === h.vehicleId)?.plate ?? 'ส่วนกลาง'
+      await insertApproval.mutateAsync({
+        id: uid('ear'),
+        requesterId: profile.id,
+        requesterName: profile.display_name || legacyUser.name,
+        requesterRole: legacyUser.role,
+        vehicleId: h.vehicleId,
+        vehiclePlate: plate,
+        reason,
+        changes: {
+          _kind: 'expense_delete',
+          expenseHeaderId: h.id,
+          expenseCode: h.code,
+          total: h.total,
+          partnerName: partners.find((p) => p.id === h.partnerId)?.name ?? '',
+        } as unknown as EditApprovalRequest['changes'],
+        changeFields: [{
+          key: 'delete',
+          label: 'ลบรายการค่าใช้จ่าย',
+          before: `${toBeCode(h.code)} · ${db.fmt(h.total)} บาท`,
+          after: 'ลบรายการ',
+        }],
+        requestedAt: new Date().toISOString(),
+        status: 'pending',
+        reviewerId: null,
+        reviewerName: null,
+        reviewedAt: null,
+        reviewNote: '',
+      })
+      alert('ส่งคำขอลบให้ผู้ดูแลระบบแล้ว')
+    } catch (e) {
+      alert('ส่งคำขอไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setActingId(null)
     }
   }
 
@@ -577,8 +668,8 @@ function ExpRecord() {
         <button className="btn" onClick={handleReset}>
           <Icon name="close" size={14} /> รีเซ็ต
         </button>
-        <button className="btn primary" onClick={handleSave}>
-          บันทึก
+        <button className="btn primary" onClick={handleSave} disabled={saving}>
+          {saving ? 'กำลังบันทึก…' : 'บันทึก'}
         </button>
       </div>
 
@@ -624,9 +715,20 @@ function ExpRecord() {
                     {h.note}
                   </td>
                   <td>
-                    <button className="btn ghost icon sm" onClick={() => setEditing(h)} title="แก้ไข">
-                      <Icon name="edit" size={14} />
-                    </button>
+                    <div className="row" style={{ gap: 4, flexWrap: 'nowrap' }}>
+                      <button className="btn ghost icon sm" onClick={() => setEditing(h)} title="แก้ไข">
+                        <Icon name="edit" size={14} />
+                      </button>
+                      <button
+                        className={`btn sm ${isAdmin ? 'danger' : 'outline'}`}
+                        onClick={() => void deleteOrRequest(h)}
+                        disabled={actingId === h.id}
+                        title={isAdmin ? 'ลบรายการ' : 'แจ้งขอลบรายการ'}
+                      >
+                        <Icon name={isAdmin ? 'trash' : 'alert'} size={13} />
+                        {actingId === h.id ? 'กำลังดำเนินการ…' : isAdmin ? 'ลบ' : 'แจ้งลบ'}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -695,6 +797,7 @@ function ExpenseEditModal({
   // Existing lines load asynchronously via useList — initialise the editable
   // rows once the query has resolved (otherwise they'd capture an empty list).
   const [lines, setLines] = useState<LineItem[]>([])
+  const [saving, setSaving] = useState(false)
   const linesInited = useRef(false)
   useEffect(() => {
     if (linesInited.current || isLoading) return
@@ -712,10 +815,12 @@ function ExpenseEditModal({
   }, [isLoading, oldLines])
 
   const handleSave = async () => {
+    if (saving) return
     if (!hdr.vehicleId || !hdr.partnerId) {
       alert('กรุณาเลือกรถและช่าง/ร้านค้า')
       return
     }
+    setSaving(true)
     try {
       const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
 
@@ -767,6 +872,8 @@ function ExpenseEditModal({
       onClose()
     } catch (e) {
       alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -810,8 +917,8 @@ function ExpenseEditModal({
           <button className="btn" onClick={onClose}>
             ยกเลิก
           </button>
-          <button className="btn primary" onClick={handleSave}>
-            <Icon name="check" size={14} /> บันทึกการแก้ไข
+          <button className="btn primary" onClick={handleSave} disabled={saving}>
+            <Icon name="check" size={14} /> {saving ? 'กำลังบันทึก…' : 'บันทึกการแก้ไข'}
           </button>
         </div>
       </div>
@@ -2424,4 +2531,5 @@ function ExpVendors() {
     </div>
   )
 }
+
 
