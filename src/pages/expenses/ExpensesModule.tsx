@@ -1,12 +1,11 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { db, uid } from '../../lib/db'
+import { db } from '../../lib/db'
 import { callRpc } from '../../lib/crud'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
-import { useAuth } from '../../context/AuthContext'
 import { Icon, Field, Info, SearchInput, FontScaleControl } from '../../components/ui'
 import { usePrint } from '../../hooks/usePrint'
-import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt, EditApprovalRequest } from '../../types'
+import type { ExpenseHeader, ExpenseLine, Partner, Vehicle, StockItem, StockReceipt } from '../../types'
 
 interface ExpensesModuleProps {
   tab: string
@@ -497,7 +496,6 @@ function ExpenseFormBody({
 }
 
 function ExpRecord() {
-  const { isAdmin, profile, legacyUser } = useAuth()
   const qc = useQueryClient()
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
   const { data: partners = [] } = useList<Partner>('partners')
@@ -506,8 +504,6 @@ function ExpRecord() {
   const insertHeader = useInsert<ExpenseHeader>('expense_headers')
   const insertLine = useInsert<ExpenseLine>('expense_lines')
   const updateStock = useUpdate<StockItem>('stock_items')
-  const { data: editApprovals = [] } = useList<EditApprovalRequest>('edit_approvals')
-  const insertApproval = useInsert<EditApprovalRequest>('edit_approvals')
 
   const recent = useMemo(() => allHeaders.slice(0, 8), [allHeaders])
 
@@ -570,77 +566,20 @@ function ExpRecord() {
 
   const deleteOrRequest = async (h: ExpenseHeader) => {
     if (actingId) return
-    if (isAdmin) {
-      if (!confirm(`ลบรายการ ${toBeCode(h.code)} จำนวน ${db.fmt(h.total)} บาท?\nการลบจะคืนสต๊อกคลัง KPS ที่ผูกกับรายการนี้ให้ด้วย`)) return
-      setActingId(h.id)
-      try {
-        const deleted = await callRpc<boolean>('delete_expense_with_stock', { p_header_id: h.id })
-        if (!deleted) throw new Error('ไม่พบรายการหรือรายการถูกลบไปแล้ว')
-        await Promise.all([
-          qc.invalidateQueries({ queryKey: ['expense_headers'] }),
-          qc.invalidateQueries({ queryKey: ['expense_lines'] }),
-          qc.invalidateQueries({ queryKey: ['stock_items'] }),
-          qc.invalidateQueries({ queryKey: ['fuel_stock'] }),
-        ])
-        alert('ลบรายการเรียบร้อย')
-      } catch (e) {
-        alert('ลบไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
-      } finally {
-        setActingId(null)
-      }
-      return
-    }
-
-    if (!legacyUser || !profile) {
-      alert('ไม่พบข้อมูลผู้ใช้งาน กรุณาออกจากระบบแล้วเข้าสู่ระบบใหม่')
-      return
-    }
-    const alreadyPending = editApprovals.some((r) => {
-      const changes = r.changes as Record<string, unknown>
-      return r.status === 'pending'
-        && changes?._kind === 'expense_delete'
-        && changes.expenseHeaderId === h.id
-    })
-    if (alreadyPending) {
-      alert('รายการนี้มีคำขอลบรออนุมัติอยู่แล้ว')
-      return
-    }
-    const reason = prompt(`เหตุผลที่ต้องการลบ ${toBeCode(h.code)}:`, '')?.trim()
-    if (!reason) return
+    if (!confirm(`ลบรายการ ${toBeCode(h.code)} จำนวน ${db.fmt(h.total)} บาท?\nการลบจะคืนสต๊อกคลัง KPS ที่ผูกกับรายการนี้ให้ด้วย`)) return
     setActingId(h.id)
     try {
-      const plate = vehicles.find((v) => v.id === h.vehicleId)?.plate ?? 'ส่วนกลาง'
-      await insertApproval.mutateAsync({
-        id: uid('ear'),
-        requesterId: profile.id,
-        requesterName: profile.display_name || legacyUser.name,
-        requesterRole: legacyUser.role,
-        vehicleId: h.vehicleId,
-        vehiclePlate: plate,
-        reason,
-        changes: {
-          _kind: 'expense_delete',
-          expenseHeaderId: h.id,
-          expenseCode: h.code,
-          total: h.total,
-          partnerName: partners.find((p) => p.id === h.partnerId)?.name ?? '',
-        } as unknown as EditApprovalRequest['changes'],
-        changeFields: [{
-          key: 'delete',
-          label: 'ลบรายการค่าใช้จ่าย',
-          before: `${toBeCode(h.code)} · ${db.fmt(h.total)} บาท`,
-          after: 'ลบรายการ',
-        }],
-        requestedAt: new Date().toISOString(),
-        status: 'pending',
-        reviewerId: null,
-        reviewerName: null,
-        reviewedAt: null,
-        reviewNote: '',
-      })
-      alert('ส่งคำขอลบให้ผู้ดูแลระบบแล้ว')
+      const deleted = await callRpc<boolean>('delete_expense_with_stock', { p_header_id: h.id })
+      if (!deleted) throw new Error('ไม่พบรายการหรือรายการถูกลบไปแล้ว')
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['expense_headers'] }),
+        qc.invalidateQueries({ queryKey: ['expense_lines'] }),
+        qc.invalidateQueries({ queryKey: ['stock_items'] }),
+        qc.invalidateQueries({ queryKey: ['fuel_stock'] }),
+      ])
+      alert('ลบรายการเรียบร้อย')
     } catch (e) {
-      alert('ส่งคำขอไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+      alert('ลบไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
     } finally {
       setActingId(null)
     }
@@ -720,13 +659,13 @@ function ExpRecord() {
                         <Icon name="edit" size={14} />
                       </button>
                       <button
-                        className={`btn sm ${isAdmin ? 'danger' : 'outline'}`}
+                        className="btn sm danger"
                         onClick={() => void deleteOrRequest(h)}
                         disabled={actingId === h.id}
-                        title={isAdmin ? 'ลบรายการ' : 'แจ้งขอลบรายการ'}
+                        title="ลบรายการ"
                       >
-                        <Icon name={isAdmin ? 'trash' : 'alert'} size={13} />
-                        {actingId === h.id ? 'กำลังดำเนินการ…' : isAdmin ? 'ลบ' : 'แจ้งลบ'}
+                        <Icon name="trash" size={13} />
+                        {actingId === h.id ? 'กำลังลบ…' : 'ลบ'}
                       </button>
                     </div>
                   </td>
