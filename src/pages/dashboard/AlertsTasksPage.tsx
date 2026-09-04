@@ -537,7 +537,9 @@ function PendingApprovalsSection({ user, requests, onReview }: PendingApprovalsS
           {requests.map(req => {
             const changesRec = req.changes as Record<string, unknown>
             const isDispatchReopen = changesRec?._kind === 'dispatch_reopen'
+            const isExpenseDelete = changesRec?._kind === 'expense_delete'
             const roundCode = isDispatchReopen ? String(changesRec.roundCode ?? '') : ''
+            const expenseCode = isExpenseDelete ? String(changesRec.expenseCode ?? '') : ''
             return (
             <div
               key={req.id}
@@ -559,6 +561,11 @@ function PendingApprovalsSection({ user, requests, onReview }: PendingApprovalsS
                         <span className="muted"> ขอเปิดรอบ </span>
                         <span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{roundCode}</span>
                         <span className="muted"> เพื่อแก้ไข</span>
+                      </>
+                    ) : isExpenseDelete ? (
+                      <>
+                        <span className="muted"> ขอให้ลบค่าใช้จ่าย </span>
+                        <span className="mono" style={{ color: 'var(--red)', fontWeight: 600 }}>{expenseCode}</span>
                       </>
                     ) : (
                       <>
@@ -649,6 +656,7 @@ interface AlertsTasksPageProps {
 }
 
 export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
+  const qc = useQueryClient()
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
 
@@ -665,6 +673,10 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
     if (!can.reviewApprovals(user.role)) return []
     return [...editApprovals]
       .filter(r => r.status === 'pending')
+      .filter(r => {
+        const changes = r.changes as Record<string, unknown>
+        return changes?._kind !== 'expense_delete' || user.role === 'admin'
+      })
       .sort((a, b) => b.requestedAt.localeCompare(a.requestedAt))
   }, [editApprovals, user.role])
 
@@ -679,7 +691,19 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
         // target a Dispatch row instead of a Vehicle. We tag the intent in
         // req.changes._kind when inserting from DispatchSummaryReport.
         const changesAsRecord = req.changes as Record<string, unknown>
-        if (changesAsRecord?._kind === 'dispatch_reopen' && typeof changesAsRecord.roundId === 'string') {
+        if (changesAsRecord?._kind === 'expense_delete' && typeof changesAsRecord.expenseHeaderId === 'string') {
+          if (user.role !== 'admin') throw new Error('เฉพาะผู้ดูแลระบบเท่านั้นที่อนุมัติการลบค่าใช้จ่ายได้')
+          const deleted = await callRpc<boolean>('delete_expense_with_stock', {
+            p_header_id: changesAsRecord.expenseHeaderId,
+          })
+          if (!deleted) throw new Error('ไม่พบรายการค่าใช้จ่ายหรือรายการถูกลบไปแล้ว')
+          await Promise.all([
+            qc.invalidateQueries({ queryKey: ['expense_headers'] }),
+            qc.invalidateQueries({ queryKey: ['expense_lines'] }),
+            qc.invalidateQueries({ queryKey: ['stock_items'] }),
+            qc.invalidateQueries({ queryKey: ['fuel_stock'] }),
+          ])
+        } else if (changesAsRecord?._kind === 'dispatch_reopen' && typeof changesAsRecord.roundId === 'string') {
           // งวดปิดแล้ว → รอบ locked: อนุมัติเปิดแก้ไม่ได้ จะทำให้ snapshot P&L เพี้ยน
           // ต้องปลดล็อกงวดก่อน (การเงิน › ปิดงวดบัญชี) แล้วค่อยอนุมัติ
           const target = dispatches.find(d => d.id === changesAsRecord.roundId)
@@ -815,3 +839,4 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
     </div>
   )
 }
+
