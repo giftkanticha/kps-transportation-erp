@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { db, uid } from '../../lib/db'
+import { callRpc } from '../../lib/crud'
 import { useList, useInsert } from '../../hooks/useTable'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
@@ -53,6 +55,7 @@ type FuelVal = { liters: number; amount: number }
 // ─── Tab 2: บันทึก ─── (Fuel record form)
 function FuelRecord() {
   const { isManager } = useAuth()
+  const queryClient = useQueryClient()
   const [form, setForm] = useState({
     vehicleId: '',
     driverId: '',
@@ -68,6 +71,58 @@ function FuelRecord() {
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: fuel = [] } = useList<FuelRecord>('fuel_records')
   const insertFuel = useInsert<FuelRecord>('fuel_records')
+  const [editing, setEditing] = useState<FuelRecord | null>(null)
+  const [editForm, setEditForm] = useState({ liters: '', pricePerL: '', odometer: '' })
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  const openEdit = (record: FuelRecord) => {
+    setEditing(record)
+    setEditForm({
+      liters: String(record.liters ?? ''),
+      pricePerL: String(record.pricePerL ?? ''),
+      odometer: String(record.odometer ?? 0),
+    })
+  }
+
+  const saveFuelEdit = async () => {
+    if (!editing || savingEdit) return
+    const liters = Number(editForm.liters)
+    const pricePerL = Number(editForm.pricePerL)
+    const odometer = Number(editForm.odometer || 0)
+    if (!Number.isFinite(liters) || liters <= 0) {
+      alert('กรุณาระบุจำนวนลิตรให้มากกว่า 0')
+      return
+    }
+    if (!Number.isFinite(pricePerL) || pricePerL < 0) {
+      alert('กรุณาระบุราคาต่อลิตรให้ถูกต้อง')
+      return
+    }
+    if (!Number.isFinite(odometer) || odometer < 0) {
+      alert('กรุณาระบุเลขไมล์ให้ถูกต้อง')
+      return
+    }
+
+    setSavingEdit(true)
+    try {
+      await callRpc('update_fuel_record_amount', {
+        p_fuel_record_id: editing.id,
+        p_liters: liters,
+        p_price_per_l: pricePerL,
+        p_odometer: odometer,
+      })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['fuel_records'] }),
+        queryClient.invalidateQueries({ queryKey: ['fuel_transactions'] }),
+        queryClient.invalidateQueries({ queryKey: ['fuel_stock'] }),
+      ])
+      setEditing(null)
+      alert('บันทึกการแก้ไขเรียบร้อย สต็อกและต้นทุนน้ำมันปรับตามแล้ว')
+    } catch (e) {
+      alert('แก้ไขไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSavingEdit(false)
+    }
+  }
 
   const save = async () => {
     if (!form.vehicleId || !form.driverId || !form.liters) {
@@ -248,6 +303,7 @@ function FuelRecord() {
                 {isManager && <th className="right">จำนวนเงิน</th>}
                 <th>คนขับ</th>
                 <th>แหล่งน้ำมัน</th>
+                {isManager && <th style={{ textAlign: 'center' }}>ดำเนินการ</th>}
               </tr>
             </thead>
             <tbody>
@@ -273,12 +329,76 @@ function FuelRecord() {
                       <span className="badge blue">ถังโรงงาน</span>
                     )}
                   </td>
+                  {isManager && (
+                    <td style={{ textAlign: 'center' }}>
+                      <button className="btn ghost icon sm" onClick={() => openEdit(f)} title="แก้ไขรายการน้ำมัน">
+                        <Icon name="edit" size={14} />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      {editing && (
+        <div className="modal-bg" onClick={() => !savingEdit && setEditing(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 500 }}>
+            <div className="head">
+              <h3>✏️ แก้ไขรายการน้ำมัน {editing.code}</h3>
+            </div>
+            <div style={{ padding: 20 }}>
+              <div className="faint" style={{ marginBottom: 14, fontSize: 12.5 }}>
+                {db.thaiDate(editing.date.slice(0, 10))} · {vehicles.find(v => v.id === editing.vehicleId)?.plate ?? '—'} · {editing.station}
+              </div>
+              <div className="grid-2" style={{ gap: 14 }}>
+                <Field label="ปริมาณ (ลิตร) *">
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={editForm.liters}
+                    onChange={(e) => setEditForm(f => ({ ...f, liters: e.target.value }))}
+                    autoFocus
+                  />
+                </Field>
+                <Field label="ราคา/ลิตร (บาท) *">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={editForm.pricePerL}
+                    onChange={(e) => setEditForm(f => ({ ...f, pricePerL: e.target.value }))}
+                  />
+                </Field>
+              </div>
+              <Field label="เลขไมล์">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={editForm.odometer}
+                  onChange={(e) => setEditForm(f => ({ ...f, odometer: e.target.value }))}
+                />
+              </Field>
+              <div style={{ marginTop: 14, padding: '12px 14px', borderRadius: 8, background: 'var(--primary-50)' }}>
+                ยอดใหม่: <strong className="mono">{db.fmt((Number(editForm.liters) || 0) * (Number(editForm.pricePerL) || 0))} บาท</strong>
+                <div className="faint" style={{ fontSize: 11.5, marginTop: 3 }}>
+                  ระบบจะปรับรายการเติมน้ำมัน สต็อก และต้นทุนที่ผูกรอบไว้พร้อมกัน
+                </div>
+              </div>
+              <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+                <button className="btn" onClick={() => setEditing(null)} disabled={savingEdit}>ยกเลิก</button>
+                <button className="btn primary" onClick={() => void saveFuelEdit()} disabled={savingEdit}>
+                  <Icon name="check" size={14} /> {savingEdit ? 'กำลังบันทึก…' : 'บันทึกการแก้ไข'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -692,3 +812,4 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
     </div>
   )
 }
+
