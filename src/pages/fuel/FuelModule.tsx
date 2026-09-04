@@ -53,7 +53,7 @@ const isFactoryFuel = (f: FuelRecord) => f.station === 'ถังโรงงา
 type FuelVal = { liters: number; amount: number }
 
 // ─── Tab 2: บันทึก ─── (Fuel record form)
-function FuelRecord() {
+function FuelRecord({ historyOnly = false }: { historyOnly?: boolean }) {
   const { isManager } = useAuth()
   const queryClient = useQueryClient()
   const [form, setForm] = useState({
@@ -155,7 +155,7 @@ function FuelRecord() {
 
   return (
     <div>
-      <div className="card" style={{ marginBottom: 18 }}>
+      {!historyOnly && <div className="card" style={{ marginBottom: 18 }}>
         <div className="head">
           <h3>บันทึกการเติมน้ำมันรถ</h3>
         </div>
@@ -287,7 +287,7 @@ function FuelRecord() {
             </button>
           </div>
         </div>
-      </div>
+      </div>}
 
       <div className="card">
         <div className="head">
@@ -766,6 +766,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
     tab === 'report' ? 'report' :
     tab === 'summary' ? 'summary' :
     tab === 'express' ? 'express' :
+    tab === 'history' ? 'history' :
     tab === 'floating' ? 'floating' :
     tab === 'reconcile' ? 'reconcile' :
     tab === 'prices' ? 'prices' :
@@ -784,6 +785,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
           [
             ['overview', 'fuel', 'ภาพรวม', 'gauge'],
             ['express', 'express', 'คีย์ด่วน', 'bolt'],
+            ['history', 'history', 'ประวัติ/แก้ไข', 'edit'],
             ['floating', 'floating', 'น้ำมันลอย', 'alert'],
             ['prices', 'prices', 'ราคารายวัน', 'money'],
             ['report', 'report', 'รายงาน', 'chart'],
@@ -804,6 +806,7 @@ export function FuelModule({ tab, setActive }: { tab: string; setActive: (id: st
 
       {current === 'overview' && <FuelStockDashboard />}
       {current === 'express' && <ExpressFuelLog setActive={setActive} />}
+      {current === 'history' && <FuelRecord historyOnly />}
       {current === 'floating' && <FloatingFuel />}
       {current === 'report' && <FuelReportV2 />}
       {current === 'summary' && <FuelInventorySummary />}
