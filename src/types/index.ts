@@ -453,6 +453,7 @@ export interface StockReceipt {
   qty: number
   unitPrice: number
   total: number
+  expenseHeaderId?: string | null
 }
 
 export interface StockItem {
@@ -618,3 +619,4 @@ export interface AppState {
   vehicleRegistrations: Record<string, unknown>[]
   requestApprovals: Record<string, unknown>[]
 }
+
