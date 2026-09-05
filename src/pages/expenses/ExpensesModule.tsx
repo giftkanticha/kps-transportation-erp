@@ -1393,14 +1393,13 @@ function ReorderCell({ item, onSaved }: { item: StockItem; onSaved: () => void }
 }
 
 function ExpStock() {
+  const qc = useQueryClient()
   const { data: stock = [] } = useList<StockItem>('stock_items')
   const { data: receipts = [] } = useList<StockReceipt>('stock_receipts')
   const { data: allPartners = [] } = useList<Partner>('partners')
   const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: allExpLines = [] } = useList<ExpenseLine>('expense_lines')
-  const updateStock = useUpdate<StockItem>('stock_items')
   const insertStock = useInsert<StockItem>('stock_items')
-  const insertReceipt = useInsert<StockReceipt>('stock_receipts')
   const insertPartner = useInsert<Partner>('partners')
   const partners = allPartners.filter((p) => !isKPSPartnerRecord(p))
 
@@ -1438,6 +1437,8 @@ function ExpStock() {
     newCategory: 'อะไหล่',
     newPartnerName: '',
     newPartnerType: PARTNER_TYPES[0],
+    paid: 'unpaid',
+    dueDate: today,
   }
   const [form, setForm] = useState(emptyReceive)
   const set = <K extends keyof typeof form>(k: K, v: string) => setForm((f) => ({ ...f, [k]: v }))
@@ -1479,53 +1480,39 @@ function ExpStock() {
         partnerId = createdPartner.id
       }
 
-      // New stock item: create it first, then receive into it.
+      // New stock item: create an empty master first. The atomic receive RPC
+      // below adds the quantity and books the matching AP expense together.
+      let stockItemId = form.stockItemId
       if (isNewItem) {
         const created = await insertStock.mutateAsync({
           code: 'ST-' + Date.now().toString().slice(-6),
           name: form.newName.trim(),
           category: form.newCategory,
           unit: form.newUnit.trim() || 'ชิ้น',
-          qtyIn: q, qtyOut: 0, qty: q,
+          qtyIn: 0, qtyOut: 0, qty: 0,
           unitCost: p, reorderAt: 0,
         })
-        await insertReceipt.mutateAsync({
-          date: form.date, partnerId, stockItemId: created.id,
-          qty: q, unitPrice: p, total: q * p,
-        })
-        alert('เพิ่มสินค้าใหม่และรับเข้าคลังเรียบร้อย')
-        setForm(emptyReceive)
-        return
+        stockItemId = created.id
       }
 
-      const s = stock.find((x) => x.id === form.stockItemId)
-      if (!s) return
-
-      // Weighted average cost
-      const oldValue = s.qty * s.unitCost
-      const newValue = q * p
-      const newQty = s.qty + q
-      const newAvgCost = newQty > 0 ? (oldValue + newValue) / newQty : p
-
-      await updateStock.mutateAsync({
-        id: s.id,
-        patch: {
-          qty: newQty,
-          qtyIn: s.qtyIn + q,
-          unitCost: Math.round(newAvgCost * 100) / 100,
-        },
+      const result = await callRpc<{ expense_code: string }>('receive_stock_with_expense', {
+        p_date: form.date,
+        p_partner_id: partnerId,
+        p_stock_item_id: stockItemId,
+        p_qty: q,
+        p_unit_price: p,
+        p_paid: form.paid === 'paid',
+        p_due_date: form.dueDate || form.date,
       })
 
-      await insertReceipt.mutateAsync({
-        date: form.date,
-        partnerId,
-        stockItemId: s.id,
-        qty: q,
-        unitPrice: p,
-        total: q * p,
-      })
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['stock_items'] }),
+        qc.invalidateQueries({ queryKey: ['stock_receipts'] }),
+        qc.invalidateQueries({ queryKey: ['expense_headers'] }),
+        qc.invalidateQueries({ queryKey: ['expense_lines'] }),
+      ])
 
-      alert('รับสินค้าเข้าคลังเรียบร้อย')
+      alert(`รับสินค้าเข้าคลังและสร้างค่าใช้จ่าย ${result.expense_code} เรียบร้อย (${form.paid === 'paid' ? 'ชำระแล้ว' : 'ยังไม่ชำระ'})`)
       setForm(emptyReceive)
     } catch (e) {
       alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
@@ -1666,6 +1653,24 @@ function ExpStock() {
               </div>
             </div>
           </div>
+          <div className="grid-2" style={{ gap: 14, marginBottom: 14 }}>
+            <Field label="สถานะการชำระ *">
+              <select value={form.paid} onChange={(e) => set('paid', e.target.value)}>
+                <option value="unpaid">ยังไม่ชำระ</option>
+                <option value="paid">ชำระแล้ว</option>
+              </select>
+            </Field>
+            <Field label="กำหนดชำระ">
+              <input
+                type="date"
+                value={form.dueDate}
+                onChange={(e) => set('dueDate', e.target.value)}
+              />
+            </Field>
+          </div>
+          <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 8, background: 'var(--primary-50)', color: 'var(--text-2)', fontSize: 12.5 }}>
+            ระบบจะสร้างรายการใน “บันทึกค่าใช้จ่าย” และ “สถานะการเงิน” ให้อัตโนมัติพร้อมกับรับสินค้าเข้าคลัง
+          </div>
           <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
             <button
               className="btn"
@@ -1753,11 +1758,13 @@ function ExpStock() {
                   <th className="right">จำนวน</th>
                   <th className="right">ราคา/หน่วย</th>
                   <th className="right">รวมเงิน</th>
+                  <th style={{ textAlign: 'center' }}>สถานะจ่าย</th>
                 </tr>
               </thead>
               <tbody>
                 {receipts.map((r) => {
                   const it = stock.find((s) => s.id === r.stockItemId)
+                  const expense = allHeaders.find((h) => h.id === r.expenseHeaderId)
                   return (
                     <tr key={r.id}>
                       <td className="num muted">{db.thaiDate(r.date)}</td>
@@ -1767,6 +1774,15 @@ function ExpStock() {
                       <td className="num right">{db.fmt(r.unitPrice)} ฿</td>
                       <td className="num right" style={{ fontWeight: 600, color: 'var(--primary)' }}>
                         {db.fmt(r.total)} ฿
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        {expense?.paid ? (
+                          <span className="badge green">ชำระแล้ว</span>
+                        ) : expense ? (
+                          <span className="badge amber">ยังไม่ชำระ</span>
+                        ) : (
+                          <span className="badge red">ยังไม่เชื่อมค่าใช้จ่าย</span>
+                        )}
                       </td>
                     </tr>
                   )
