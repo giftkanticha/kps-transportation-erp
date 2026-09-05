@@ -1737,11 +1737,11 @@ function ExpStock() {
         </div>
       </div>
 
-      {/* Recent receipts history */}
+      {/* Receipts history */}
       {receipts.length > 0 && (
         <div className="card">
           <div className="head">
-            <h3>ประวัติการรับเข้าล่าสุด</h3>
+            <h3>ประวัติการรับเข้าทั้งหมด ({receipts.length} รายการ)</h3>
           </div>
           <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
             <table className="tbl">
@@ -1756,7 +1756,7 @@ function ExpStock() {
                 </tr>
               </thead>
               <tbody>
-                {receipts.slice(0, 10).map((r) => {
+                {receipts.map((r) => {
                   const it = stock.find((s) => s.id === r.stockItemId)
                   return (
                     <tr key={r.id}>
@@ -2000,6 +2000,8 @@ function ExpReport() {
   const { data: partners = [] } = useList<Partner>('partners')
   const { data: headers = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: allLines = [] } = useList<ExpenseLine>('expense_lines')
+  const { data: receipts = [] } = useList<StockReceipt>('stock_receipts')
+  const { data: stock = [] } = useList<StockItem>('stock_items')
   const [innerTab, setInnerTab] = useState('repair')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -2012,6 +2014,50 @@ function ExpReport() {
     if (dateTo && h.date > dateTo) return false
     return true
   })
+
+  const reportLines = useMemo(() => {
+    const expenseRows = allLines.flatMap((line) => {
+      const header = headers.find((h) => h.id === line.headerId)
+      if (!header) return []
+      if (vehicleFilter && header.vehicleId !== vehicleFilter) return []
+      if (dateFrom && header.date < dateFrom) return []
+      if (dateTo && header.date > dateTo) return []
+      return [{
+        id: `expense-${line.id}`,
+        date: header.date,
+        source: 'ค่าใช้จ่ายรถ',
+        vehicle: vehicles.find((v) => v.id === header.vehicleId)?.plate ?? '—',
+        partner: partners.find((p) => p.id === header.partnerId)?.name ?? '—',
+        item: line.item,
+        category: line.category,
+        qty: line.qty,
+        unitPrice: line.unitPrice,
+        total: line.amount,
+      }]
+    })
+
+    // Stock receipts are company inventory purchases and are not tied to one vehicle.
+    // Show them in the item-detail report whenever the user is viewing all vehicles.
+    const receiptRows = vehicleFilter ? [] : receipts.flatMap((receipt) => {
+      if (dateFrom && receipt.date < dateFrom) return []
+      if (dateTo && receipt.date > dateTo) return []
+      const item = stock.find((s) => s.id === receipt.stockItemId)
+      return [{
+        id: `receipt-${receipt.id}`,
+        date: receipt.date,
+        source: 'รับเข้าคลัง KPS',
+        vehicle: 'ส่วนกลาง',
+        partner: partners.find((p) => p.id === receipt.partnerId)?.name ?? '—',
+        item: item?.name ?? '—',
+        category: item?.category ?? 'สต็อก',
+        qty: receipt.qty,
+        unitPrice: receipt.unitPrice,
+        total: receipt.total,
+      }]
+    })
+
+    return [...expenseRows, ...receiptRows].sort((a, b) => b.date.localeCompare(a.date))
+  }, [allLines, headers, receipts, stock, vehicles, partners, vehicleFilter, dateFrom, dateTo])
 
   const innerTabs: [string, string][] = [
     ['repair', 'ประวัติการซ่อม'],
@@ -2177,10 +2223,66 @@ function ExpReport() {
       )}
 
       {innerTab === 'lines' && (
-        <div style={{ padding: 60, textAlign: 'center', color: 'var(--text-muted)' }}>
-          <Icon name="chart" size={48} style={{ opacity: 0.3, marginBottom: 12 }} />
-          <div>รายละเอียดรายการ — อยู่ในระหว่างเตรียมข้อมูล</div>
-        </div>
+        <>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
+            <div className="row" style={{ gap: 14, alignItems: 'flex-end' }}>
+              <Field label="จากวันที่">
+                <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ width: 180 }} />
+              </Field>
+              <Field label="ถึงวันที่">
+                <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ width: 180 }} />
+              </Field>
+              <Field label="ทะเบียนรถ">
+                <select value={vehicleFilter} onChange={(e) => setVehicleFilter(e.target.value)} style={{ width: 190 }}>
+                  <option value="">ทั้งหมด (รวมคลัง KPS)</option>
+                  {vehicles.map((v) => <option key={v.id} value={v.id}>{v.plate}</option>)}
+                </select>
+              </Field>
+              <div className="muted" style={{ fontSize: 12, paddingBottom: 10 }}>
+                รวม {reportLines.length} รายการ
+              </div>
+            </div>
+          </div>
+          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0, overflow: 'auto' }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>วันที่</th>
+                  <th>แหล่งรายการ</th>
+                  <th>รถ / หน่วยงาน</th>
+                  <th>คู่ค้า</th>
+                  <th>รายการ</th>
+                  <th>หมวด</th>
+                  <th className="right">จำนวน</th>
+                  <th className="right">ราคา/หน่วย</th>
+                  <th className="right">รวมเงิน</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reportLines.map((line) => (
+                  <tr key={line.id}>
+                    <td className="num muted">{db.thaiDate(line.date)}</td>
+                    <td><span className={`badge ${line.source === 'รับเข้าคลัง KPS' ? 'blue' : 'violet'}`}>{line.source}</span></td>
+                    <td>{line.vehicle}</td>
+                    <td>{line.partner}</td>
+                    <td style={{ fontWeight: 500 }}>{line.item}</td>
+                    <td><span className="badge gray">{line.category}</span></td>
+                    <td className="num right">{line.qty}</td>
+                    <td className="num right">{db.fmt(line.unitPrice)} ฿</td>
+                    <td className="num right" style={{ fontWeight: 600 }}>{db.fmt(line.total)} ฿</td>
+                  </tr>
+                ))}
+                {reportLines.length === 0 && (
+                  <tr><td colSpan={9}><div className="empty">ไม่พบรายการในช่วงที่เลือก</div></td></tr>
+                )}
+                <tr style={{ background: 'var(--primary-50)', fontWeight: 700 }}>
+                  <td colSpan={8} className="right">รวม</td>
+                  <td className="num right">{db.fmt(reportLines.reduce((sum, line) => sum + Number(line.total), 0))} ฿</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
       {innerTab === 'pivot' && <PivotTab />}
     </div>
