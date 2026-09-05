@@ -1,5 +1,10 @@
 # KPS ERP — Docs
 
+## คู่มือการใช้งาน (SOP)
+
+- **[SOP-system-usage.md](./SOP-system-usage.md)** — SOP การใช้ระบบสำหรับพนักงาน / ผู้จัดการ / แอดมิน (บทบาท-สิทธิ์, การสมัคร-อนุมัติบัญชี, งานประจำวัน, งานแอดมิน)
+- **[SOP.md](../SOP.md)** — SOP ขั้นตอนละเอียดของงานขนส่ง (Dispatch Round) และรอบน้ำมัน (Fuel Round)
+
 ## Auth + Database
 
 ก่อนจะแก้ระบบ login/database ลองอ่านลำดับนี้:
