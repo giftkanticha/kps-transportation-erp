@@ -104,6 +104,9 @@ function autoRoute(
   if (group === 'INTERNAL') {
     return { status: 'INTERNAL_DEDUCTED', statusLabel: '🟢 ตัดสต็อค (รถโรงงาน)', tripId: null, error: '' }
   }
+  if (group === 'EQUIPMENT') {
+    return { status: 'INTERNAL_DEDUCTED', statusLabel: '🟢 บันทึกค่าใช้จ่าย (เครื่องจักร)', tripId: null, error: '' }
+  }
 
   const matches = dispatches.filter(d =>
     d.vehicleId === vehicleId &&

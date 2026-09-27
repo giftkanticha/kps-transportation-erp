@@ -1107,14 +1107,16 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             try {
               // 1) Unlink fuel transactions so they don't dangle as TRIP_LINKED
               //    with a null trip_id (FK is ON DELETE SET NULL). Vehicles in
-              //    the INTERNAL (factory) group never need trip-linking, so they
-              //    go back to INTERNAL_DEDUCTED instead of FLOATING — otherwise
-              //    they'd sit forever on "น้ำมันลอย" with no round to bind to.
+              //    the INTERNAL (factory) or EQUIPMENT (machinery) group never
+              //    need trip-linking, so they go back to INTERNAL_DEDUCTED
+              //    instead of FLOATING — otherwise they'd sit forever on
+              //    "น้ำมันลอย" with no round to bind to.
               for (const tx of allFuelTxs.filter(t => t.tripId === round.id)) {
                 const txVehicle = vehicles.find(v => v.id === tx.vehicleId)
+                const noRoundNeeded = txVehicle?.groupKind === 'INTERNAL' || txVehicle?.groupKind === 'EQUIPMENT'
                 await updateFuelTx.mutateAsync({
                   id: tx.id,
-                  patch: { tripId: null, status: txVehicle?.groupKind === 'INTERNAL' ? 'INTERNAL_DEDUCTED' : 'FLOATING' },
+                  patch: { tripId: null, status: noRoundNeeded ? 'INTERNAL_DEDUCTED' : 'FLOATING' },
                 })
               }
               // 2) Delete the fuel_records mirror (TRIP-{code}-CLOSE etc.).
