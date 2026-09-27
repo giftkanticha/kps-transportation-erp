@@ -310,17 +310,17 @@ function CloseForm({
     const msg = `ปลดน้ำมันรายการนี้ออกจากรอบ?\n${db.thaiDate(tx.date)} · ${tx.liters.toFixed(2)} ลิตร\n\nรายการจะกลับไปอยู่ในหน้า "น้ำมันลอย" และสามารถลบหรือผูกรอบใหม่ได้`
     if (!confirm(msg)) return
     try {
-      // รถกลุ่มโรงงาน (INTERNAL) ไม่ต้องผูกรอบ — ปลดแล้วต้องกลับไปตัดสต็อคอัตโนมัติ
-      // ไม่ใช่ไปค้างเป็น "น้ำมันลอย" ที่ไม่มีวันมีรอบให้ผูก
-      const isInternal = vehicle?.groupKind === 'INTERNAL'
+      // รถกลุ่มโรงงาน (INTERNAL) และเครื่องจักร (EQUIPMENT) ไม่ต้องผูกรอบ — ปลดแล้วต้องกลับไป
+      // ตัดสต็อค/บันทึกค่าใช้จ่ายอัตโนมัติ ไม่ใช่ไปค้างเป็น "น้ำมันลอย" ที่ไม่มีวันมีรอบให้ผูก
+      const noRoundNeeded = vehicle?.groupKind === 'INTERNAL' || vehicle?.groupKind === 'EQUIPMENT'
       await updateFuelTx.mutateAsync({
         id: tx.id,
-        patch: { tripId: null, status: isInternal ? 'INTERNAL_DEDUCTED' : 'FLOATING' },
+        patch: { tripId: null, status: noRoundNeeded ? 'INTERNAL_DEDUCTED' : 'FLOATING' },
       })
       setToast({
         kind: 'success',
-        msg: isInternal
-          ? '✅ ปลดออกจากรอบแล้ว — รถกลุ่มโรงงานตัดสต็อคอัตโนมัติ ไม่ต้องผูกรอบ'
+        msg: noRoundNeeded
+          ? '✅ ปลดออกจากรอบแล้ว — รถกลุ่มนี้บันทึกอัตโนมัติ ไม่ต้องผูกรอบ'
           : '✅ ปลดออกจากรอบแล้ว — ไปดูที่หน้า "น้ำมันลอย"',
       })
     } catch (e) {

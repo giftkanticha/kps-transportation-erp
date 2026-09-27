@@ -677,6 +677,8 @@ export function VehiclesPage({ setActive, setSubject, user }: VehiclesPageProps)
                     <td>
                       {v.groupKind === 'INTERNAL' ? (
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#F0FDF4', color: '#166534' }}>🏭 โรงงาน</span>
+                      ) : v.groupKind === 'EQUIPMENT' ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#FEF3C7', color: '#92400E' }}>⚙️ เครื่องจักร</span>
                       ) : v.groupKind === 'TRANSPORT' ? (
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: '#EFF6FF', color: '#1D4ED8' }}>🚛 ขนส่ง</span>
                       ) : (
