@@ -57,6 +57,7 @@ const crumbMap: Record<string, string> = {
   'tires.scrapped': 'ระบบยาง • ยางหมดสภาพ',
   fuel: 'ระบบน้ำมัน • ภาพรวม',
   'fuel.express': 'ระบบน้ำมัน • คีย์ด่วน',
+  'fuel.history': 'ระบบน้ำมัน • ประวัติ/แก้ไข',
   'fuel.floating': 'ระบบน้ำมัน • น้ำมันลอย',
   'fuel.report': 'ระบบน้ำมัน • รายงาน',
   'fuel.summary': 'ระบบน้ำมัน • สรุปคลังน้ำมันรวม',
@@ -180,6 +181,8 @@ export default function App() {
         return <FuelModule tab="overview" setActive={setActive} />
       case 'fuel.express':
         return <FuelModule tab="express" setActive={setActive} />
+      case 'fuel.history':
+        return <FuelModule tab="history" setActive={setActive} />
       case 'fuel.floating':
         return <FuelModule tab="floating" setActive={setActive} />
       case 'fuel.report':
