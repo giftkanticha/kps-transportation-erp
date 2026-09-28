@@ -2,13 +2,16 @@ import { useMemo } from 'react'
 import { db, ROUTE_ANOMALY_PCT, ROUTE_MIN_SAMPLES } from '../lib/db'
 import { useList } from './useTable'
 import { useDispatches } from './useDispatches'
-import type { Vehicle, Employee, Dispatch, FuelRound } from '../types'
+import type { Vehicle, Employee, Dispatch, Location, FuelRound } from '../types'
 
 export interface RouteTripRow {
   round: Dispatch
-  routeKey: string
-  origin: string
-  destination: string
+  /** ลำดับสถานที่ที่ผ่านจริงในรอบนี้ เช่น ['KPS','สันกอก','KPS'] — ไม่ยุบเหลือแค่ต้นทาง/ปลายทางสุดท้าย */
+  stops: string[]
+  /** ป้ายแสดงผล: stops คั่นด้วย " → " */
+  routeLabel: string
+  /** จำนวนขาในรอบ — รวมเป็นส่วนหนึ่งของ key เพื่อไม่ให้รอบที่แวะหลายจุดปนกับรอบวิ่งตรง */
+  legCount: number
   kind: 'loaded' | 'deadhead'
   vehicle?: Vehicle
   driver?: Employee
@@ -33,8 +36,13 @@ export interface RouteTripFlags {
   sampleOk: boolean
 }
 
-export function routeGroupKey(routeKey: string, kind: string): string {
-  return `${routeKey}|${kind}`
+// เทียบแบบไม่สนช่องว่างหัวท้าย/ตัวพิมพ์ — ให้ตรงกับตรรกะเช็คซ้ำใน LocationCombobox
+function normKey(s: string): string {
+  return (s ?? '').trim().toLowerCase()
+}
+
+export function routeGroupKey(routeKey: string, legCount: number, kind: string): string {
+  return `${routeKey}|legs=${legCount}|${kind}`
 }
 
 // เที่ยวไม่มีสินค้า/ตีเปล่า = ทุกขาไม่วางบิล (noBill) หรือรอบไม่มีรายได้เลย
@@ -63,22 +71,51 @@ export function useRouteAnomalies() {
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: dispatch = [] } = useDispatches()
   const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
+  const { data: locations = [] } = useList<Location>('locations')
+
+  // ต้นทาง/ปลายทางเป็นข้อความอิสระ (พิมพ์เอง หรือเลือกจาก datalist ของทะเบียนสถานที่)
+  // "ปัก" ชื่อให้อ้างอิงทะเบียนสถานที่เดียวกันเสมอ กันกรณีเผลอพิมพ์เว้นวรรค/ตัวพิมพ์
+  // ต่างกันจนระบบมองว่าเป็นคนละที่ — ถ้าไม่พบในทะเบียนจะ fallback เป็นชื่อที่พิมพ์ (ตัดช่องว่างหัวท้าย)
+  const canonicalize = useMemo(() => {
+    const map = new Map<string, string>()
+    locations.forEach(l => {
+      const key = normKey(l.name)
+      if (key) map.set(key, l.name)
+    })
+    return (raw: string): string => {
+      const trimmed = (raw ?? '').trim()
+      if (!trimmed) return ''
+      return map.get(normKey(trimmed)) ?? trimmed
+    }
+  }, [locations])
 
   const trips = useMemo<RouteTripRow[]>(() => {
     return dispatch
       .filter(d => d.roundStatus === 'closed' || d.status === 'completed')
       .map((round): RouteTripRow => {
-        const origin = db.originOf(round) || '—'
-        const destination = db.destOf(round) || '—'
+        const legs = db.legsOf(round)
+        // ลำดับสถานที่จริงที่ผ่านในรอบนี้ (ไม่ยุบเหลือแค่ต้นทาง/ปลายทางสุดท้าย — รอบไป-กลับ
+        // กลับมาจุดเดิมจะทำให้จุดแวะระหว่างทาง เช่น "สันกอก" หายไปถ้าดูแค่ต้นทาง-ปลายทางรวม)
+        const stops: string[] = []
+        legs.forEach((l, i) => {
+          if (i === 0) {
+            const o = canonicalize(l.origin)
+            if (o) stops.push(o)
+          }
+          const d = canonicalize(l.destination)
+          if (d && stops[stops.length - 1] !== d) stops.push(d)
+        })
+        if (stops.length === 0) stops.push('—')
+
         const fuelRound = db.fuelRoundOfDispatch(round.id, fuelRounds)
         const consumed = fuelRound ? db.fuelRoundConsumed(fuelRound) : (round.liters || 0)
         const distance = db.roundDistance(round)
         const kmPerL = consumed > 0 && distance > 0 ? distance / consumed : null
         return {
           round,
-          routeKey: `${origin} → ${destination}`,
-          origin,
-          destination,
+          stops,
+          routeLabel: stops.join(' → '),
+          legCount: legs.length,
           kind: kindOf(round),
           vehicle: vehicles.find(v => v.id === round.vehicleId),
           driver: employees.find(e => e.id === round.driverId),
@@ -88,12 +125,12 @@ export function useRouteAnomalies() {
         }
       })
       .filter(t => t.distance > 0)
-  }, [dispatch, fuelRounds, vehicles, employees])
+  }, [dispatch, fuelRounds, vehicles, employees, canonicalize])
 
   const baselineMap = useMemo(() => {
     const groups = new Map<string, RouteTripRow[]>()
     trips.forEach(t => {
-      const k = routeGroupKey(t.routeKey, t.kind)
+      const k = routeGroupKey(t.routeLabel, t.legCount, t.kind)
       const arr = groups.get(k) ?? []
       arr.push(t)
       groups.set(k, arr)
@@ -111,7 +148,7 @@ export function useRouteAnomalies() {
     return map
   }, [trips])
 
-  const baselineOf = (t: RouteTripRow) => baselineMap.get(routeGroupKey(t.routeKey, t.kind))
+  const baselineOf = (t: RouteTripRow) => baselineMap.get(routeGroupKey(t.routeLabel, t.legCount, t.kind))
 
   return { trips, baselineMap, baselineOf }
 }

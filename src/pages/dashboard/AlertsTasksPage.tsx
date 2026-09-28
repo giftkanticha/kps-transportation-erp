@@ -830,7 +830,7 @@ export function AlertsTasksPage({ user, setActive }: AlertsTasksPageProps) {
     const cutoffStr = cutoff.toISOString().slice(0, 10)
     return routeTrips
       .filter(t => t.date >= cutoffStr)
-      .map(t => ({ trip: t, flags: routeTripFlags(t, baselineMap.get(routeGroupKey(t.routeKey, t.kind))) }))
+      .map(t => ({ trip: t, flags: routeTripFlags(t, baselineMap.get(routeGroupKey(t.routeLabel, t.legCount, t.kind))) }))
       .filter(x => x.flags.anomaly)
       .map(({ trip, flags }): RouteAnomalyAlert => {
         const severity: 'red' | 'amber' =
@@ -842,7 +842,7 @@ export function AlertsTasksPage({ user, setActive }: AlertsTasksPageProps) {
           roundCode: trip.round.code,
           date: trip.date,
           plate: trip.vehicle?.plate ?? '—',
-          route: `${trip.origin} → ${trip.destination}`,
+          route: trip.routeLabel,
           kind: trip.kind,
           distancePct: flags.distancePct,
           fuelPct: flags.fuelPct,

@@ -48,14 +48,14 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
       if (to && t.date > to) return false
       if (vehicleId && t.round.vehicleId !== vehicleId) return false
       if (kindFilter !== 'all' && t.kind !== kindFilter) return false
-      if (routeQuery && !`${t.origin} ${t.destination}`.toLowerCase().includes(routeQuery.toLowerCase())) return false
+      if (routeQuery && !t.routeLabel.toLowerCase().includes(routeQuery.toLowerCase())) return false
       return true
     })
   }, [allTrips, from, to, vehicleId, kindFilter, routeQuery])
 
   const flaggedTrips = useMemo(() => {
     return filteredTrips
-      .map(t => ({ trip: t, flags: tripFlags(t, baselineMap.get(groupKey(t.routeKey, t.kind))) }))
+      .map(t => ({ trip: t, flags: tripFlags(t, baselineMap.get(groupKey(t.routeLabel, t.legCount, t.kind))) }))
       .filter(x => x.flags.anomaly)
       .sort((a, b) => {
         const av = Math.max(Math.abs(a.flags.distancePct ?? 0), Math.abs(a.flags.fuelPct ?? 0))
@@ -67,13 +67,13 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
   const summaryRows = useMemo(() => {
     const groups = new Map<string, TripRow[]>()
     filteredTrips.forEach(t => {
-      const k = groupKey(t.routeKey, t.kind)
+      const k = groupKey(t.routeLabel, t.legCount, t.kind)
       const arr = groups.get(k) ?? []
       arr.push(t)
       groups.set(k, arr)
     })
     const out: Array<{
-      key: string; origin: string; destination: string; kind: 'loaded' | 'deadhead'
+      key: string; routeLabel: string; legCount: number; kind: 'loaded' | 'deadhead'
       count: number; avgDistance: number; base: Baseline | undefined
       distancePct: number | null; avgKmPerL: number | null; fuelPct: number | null
       anomalyCount: number; sampleOk: boolean
@@ -93,7 +93,7 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
         : null
       const anomalyCount = trips.filter(t => tripFlags(t, base).anomaly).length
       out.push({
-        key: k, origin: trips[0].origin, destination: trips[0].destination, kind: trips[0].kind,
+        key: k, routeLabel: trips[0].routeLabel, legCount: trips[0].legCount, kind: trips[0].kind,
         count, avgDistance, base, distancePct, avgKmPerL, fuelPct, anomalyCount, sampleOk,
       })
     })
@@ -204,6 +204,7 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
               <tr>
                 <th>เส้นทาง</th>
                 <th>ประเภท</th>
+                <th className="num">ขา/รอบ</th>
                 <th className="num">จำนวนเที่ยว</th>
                 <th className="num">ระยะทางเฉลี่ย</th>
                 <th className="num">มาตรฐาน (ย้อนหลัง)</th>
@@ -217,12 +218,13 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
             <tbody>
               {summaryRows.map(r => (
                 <tr key={r.key}>
-                  <td>{r.origin} → {r.destination}</td>
+                  <td>{r.routeLabel}</td>
                   <td>
                     <span className={`badge ${r.kind === 'deadhead' ? 'amber' : 'green'}`} style={{ fontSize: 11 }}>
                       {r.kind === 'deadhead' ? 'ตีเปล่า' : 'มีสินค้า'}
                     </span>
                   </td>
+                  <td className="num muted">{r.legCount}</td>
                   <td className="num">{r.count}</td>
                   <td className="num">{db.fmt(r.avgDistance)}</td>
                   <td className="num muted">{r.sampleOk && r.base ? db.fmt(r.base.meanDistance) : `น้อยกว่า ${ROUTE_MIN_SAMPLES} เที่ยว`}</td>
@@ -243,7 +245,7 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
               ))}
               {summaryRows.length === 0 && (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: 'center', padding: 36, color: 'var(--text-2)' }}>
+                  <td colSpan={11} style={{ textAlign: 'center', padding: 36, color: 'var(--text-2)' }}>
                     ไม่พบเที่ยวในช่วงเวลาที่เลือก
                   </td>
                 </tr>
@@ -266,6 +268,7 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
                 <th>วันที่</th>
                 <th>เส้นทาง</th>
                 <th>ประเภท</th>
+                <th className="num">ขา/รอบ</th>
                 <th>รถ</th>
                 <th>คนขับ</th>
                 <th className="num">ระยะทาง</th>
@@ -285,12 +288,13 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
                 >
                   <td className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{trip.round.code}</td>
                   <td className="num muted">{trip.date}</td>
-                  <td>{trip.origin} → {trip.destination}</td>
+                  <td>{trip.routeLabel}</td>
                   <td>
                     <span className={`badge ${trip.kind === 'deadhead' ? 'amber' : 'green'}`} style={{ fontSize: 11 }}>
                       {trip.kind === 'deadhead' ? 'ตีเปล่า' : 'มีสินค้า'}
                     </span>
                   </td>
+                  <td className="num muted">{trip.legCount}</td>
                   <td className="mono">{trip.vehicle?.plate ?? '—'}</td>
                   <td>{trip.driver?.name ?? '—'}</td>
                   <td className="num">{db.fmt(trip.distance)} {flags.distanceFlag && <span title={`เกินค่าเฉลี่ย ${pctText(flags.distancePct)}`}>⚠️</span>}</td>
@@ -303,7 +307,7 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
               ))}
               {flaggedTrips.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ textAlign: 'center', padding: 36, color: 'var(--text-2)' }}>
+                  <td colSpan={10} style={{ textAlign: 'center', padding: 36, color: 'var(--text-2)' }}>
                     ไม่พบเที่ยวผิดปกติในช่วงเวลาที่เลือก
                   </td>
                 </tr>
