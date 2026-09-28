@@ -4,7 +4,7 @@ import { useList } from '../../hooks/useTable'
 import { useSessionState } from '../../hooks/useSessionState'
 import {
   useRouteAnomalies, routeGroupKey, routeTripFlags,
-  type RouteTripRow, type RouteBaseline,
+  type RouteTripRow,
 } from '../../hooks/useRouteAnomalies'
 import type { Vehicle } from '../../types'
 import { Icon, Field, SegmentedFilter } from '../../components/ui'
@@ -16,7 +16,6 @@ interface Props {
 
 type KindFilter = 'all' | 'loaded' | 'deadhead'
 type TripRow = RouteTripRow
-type Baseline = RouteBaseline
 const groupKey = routeGroupKey
 const tripFlags = routeTripFlags
 
@@ -76,8 +75,10 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
     })
     const out: Array<{
       key: string; routeLabel: string; legCount: number; kind: 'loaded' | 'deadhead'
-      count: number; avgDistance: number; base: Baseline | undefined
-      distancePct: number | null; avgKmPerL: number | null; fuelPct: number | null
+      count: number; avgDistance: number
+      distanceBase: number | null; distanceSource: 'historical' | 'manual' | null; distancePct: number | null
+      avgKmPerL: number | null
+      fuelBase: number | null; fuelSource: 'historical' | 'manual' | null; fuelPct: number | null
       anomalyCount: number; sampleOk: boolean
     }> = []
     groups.forEach((trips, k) => {
@@ -88,15 +89,22 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
       const avgKmPerL = withFuel.length
         ? withFuel.reduce((s, t) => s + (t.kmPerL as number), 0) / withFuel.length
         : null
-      const sampleOk = !!base && base.n >= ROUTE_MIN_SAMPLES
-      const distancePct = sampleOk && base ? (avgDistance - base.meanDistance) / base.meanDistance : null
-      const fuelPct = sampleOk && base?.meanKmPerL && avgKmPerL != null
-        ? (avgKmPerL - base.meanKmPerL) / base.meanKmPerL
-        : null
+
+      const historicalDistanceOk = !!base && base.n >= ROUTE_MIN_SAMPLES
+      const distanceBase = historicalDistanceOk ? base!.meanDistance : (base?.manualDistance ?? null)
+      const distanceSource = historicalDistanceOk ? 'historical' as const : (distanceBase != null ? 'manual' as const : null)
+      const distancePct = distanceBase != null ? (avgDistance - distanceBase) / distanceBase : null
+
+      const historicalFuelOk = !!base && base.nKmPerL >= ROUTE_MIN_SAMPLES && base.meanKmPerL != null
+      const fuelBase = historicalFuelOk ? base!.meanKmPerL : (base?.manualKmPerL ?? null)
+      const fuelSource = historicalFuelOk ? 'historical' as const : (fuelBase != null ? 'manual' as const : null)
+      const fuelPct = fuelBase != null && avgKmPerL != null ? (avgKmPerL - fuelBase) / fuelBase : null
+
       const anomalyCount = trips.filter(t => tripFlags(t, base).anomaly).length
       out.push({
         key: k, routeLabel: trips[0].routeLabel, legCount: trips[0].legCount, kind: trips[0].kind,
-        count, avgDistance, base, distancePct, avgKmPerL, fuelPct, anomalyCount, sampleOk,
+        count, avgDistance, distanceBase, distanceSource, distancePct, avgKmPerL, fuelBase, fuelSource, fuelPct,
+        anomalyCount, sampleOk: distanceSource != null || fuelSource != null,
       })
     })
     return out.sort((a, b) => b.anomalyCount - a.anomalyCount || b.count - a.count)
@@ -110,7 +118,7 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
         <div>
           <h1 className="page-title">วิเคราะห์เที่ยววิ่งตามเส้นทาง</h1>
           <div className="page-sub">
-            เทียบระยะทาง/อัตราน้ำมันแต่ละเที่ยวกับค่าเฉลี่ยของเส้นทางเดียวกัน (แยกตีเปล่า/มีสินค้า) — ผิดปกติเมื่อต่างจากค่าเฉลี่ยเกิน ±{(ROUTE_ANOMALY_PCT * 100).toFixed(0)}% และมีเที่ยวย้อนหลังพอ (≥{ROUTE_MIN_SAMPLES} เที่ยว)
+            เทียบระยะทาง/อัตราน้ำมันแต่ละเที่ยวกับค่าเฉลี่ยของเส้นทางเดียวกัน (แยกตีเปล่า/มีสินค้า) — ผิดปกติเมื่อต่างจากค่าเฉลี่ยเกิน ±{(ROUTE_ANOMALY_PCT * 100).toFixed(0)}% ใช้ค่าเฉลี่ยย้อนหลังเมื่อมีเที่ยวพอ (≥{ROUTE_MIN_SAMPLES} เที่ยว) ไม่พอจะใช้ค่าที่ตั้งไว้ใน "จัดการเส้นทางมาตรฐาน" แทน
           </div>
         </div>
       </div>
@@ -229,12 +237,20 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
                   <td className="num muted">{r.legCount}</td>
                   <td className="num">{r.count}</td>
                   <td className="num">{db.fmt(r.avgDistance)}</td>
-                  <td className="num muted">{r.sampleOk && r.base ? db.fmt(r.base.meanDistance) : `น้อยกว่า ${ROUTE_MIN_SAMPLES} เที่ยว`}</td>
+                  <td className="num muted">
+                    {r.distanceBase != null
+                      ? <>{db.fmt(r.distanceBase)}{r.distanceSource === 'manual' && <span title="ใช้ค่าที่ตั้งไว้ในหน้าจัดการเส้นทางมาตรฐาน เพราะยังมีเที่ยวย้อนหลังไม่พอ"> (ตั้งเอง)</span>}</>
+                      : `น้อยกว่า ${ROUTE_MIN_SAMPLES} เที่ยว`}
+                  </td>
                   <td className="num" style={{ color: r.distancePct != null && r.distancePct > ROUTE_ANOMALY_PCT ? 'var(--red)' : undefined, fontWeight: r.distancePct != null && r.distancePct > ROUTE_ANOMALY_PCT ? 600 : undefined }}>
                     {pctText(r.distancePct)}
                   </td>
                   <td className="num">{r.avgKmPerL != null ? r.avgKmPerL.toFixed(2) : '—'}</td>
-                  <td className="num muted">{r.sampleOk && r.base?.meanKmPerL != null ? r.base.meanKmPerL.toFixed(2) : '—'}</td>
+                  <td className="num muted">
+                    {r.fuelBase != null
+                      ? <>{r.fuelBase.toFixed(2)}{r.fuelSource === 'manual' && <span title="ใช้ค่าที่ตั้งไว้ในหน้าจัดการเส้นทางมาตรฐาน เพราะยังมีเที่ยวย้อนหลังไม่พอ"> (ตั้งเอง)</span>}</>
+                      : '—'}
+                  </td>
                   <td className="num" style={{ color: r.fuelPct != null && r.fuelPct < -ROUTE_ANOMALY_PCT ? 'var(--red)' : undefined, fontWeight: r.fuelPct != null && r.fuelPct < -ROUTE_ANOMALY_PCT ? 600 : undefined }}>
                     {pctText(r.fuelPct)}
                   </td>

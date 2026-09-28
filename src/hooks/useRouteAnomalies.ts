@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 import { db, ROUTE_ANOMALY_PCT, ROUTE_MIN_SAMPLES } from '../lib/db'
 import { useList } from './useTable'
 import { useDispatches } from './useDispatches'
-import type { Vehicle, Employee, Dispatch, Location, FuelRound } from '../types'
+import type { Vehicle, Employee, Dispatch, Location, Route, FuelRound } from '../types'
 
 export interface RouteTripRow {
   round: Dispatch
@@ -25,6 +25,10 @@ export interface RouteBaseline {
   meanDistance: number
   meanKmPerL: number | null
   nKmPerL: number
+  /** ผลรวมระยะทางมาตรฐาน (ตาราง routes) ตามลำดับจุดจริงของกลุ่มนี้ — null ถ้ามีช่วงใดยังไม่ได้ตั้งค่า */
+  manualDistance: number | null
+  /** อัตรามาตรฐานรวมทั้งรอบ ผสานจากอัตรามาตรฐานแต่ละช่วงถ่วงน้ำหนักด้วยระยะทาง — null ถ้าข้อมูลไม่ครบ */
+  manualKmPerL: number | null
 }
 
 export interface RouteTripFlags {
@@ -34,6 +38,9 @@ export interface RouteTripFlags {
   fuelFlag: boolean
   anomaly: boolean
   sampleOk: boolean
+  /** baseline ระยะทางที่ใช้เทียบมาจากสถิติย้อนหลังจริง หรือค่าที่ตั้งไว้ในตาราง routes */
+  distanceSource: 'historical' | 'manual' | null
+  fuelSource: 'historical' | 'manual' | null
 }
 
 // เทียบแบบไม่สนช่องว่างหัวท้าย/ตัวพิมพ์ — ให้ตรงกับตรรกะเช็คซ้ำใน LocationCombobox
@@ -53,15 +60,24 @@ function kindOf(round: Dispatch): 'loaded' | 'deadhead' {
 }
 
 export function routeTripFlags(t: RouteTripRow, base?: RouteBaseline): RouteTripFlags {
-  const sampleOk = !!base && base.n >= ROUTE_MIN_SAMPLES
-  const distancePct = sampleOk && base ? (t.distance - base.meanDistance) / base.meanDistance : null
-  const distanceFlag = sampleOk && distancePct != null && distancePct > ROUTE_ANOMALY_PCT
-  const fuelSampleOk = !!base && base.nKmPerL >= ROUTE_MIN_SAMPLES && base.meanKmPerL != null
-  const fuelPct = fuelSampleOk && base?.meanKmPerL && t.kmPerL != null
-    ? (t.kmPerL - base.meanKmPerL) / base.meanKmPerL
-    : null
-  const fuelFlag = fuelSampleOk && fuelPct != null && fuelPct < -ROUTE_ANOMALY_PCT
-  return { distancePct, distanceFlag, fuelPct, fuelFlag, anomaly: distanceFlag || fuelFlag, sampleOk }
+  const historicalDistanceOk = !!base && base.n >= ROUTE_MIN_SAMPLES
+  const distanceBase = historicalDistanceOk ? base!.meanDistance : (base?.manualDistance ?? null)
+  const distanceSource: RouteTripFlags['distanceSource'] = historicalDistanceOk ? 'historical' : (distanceBase != null ? 'manual' : null)
+  const distancePct = distanceBase != null ? (t.distance - distanceBase) / distanceBase : null
+  const distanceFlag = distancePct != null && distancePct > ROUTE_ANOMALY_PCT
+
+  const historicalFuelOk = !!base && base.nKmPerL >= ROUTE_MIN_SAMPLES && base.meanKmPerL != null
+  const fuelBase = historicalFuelOk ? base!.meanKmPerL : (base?.manualKmPerL ?? null)
+  const fuelSource: RouteTripFlags['fuelSource'] = historicalFuelOk ? 'historical' : (fuelBase != null ? 'manual' : null)
+  const fuelPct = fuelBase != null && t.kmPerL != null ? (t.kmPerL - fuelBase) / fuelBase : null
+  const fuelFlag = fuelPct != null && fuelPct < -ROUTE_ANOMALY_PCT
+
+  return {
+    distancePct, distanceFlag, fuelPct, fuelFlag,
+    anomaly: distanceFlag || fuelFlag,
+    sampleOk: distanceSource != null || fuelSource != null,
+    distanceSource, fuelSource,
+  }
 }
 
 // เที่ยวทั้งหมดที่ปิดรอบแล้ว/เสร็จแล้ว + ค่าเฉลี่ยมาตรฐานต่อเส้นทาง+ประเภท (ตีเปล่า/มีสินค้า
@@ -72,6 +88,7 @@ export function useRouteAnomalies() {
   const { data: dispatch = [] } = useDispatches()
   const { data: fuelRounds = [] } = useList<FuelRound>('fuel_rounds')
   const { data: locations = [] } = useList<Location>('locations')
+  const { data: routes = [] } = useList<Route>('routes')
 
   // ต้นทาง/ปลายทางเป็นข้อความอิสระ (พิมพ์เอง หรือเลือกจาก datalist ของทะเบียนสถานที่)
   // "ปัก" ชื่อให้อ้างอิงทะเบียนสถานที่เดียวกันเสมอ กันกรณีเผลอพิมพ์เว้นวรรค/ตัวพิมพ์
@@ -88,6 +105,51 @@ export function useRouteAnomalies() {
       return map.get(normKey(trimmed)) ?? trimmed
     }
   }, [locations])
+
+  // ชื่อ (canonical) → id ของสถานที่ — ใช้จับคู่ลำดับจุดจริงของแต่ละรอบเข้ากับตาราง routes
+  const locationIdByName = useMemo(() => {
+    const map = new Map<string, string>()
+    locations.forEach(l => map.set(normKey(l.name), l.id))
+    return map
+  }, [locations])
+
+  const routeByPair = useMemo(() => {
+    const map = new Map<string, Route>()
+    routes.forEach(r => {
+      if (!r.active) return
+      map.set(`${r.originLocationId}>>${r.destinationLocationId}`, r)
+    })
+    return map
+  }, [routes])
+
+  // ผลรวมระยะทาง/อัตรามาตรฐานตามลำดับจุดจริง — ต้องมีค่ามาตรฐานตั้งไว้ครบทุกช่วงถึงจะใช้ได้
+  // (ผสานอัตรามาตรฐานด้วยการรวม "ปริมาณน้ำมันที่ควรใช้" ของแต่ละช่วงแล้วหารกลับ ไม่ใช่เฉลี่ยตรงๆ)
+  const manualStandardsFor = (stops: string[]): { manualDistance: number | null; manualKmPerL: number | null } => {
+    if (stops.length < 2) return { manualDistance: null, manualKmPerL: null }
+    let totalDistance = 0
+    let totalFuel = 0
+    let distanceOk = true
+    let fuelOk = true
+    for (let i = 0; i < stops.length - 1; i++) {
+      const originId = locationIdByName.get(normKey(stops[i]))
+      const destId = locationIdByName.get(normKey(stops[i + 1]))
+      const route = originId && destId ? routeByPair.get(`${originId}>>${destId}`) : undefined
+      if (route?.standardDistanceKm != null) {
+        totalDistance += route.standardDistanceKm
+      } else {
+        distanceOk = false
+      }
+      if (route?.standardDistanceKm != null && route?.standardKmpl) {
+        totalFuel += route.standardDistanceKm / route.standardKmpl
+      } else {
+        fuelOk = false
+      }
+    }
+    return {
+      manualDistance: distanceOk ? totalDistance : null,
+      manualKmPerL: distanceOk && fuelOk && totalFuel > 0 ? totalDistance / totalFuel : null,
+    }
+  }
 
   const trips = useMemo<RouteTripRow[]>(() => {
     return dispatch
@@ -143,10 +205,12 @@ export function useRouteAnomalies() {
       const meanKmPerL = withFuel.length
         ? withFuel.reduce((s, t) => s + (t.kmPerL as number), 0) / withFuel.length
         : null
-      map.set(k, { n, meanDistance, meanKmPerL, nKmPerL: withFuel.length })
+      const { manualDistance, manualKmPerL } = manualStandardsFor(group[0].stops)
+      map.set(k, { n, meanDistance, meanKmPerL, nKmPerL: withFuel.length, manualDistance, manualKmPerL })
     })
     return map
-  }, [trips])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trips, routeByPair, locationIdByName])
 
   const baselineOf = (t: RouteTripRow) => baselineMap.get(routeGroupKey(t.routeLabel, t.legCount, t.kind))
 

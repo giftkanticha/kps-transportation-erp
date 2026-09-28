@@ -121,6 +121,18 @@ export interface Location {
   contact?: string
 }
 
+// เส้นทางมาตรฐาน (ต้นทาง→ปลายทาง) — ให้แอดมินตั้งระยะทาง/อัตราน้ำมันอ้างอิงเองได้
+// ใช้เป็น fallback baseline ตอนเส้นทางยังไม่มีประวัติพอ (ดู useRouteAnomalies.ts)
+export interface Route {
+  id: string
+  originLocationId: string
+  destinationLocationId: string
+  standardDistanceKm: number | null
+  standardKmpl: number | null
+  notes: string
+  active: boolean
+}
+
 export interface Subcontractor {
   id: string
   code: string

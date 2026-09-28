@@ -70,6 +70,7 @@ const MENU: MenuItem[] = [
     id: 'routeAnalysis', label: 'วิเคราะห์เส้นทาง', icon: 'alert', roles: ['admin', 'manager'],
     sub: [
       { id: 'routeAnalysis.trips', label: 'วิเคราะห์เที่ยววิ่ง', icon: 'chart' },
+      { id: 'routeAnalysis.routes', label: 'จัดการเส้นทางมาตรฐาน', icon: 'gauge' },
       { id: 'routeAnalysis.locations', label: 'ทะเบียนสถานที่', icon: 'pin' },
     ],
   },

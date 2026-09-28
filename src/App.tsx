@@ -37,6 +37,7 @@ import { VehicleManagement } from './pages/vehicles/VehicleManagement'
 import { MaintenancePage } from './pages/maintenance/MaintenancePage'
 import { PartnersPage } from './pages/customers/PartnersPage'
 import { LocationsPage } from './pages/locations/LocationsPage'
+import { RoutesPage } from './pages/locations/RoutesPage'
 import { CustomerBilling } from './pages/dispatch/CustomerBilling'
 import { CompanyBankAccountsPage } from './pages/settings/CompanyBankAccountsPage'
 import { SettingsUsers } from './pages/settings/SettingsUsers'
@@ -75,6 +76,7 @@ const crumbMap: Record<string, string> = {
   'dispatch.history': 'งานขนส่ง • ประวัติงาน',
   'dispatch.billing': 'งานขนส่ง • สรุป/วางบิลรายลูกค้า',
   'routeAnalysis.trips': 'วิเคราะห์เส้นทาง • วิเคราะห์เที่ยววิ่ง',
+  'routeAnalysis.routes': 'วิเคราะห์เส้นทาง • จัดการเส้นทางมาตรฐาน',
   'routeAnalysis.locations': 'วิเคราะห์เส้นทาง • ทะเบียนสถานที่',
   'settings.bankAccounts': 'ตั้งค่า • บัญชีธนาคารบริษัท',
   subcontractors: 'รถรับจ้างร่วม',
@@ -217,6 +219,8 @@ export default function App() {
       case 'routeAnalysis':
       case 'routeAnalysis.trips':
         return <RouteAnalysisReport setActive={setActive} setSubject={setSubject} />
+      case 'routeAnalysis.routes':
+        return <RoutesPage />
       case 'routeAnalysis.locations':
         return <LocationsPage />
 

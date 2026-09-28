@@ -42,6 +42,7 @@ const MANAGER_PLUS_ROUTES = new Set<string>([
   'dispatch.vehicleMonthly',
   'dispatch.billing',    // money — billing notes & receivables
   'routeAnalysis.trips',
+  'routeAnalysis.routes',     // master data — managers/admins curate it
   'routeAnalysis.locations',  // master data — managers/admins curate it
 
   'expenses.finance', 'expenses.report',
