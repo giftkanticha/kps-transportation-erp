@@ -91,6 +91,23 @@ function toBeCode(code: string): string {
   return code.replace(/^EXP-(\d{4})/, (_, y) => `EXP-${+y + 543}`)
 }
 
+// Reserve `count` sequential codes up front — genExpCode() alone would return the
+// same code for every header created in one multi-vehicle save, since `headers`
+// doesn't reflect inserts made earlier in the same loop.
+function genExpCodes(headers: ExpenseHeader[], count: number): string[] {
+  const now = new Date()
+  const yyyymmdd = String(now.getFullYear()) +
+    String(now.getMonth() + 1).padStart(2, '0') +
+    String(now.getDate()).padStart(2, '0')
+  const prefix = `EXP-${yyyymmdd}-`
+  const existing = headers.filter((h) => h.code.startsWith(prefix))
+  const maxSeq = existing.reduce((max, h) => {
+    const n = parseInt(h.code.slice(prefix.length), 10)
+    return Number.isNaN(n) ? max : Math.max(max, n)
+  }, 0)
+  return Array.from({ length: count }, (_, i) => prefix + String(maxSeq + 1 + i).padStart(3, '0'))
+}
+
 export function ExpensesModule({ tab, setActive }: ExpensesModuleProps) {
   const current =
     tab === 'finance'
@@ -180,6 +197,198 @@ const emptyLine = (): LineItem => ({
   note: '',
 })
 
+// Line-items table (add/remove rows, stock picker, running total) — shared by
+// the single-vehicle form and by every vehicle block in the multi-vehicle form.
+function LineItemsEditor({
+  lines,
+  setLines,
+  stocks,
+  isKPS,
+  hideInvoiceCol = false,
+}: {
+  lines: LineItem[]
+  setLines: (next: LineItem[]) => void
+  stocks: StockItem[]
+  isKPS: boolean
+  hideInvoiceCol?: boolean
+}) {
+  const setLine = (i: number, k: keyof LineItem, v: string | number) =>
+    setLines(
+      lines.map((l, idx) =>
+        idx === i
+          ? { ...l, [k]: k === 'qty' || k === 'unitPrice' ? +v || 0 : v }
+          : l,
+      ),
+    )
+
+  const addLine = () => setLines([...lines, emptyLine()])
+  const removeLine = (i: number) => setLines(lines.filter((_, idx) => idx !== i))
+
+  const totals = lines.map((l) => (l.qty || 0) * (l.unitPrice || 0))
+  const netTotal = totals.reduce((s, t) => s + t, 0)
+
+  // Auto-fill from selected stock item — use sellPrice if set, otherwise fall back to unitCost
+  const pickStock = (i: number, stockId: string) => {
+    const s = stocks.find((x) => x.id === stockId)
+    setLines(
+      lines.map((l, idx) =>
+        idx === i
+          ? {
+              ...l,
+              stockItemId: stockId,
+              item: s?.name ?? '',
+              unitPrice: s?.sellPrice ?? s?.unitCost ?? 0,
+              category: s?.category ?? l.category,
+            }
+          : l,
+      ),
+    )
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="head">
+        <h3>รายการค่าใช้จ่าย</h3>
+        <div className="right">
+          <button className="btn outline sm" onClick={addLine}>
+            <Icon name="plus" size={13} /> เพิ่มรายการ
+          </button>
+        </div>
+      </div>
+      <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+        <table className="tbl">
+          <thead>
+            <tr>
+              <th>#</th>
+              {!hideInvoiceCol && <th>เลขเอกสาร</th>}
+              <th>รายการ</th>
+              <th>ประเภท</th>
+              <th className="right">จำนวน</th>
+              <th className="right">ราคา/หน่วย</th>
+              <th className="right">จำนวนเงิน</th>
+              <th>หมายเหตุ</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((l, i) => {
+              const stk = l.stockItemId ? stocks.find((s) => s.id === l.stockItemId) : undefined
+              return (
+                <tr key={i}>
+                  <td className="num muted">{i + 1}</td>
+                  {!hideInvoiceCol && (
+                    <td style={{ padding: '8px 10px' }}>
+                      <input
+                        value={l.invoiceNo}
+                        onChange={(e) => setLine(i, 'invoiceNo', e.target.value)}
+                        style={{ ...inlineInput, maxWidth: 90 }}
+                      />
+                    </td>
+                  )}
+                  <td style={{ padding: '8px 10px', minWidth: 200 }}>
+                    {isKPS ? (
+                      <div>
+                        <select
+                          value={l.stockItemId ?? ''}
+                          onChange={(e) => pickStock(i, e.target.value)}
+                          style={inlineInput}
+                        >
+                          <option value="">-- เลือกสินค้าจากคลัง --</option>
+                          {stocks.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name} (คงเหลือ {s.qty} {s.unit})
+                            </option>
+                          ))}
+                        </select>
+                        {stk && (
+                          <div className="faint" style={{ fontSize: 10.5, marginTop: 2 }}>
+                            ทุน {db.fmt(stk.unitCost)} ฿
+                            {stk.sellPrice != null && (
+                              <span style={{ color: '#0369A1', marginLeft: 6 }}>
+                                · ขาย {db.fmt(stk.sellPrice)} ฿/{stk.unit}
+                              </span>
+                            )}
+                            {l.qty > stk.qty && (
+                              <span style={{ color: 'var(--red)', marginLeft: 6 }}>
+                                ⚠ ไม่พอ (มี {stk.qty})
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <input
+                        value={l.item}
+                        onChange={(e) => setLine(i, 'item', e.target.value)}
+                        placeholder="ชื่อรายการ"
+                        style={inlineInput}
+                      />
+                    )}
+                  </td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <select
+                      value={l.category}
+                      onChange={(e) => setLine(i, 'category', e.target.value)}
+                      style={{ ...inlineInput, maxWidth: 110 }}
+                      disabled={isKPS && !!l.stockItemId}
+                    >
+                      {CATEGORIES.map((c) => (
+                        <option key={c}>{c}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <input
+                      type="number"
+                      value={l.qty}
+                      onChange={(e) => setLine(i, 'qty', e.target.value)}
+                      style={{ ...inlineInput, maxWidth: 70, textAlign: 'right' }}
+                    />
+                  </td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <input
+                      type="number"
+                      value={l.unitPrice}
+                      onChange={(e) => setLine(i, 'unitPrice', e.target.value)}
+                      style={{ ...inlineInput, textAlign: 'right' }}
+                      readOnly={isKPS && !!l.stockItemId}
+                    />
+                  </td>
+                  <td className="num right mono" style={{ padding: '8px 10px', fontWeight: 600 }}>
+                    {totals[i].toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <input
+                      value={l.note}
+                      onChange={(e) => setLine(i, 'note', e.target.value)}
+                      placeholder="หมายเหตุ"
+                      style={inlineInput}
+                    />
+                  </td>
+                  <td>
+                    <button className="btn ghost icon sm danger" onClick={() => removeLine(i)}>
+                      <Icon name="trash" size={13} />
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+            <tr style={{ background: 'var(--green-50)' }}>
+              <td colSpan={hideInvoiceCol ? 5 : 6} className="right" style={{ padding: '12px 16px', fontWeight: 700 }}>
+                Net Total
+              </td>
+              <td className="num right mono" style={{ padding: '12px 16px', fontWeight: 700, fontSize: 15, color: '#166534' }}>
+                {netTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </td>
+              <td colSpan={2}></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 // Form body shared between create and edit
 function ExpenseFormBody({
   hdr,
@@ -203,39 +412,8 @@ function ExpenseFormBody({
   const setH = <K extends keyof HeaderForm>(k: K, v: HeaderForm[K]) =>
     setHdr({ ...hdr, [k]: v })
 
-  const setLine = (i: number, k: keyof LineItem, v: string | number) =>
-    setLines(
-      lines.map((l, idx) =>
-        idx === i
-          ? { ...l, [k]: k === 'qty' || k === 'unitPrice' ? +v || 0 : v }
-          : l,
-      ),
-    )
-
-  const addLine = () => setLines([...lines, emptyLine()])
-  const removeLine = (i: number) => setLines(lines.filter((_, idx) => idx !== i))
-
   const isKPS = isKPSPartner(hdr.partnerId, partners)
-  const totals = lines.map((l) => (l.qty || 0) * (l.unitPrice || 0))
-  const netTotal = totals.reduce((s, t) => s + t, 0)
-
-  // Auto-fill from selected stock item — use sellPrice if set, otherwise fall back to unitCost
-  const pickStock = (i: number, stockId: string) => {
-    const s = stocks.find((x) => x.id === stockId)
-    setLines(
-      lines.map((l, idx) =>
-        idx === i
-          ? {
-              ...l,
-              stockItemId: stockId,
-              item: s?.name ?? '',
-              unitPrice: s?.sellPrice ?? s?.unitCost ?? 0,
-              category: s?.category ?? l.category,
-            }
-          : l,
-      ),
-    )
-  }
+  const netTotal = lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
 
   return (
     <div>
@@ -352,145 +530,7 @@ function ExpenseFormBody({
         </div>
       </div>
 
-      {/* Line items */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="head">
-          <h3>รายการค่าใช้จ่าย</h3>
-          <div className="right">
-            <button className="btn outline sm" onClick={addLine}>
-              <Icon name="plus" size={13} /> เพิ่มรายการ
-            </button>
-          </div>
-        </div>
-        <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
-          <table className="tbl">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>เลขเอกสาร</th>
-                <th>รายการ</th>
-                <th>ประเภท</th>
-                <th className="right">จำนวน</th>
-                <th className="right">ราคา/หน่วย</th>
-                <th className="right">จำนวนเงิน</th>
-                <th>หมายเหตุ</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {lines.map((l, i) => {
-                const stk = l.stockItemId ? stocks.find((s) => s.id === l.stockItemId) : undefined
-                return (
-                  <tr key={i}>
-                    <td className="num muted">{i + 1}</td>
-                    <td style={{ padding: '8px 10px' }}>
-                      <input
-                        value={l.invoiceNo}
-                        onChange={(e) => setLine(i, 'invoiceNo', e.target.value)}
-                        style={{ ...inlineInput, maxWidth: 90 }}
-                      />
-                    </td>
-                    <td style={{ padding: '8px 10px', minWidth: 200 }}>
-                      {isKPS ? (
-                        <div>
-                          <select
-                            value={l.stockItemId ?? ''}
-                            onChange={(e) => pickStock(i, e.target.value)}
-                            style={inlineInput}
-                          >
-                            <option value="">-- เลือกสินค้าจากคลัง --</option>
-                            {stocks.map((s) => (
-                              <option key={s.id} value={s.id}>
-                                {s.name} (คงเหลือ {s.qty} {s.unit})
-                              </option>
-                            ))}
-                          </select>
-                          {stk && (
-                            <div className="faint" style={{ fontSize: 10.5, marginTop: 2 }}>
-                              ทุน {db.fmt(stk.unitCost)} ฿
-                              {stk.sellPrice != null && (
-                                <span style={{ color: '#0369A1', marginLeft: 6 }}>
-                                  · ขาย {db.fmt(stk.sellPrice)} ฿/{stk.unit}
-                                </span>
-                              )}
-                              {l.qty > stk.qty && (
-                                <span style={{ color: 'var(--red)', marginLeft: 6 }}>
-                                  ⚠ ไม่พอ (มี {stk.qty})
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <input
-                          value={l.item}
-                          onChange={(e) => setLine(i, 'item', e.target.value)}
-                          placeholder="ชื่อรายการ"
-                          style={inlineInput}
-                        />
-                      )}
-                    </td>
-                    <td style={{ padding: '8px 10px' }}>
-                      <select
-                        value={l.category}
-                        onChange={(e) => setLine(i, 'category', e.target.value)}
-                        style={{ ...inlineInput, maxWidth: 110 }}
-                        disabled={isKPS && !!l.stockItemId}
-                      >
-                        {CATEGORIES.map((c) => (
-                          <option key={c}>{c}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td style={{ padding: '8px 10px' }}>
-                      <input
-                        type="number"
-                        value={l.qty}
-                        onChange={(e) => setLine(i, 'qty', e.target.value)}
-                        style={{ ...inlineInput, maxWidth: 70, textAlign: 'right' }}
-                      />
-                    </td>
-                    <td style={{ padding: '8px 10px' }}>
-                      <input
-                        type="number"
-                        value={l.unitPrice}
-                        onChange={(e) => setLine(i, 'unitPrice', e.target.value)}
-                        style={{ ...inlineInput, textAlign: 'right' }}
-                        readOnly={isKPS && !!l.stockItemId}
-                      />
-                    </td>
-                    <td className="num right mono" style={{ padding: '8px 10px', fontWeight: 600 }}>
-                      {totals[i].toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </td>
-                    <td style={{ padding: '8px 10px' }}>
-                      <input
-                        value={l.note}
-                        onChange={(e) => setLine(i, 'note', e.target.value)}
-                        placeholder="หมายเหตุ"
-                        style={inlineInput}
-                      />
-                    </td>
-                    <td>
-                      <button className="btn ghost icon sm danger" onClick={() => removeLine(i)}>
-                        <Icon name="trash" size={13} />
-                      </button>
-                    </td>
-                  </tr>
-                )
-              })}
-              <tr style={{ background: 'var(--green-50)' }}>
-                <td colSpan={6} className="right" style={{ padding: '12px 16px', fontWeight: 700 }}>
-                  Net Total
-                </td>
-                <td className="num right mono" style={{ padding: '12px 16px', fontWeight: 700, fontSize: 15, color: '#166534' }}>
-                  {netTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </td>
-                <td colSpan={2}></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <LineItemsEditor lines={lines} setLines={setLines} stocks={stocks} isKPS={isKPS} />
     </div>
   )
 }
@@ -513,6 +553,7 @@ function ExpRecord() {
   const [docCode] = useState(() => genExpCode(allHeaders))
   const [saving, setSaving] = useState(false)
   const [actingId, setActingId] = useState<string | null>(null)
+  const [mode, setMode] = useState<'single' | 'multi'>('single')
 
   const handleSave = async () => {
     if (saving) return
@@ -592,25 +633,54 @@ function ExpRecord() {
 
   return (
     <div>
-      <ExpenseFormBody
-        hdr={hdr}
-        setHdr={setHdr}
-        lines={lines}
-        setLines={setLines}
-        vehicles={vehicles}
-        partners={partners}
-        stocks={stocks}
-        docCode={docCode}
-      />
-
-      <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginBottom: 18 }}>
-        <button className="btn" onClick={handleReset}>
-          <Icon name="close" size={14} /> รีเซ็ต
+      <div className="row" style={{ gap: 8, marginBottom: 16 }}>
+        <button
+          className={`btn ${mode === 'single' ? 'primary' : 'outline'} sm`}
+          onClick={() => setMode('single')}
+        >
+          บันทึกทีละคัน
         </button>
-        <button className="btn primary" onClick={handleSave} disabled={saving}>
-          {saving ? 'กำลังบันทึก…' : 'บันทึก'}
+        <button
+          className={`btn ${mode === 'multi' ? 'primary' : 'outline'} sm`}
+          onClick={() => setMode('multi')}
+        >
+          บันทึกหลายคัน (ช่างเดียว)
         </button>
       </div>
+
+      {mode === 'multi' ? (
+        <MultiVehicleExpenseForm
+          vehicles={vehicles}
+          partners={partners}
+          stocks={stocks}
+          allHeaders={allHeaders}
+          insertHeader={insertHeader}
+          insertLine={insertLine}
+          updateStock={updateStock}
+        />
+      ) : (
+        <>
+          <ExpenseFormBody
+            hdr={hdr}
+            setHdr={setHdr}
+            lines={lines}
+            setLines={setLines}
+            vehicles={vehicles}
+            partners={partners}
+            stocks={stocks}
+            docCode={docCode}
+          />
+
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginBottom: 18 }}>
+            <button className="btn" onClick={handleReset}>
+              <Icon name="close" size={14} /> รีเซ็ต
+            </button>
+            <button className="btn primary" onClick={handleSave} disabled={saving}>
+              {saving ? 'กำลังบันทึก…' : 'บันทึก'}
+            </button>
+          </div>
+        </>
+      )}
 
       {/* Recent history with edit button */}
       <div className="card">
@@ -693,6 +763,285 @@ function ExpRecord() {
           stocks={stocks}
         />
       )}
+    </div>
+  )
+}
+
+// ─── Multi-vehicle (single ช่าง) batch entry ────────────────────────────────
+// One ช่าง/ร้านค้า, one invoice number, and one payment status/due date shared
+// across a repeatable list of vehicle blocks. Each block still becomes its own
+// independent expense_headers row on save (same as the single-vehicle form) —
+// there is no batch linkage, so editing/deleting afterwards works exactly like
+// any other expense record.
+
+interface VehicleBlock {
+  key: string
+  vehicleId: string
+  date: string
+  odometer: string
+  lines: LineItem[]
+}
+
+const emptyBlock = (): VehicleBlock => ({
+  key: Math.random().toString(36).slice(2),
+  vehicleId: '',
+  date: new Date().toISOString().slice(0, 10),
+  odometer: '',
+  lines: [emptyLine()],
+})
+
+interface MultiHeaderForm {
+  partnerId: string
+  invoiceNo: string
+  paid: 'paid' | 'unpaid'
+  dueDate: string
+}
+
+const emptyMultiHeader = (): MultiHeaderForm => ({
+  partnerId: '',
+  invoiceNo: 'INV-',
+  paid: 'unpaid',
+  dueDate: '',
+})
+
+function MultiVehicleExpenseForm({
+  vehicles,
+  partners,
+  stocks,
+  allHeaders,
+  insertHeader,
+  insertLine,
+  updateStock,
+}: {
+  vehicles: Vehicle[]
+  partners: Partner[]
+  stocks: StockItem[]
+  allHeaders: ExpenseHeader[]
+  insertHeader: ReturnType<typeof useInsert<ExpenseHeader>>
+  insertLine: ReturnType<typeof useInsert<ExpenseLine>>
+  updateStock: ReturnType<typeof useUpdate<StockItem>>
+}) {
+  const [hdr, setHdr] = useState<MultiHeaderForm>(emptyMultiHeader())
+  const [blocks, setBlocks] = useState<VehicleBlock[]>([emptyBlock()])
+  const [saving, setSaving] = useState(false)
+
+  const setH = <K extends keyof MultiHeaderForm>(k: K, v: MultiHeaderForm[K]) =>
+    setHdr({ ...hdr, [k]: v })
+
+  const isKPS = isKPSPartner(hdr.partnerId, partners)
+
+  const setBlock = (i: number, patch: Partial<VehicleBlock>) =>
+    setBlocks(blocks.map((b, idx) => (idx === i ? { ...b, ...patch } : b)))
+
+  const addBlock = () => setBlocks([...blocks, emptyBlock()])
+  const removeBlock = (i: number) => setBlocks(blocks.filter((_, idx) => idx !== i))
+
+  const blockTotal = (b: VehicleBlock) =>
+    b.lines.reduce((s, l) => s + (l.qty || 0) * (l.unitPrice || 0), 0)
+  const grandTotal = blocks.reduce((s, b) => s + blockTotal(b), 0)
+
+  const handleReset = () => {
+    setHdr(emptyMultiHeader())
+    setBlocks([emptyBlock()])
+  }
+
+  const handleSave = async () => {
+    if (saving) return
+    if (!hdr.partnerId) {
+      alert('กรุณาเลือกช่าง/ร้านค้า')
+      return
+    }
+    if (blocks.some((b) => !b.vehicleId)) {
+      alert('กรุณาเลือกรถให้ครบทุกคัน')
+      return
+    }
+    const usableBlocks = blocks.filter((b) => b.lines.some((l) => l.item || l.stockItemId))
+    if (usableBlocks.length === 0) {
+      alert('กรุณาเพิ่มรายการอย่างน้อย 1 รายการ')
+      return
+    }
+    setSaving(true)
+    try {
+      const codes = genExpCodes(allHeaders, usableBlocks.length)
+      for (let i = 0; i < usableBlocks.length; i++) {
+        const b = usableBlocks[i]
+        const netTotal = blockTotal(b)
+        const h = await insertHeader.mutateAsync({
+          code: codes[i],
+          date: b.date,
+          vehicleId: b.vehicleId,
+          partnerId: hdr.partnerId,
+          odometer: Number(b.odometer) || 0,
+          paid: hdr.paid === 'paid',
+          dueDate: hdr.dueDate,
+          total: netTotal,
+          lineCount: b.lines.length,
+          note: b.lines.map((l) => l.item).filter(Boolean).join(', '),
+        })
+        for (const l of b.lines) {
+          const { id: _id, ...rest } = l
+          void _id
+          await insertLine.mutateAsync({
+            ...rest,
+            invoiceNo: hdr.invoiceNo,
+            headerId: h.id,
+            amount: (l.qty || 0) * (l.unitPrice || 0),
+          })
+        }
+        if (isKPS) {
+          for (const d of buildStockDeltas(b.lines, -1, stocks)) {
+            await updateStock.mutateAsync(d)
+          }
+        }
+      }
+      alert(`บันทึกเรียบร้อย (${usableBlocks.length} คัน)`)
+      handleReset()
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="head">
+          <h3>ข้อมูลช่าง (ใช้ร่วมกันทุกคัน)</h3>
+        </div>
+        <div style={{ padding: 22 }}>
+          <div className="grid-2" style={{ gap: 16, alignItems: 'start' }}>
+            <Field label="ช่าง / ร้านค้า *">
+              <select value={hdr.partnerId} onChange={(e) => setH('partnerId', e.target.value)}>
+                <option value="">-- เลือกช่าง/ร้านค้า --</option>
+                {partners.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              {isKPS && (
+                <div className="faint" style={{ fontSize: 11.5, marginTop: 4, color: 'var(--primary)' }}>
+                  ★ เมื่อจ่ายจากคลัง KPS รายการจะดึงจากสต๊อก และตัดจำนวนคงเหลืออัตโนมัติ
+                </div>
+              )}
+            </Field>
+            <Field label="เลขที่ใบเสร็จ/invoice (ใช้ร่วมกันทุกคัน)">
+              <input value={hdr.invoiceNo} onChange={(e) => setH('invoiceNo', e.target.value)} />
+            </Field>
+            <Field label="สถานะการชำระเงิน">
+              <div style={{
+                height: 38, display: 'flex', alignItems: 'center', gap: 20,
+                padding: '0 12px', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', background: '#fff',
+              }}>
+                <label className="row" style={{ gap: 7, cursor: 'pointer', fontSize: 13.5 }}>
+                  <input
+                    type="radio"
+                    name="mex-paid"
+                    checked={hdr.paid === 'unpaid'}
+                    onChange={() => setH('paid', 'unpaid')}
+                    style={{ accentColor: 'var(--primary)' }}
+                  />
+                  <span>ยังไม่ชำระ</span>
+                </label>
+                <label className="row" style={{ gap: 7, cursor: 'pointer', fontSize: 13.5 }}>
+                  <input
+                    type="radio"
+                    name="mex-paid"
+                    checked={hdr.paid === 'paid'}
+                    onChange={() => setH('paid', 'paid')}
+                    style={{ accentColor: 'var(--primary)' }}
+                  />
+                  <span>ชำระแล้ว</span>
+                </label>
+              </div>
+            </Field>
+            <Field label="วันครบกำหนดชำระ">
+              <input type="date" value={hdr.dueDate} onChange={(e) => setH('dueDate', e.target.value)} />
+            </Field>
+          </div>
+        </div>
+      </div>
+
+      {blocks.map((b, i) => (
+        <div className="card" key={b.key} style={{ marginBottom: 16 }}>
+          <div className="head">
+            <h3>รถคันที่ {i + 1}</h3>
+            <div className="right">
+              <button
+                className="btn ghost icon sm danger"
+                onClick={() => removeBlock(i)}
+                disabled={blocks.length === 1}
+                title="ลบคันนี้"
+              >
+                <Icon name="trash" size={13} />
+              </button>
+            </div>
+          </div>
+          <div style={{ padding: 22 }}>
+            <div className="grid-2" style={{ gap: 16, marginBottom: 16, alignItems: 'start' }}>
+              <Field label="เลือกรถ *">
+                <select value={b.vehicleId} onChange={(e) => setBlock(i, { vehicleId: e.target.value })}>
+                  <option value="">-- เลือกรถ --</option>
+                  {vehicles.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.plate} • {v.brand}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="วันที่ *">
+                <input type="date" value={b.date} onChange={(e) => setBlock(i, { date: e.target.value })} />
+              </Field>
+              <Field label="เลขไมล์ (km)">
+                <input
+                  type="number"
+                  value={b.odometer}
+                  onChange={(e) => setBlock(i, { odometer: e.target.value })}
+                  placeholder="0"
+                />
+              </Field>
+            </div>
+            <LineItemsEditor
+              lines={b.lines}
+              setLines={(next) => setBlock(i, { lines: next })}
+              stocks={stocks}
+              isKPS={isKPS}
+              hideInvoiceCol
+            />
+          </div>
+        </div>
+      ))}
+
+      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 18, flexWrap: 'wrap', gap: 12 }}>
+        <button className="btn outline" onClick={addBlock}>
+          <Icon name="plus" size={13} /> เพิ่มรถ
+        </button>
+        <div
+          style={{
+            padding: '10px 18px',
+            background: 'var(--primary-50)',
+            borderRadius: 'var(--r-md)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>ยอดรวมทั้งหมด ({blocks.length} คัน)</span>
+          <span className="mono" style={{ fontSize: 18, fontWeight: 700, color: 'var(--primary)' }}>
+            {grandTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} บาท
+          </span>
+        </div>
+      </div>
+
+      <div className="row" style={{ justifyContent: 'flex-end', gap: 8, marginBottom: 18 }}>
+        <button className="btn" onClick={handleReset}>
+          <Icon name="close" size={14} /> รีเซ็ต
+        </button>
+        <button className="btn primary" onClick={handleSave} disabled={saving}>
+          {saving ? 'กำลังบันทึก…' : `บันทึก (${blocks.length} คัน)`}
+        </button>
+      </div>
     </div>
   )
 }
