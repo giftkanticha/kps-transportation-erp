@@ -257,15 +257,25 @@ export function RoutesPage() {
         </div>
         {(() => {
           const mapsUrl = mapsDirectionsUrl(locationById.get(form.originLocationId), locationById.get(form.destinationLocationId))
-          return mapsUrl && (
-            <a
-              href={mapsUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, marginTop: 12, color: 'var(--primary)' }}
-            >
-              <Icon name="pin" size={13} /> เปิดดูระยะทางจริงใน Google Maps ↗
-            </a>
+          if (mapsUrl) {
+            return (
+              <a
+                href={mapsUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, marginTop: 12, color: 'var(--primary)' }}
+              >
+                <Icon name="pin" size={13} /> เปิดดูระยะทางจริงใน Google Maps ↗
+              </a>
+            )
+          }
+          // ยังไม่ขึ้นลิงก์เพราะยังเลือกไม่ครบ — บอกให้ชัดแทนการไม่แสดงอะไรเลย
+          // (ผู้ใช้เข้าใจผิดว่าฟีเจอร์หายไปถ้าไม่มีข้อความอะไรตรงนี้เลย)
+          return (
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 12 }}>
+              <Icon name="pin" size={13} /> เลือกต้นทางและปลายทางให้ครบก่อน จะมีลิงก์เปิดดูระยะทางจริงใน Google Maps ขึ้นตรงนี้
+              {activeLocations.length === 0 && <> — ตอนนี้ทะเบียนสถานที่ยังไม่มีรายการ (ไม่มีตัวเลือกในช่องด้านบน) ต้องไปเพิ่มที่ "ทะเบียนสถานที่" ก่อน</>}
+            </div>
           )
         })()}
         <div className="grid-2" style={{ gap: 12, marginTop: 12 }}>
