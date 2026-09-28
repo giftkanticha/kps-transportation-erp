@@ -14,6 +14,21 @@ interface RouteForm {
 
 const EMPTY: RouteForm = { originLocationId: '', destinationLocationId: '', standardDistanceKm: '', standardKmpl: '', notes: '' }
 
+// ใช้ชื่อ+ที่อยู่+จังหวัดที่มีอยู่แล้วในทะเบียนสถานที่ ประกอบเป็นคำค้นหาให้ Google Maps
+// เดาพิกัดเอง — ไม่ต้องผูก API/พิกัดจริง แค่เปิดดูระยะทางจริงแล้วพิมพ์ใส่เอง
+function mapsQueryFor(l?: Location): string {
+  if (!l) return ''
+  return [l.name, l.address, l.province].filter(Boolean).join(', ')
+}
+
+function mapsDirectionsUrl(origin?: Location, destination?: Location): string | null {
+  const o = mapsQueryFor(origin)
+  const d = mapsQueryFor(destination)
+  if (!o || !d) return null
+  const params = new URLSearchParams({ api: '1', origin: o, destination: d, travelmode: 'driving' })
+  return `https://www.google.com/maps/dir/?${params.toString()}`
+}
+
 function Modal({
   open, onClose, title, footer, children,
 }: {
@@ -169,7 +184,9 @@ export function RoutesPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
+            {rows.map(r => {
+              const mapsUrl = mapsDirectionsUrl(locationById.get(r.originLocationId), locationById.get(r.destinationLocationId))
+              return (
               <tr key={r.id} style={{ opacity: r.active ? 1 : 0.55 }}>
                 <td>{nameOf(r.originLocationId)}</td>
                 <td>{nameOf(r.destinationLocationId)}</td>
@@ -179,6 +196,17 @@ export function RoutesPage() {
                 <td><StatusBadge status={r.active ? 'active' : 'inactive'} /></td>
                 <td>
                   <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
+                    {mapsUrl && (
+                      <a
+                        className="btn ghost sm"
+                        title="เปิดดูระยะทางจริงใน Google Maps"
+                        href={mapsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Icon name="pin" size={13} /> Maps
+                      </a>
+                    )}
                     <button className="btn ghost icon sm" title="แก้ไข" onClick={() => openEdit(r)}>
                       <Icon name="edit" size={14} />
                     </button>
@@ -191,7 +219,8 @@ export function RoutesPage() {
                   </div>
                 </td>
               </tr>
-            ))}
+              )
+            })}
             {rows.length === 0 && (
               <tr><td colSpan={7} className="empty" style={{ padding: 32 }}>ยังไม่มีเส้นทาง — กด "เพิ่มเส้นทางใหม่"</td></tr>
             )}
@@ -226,6 +255,19 @@ export function RoutesPage() {
             </select>
           </Field>
         </div>
+        {(() => {
+          const mapsUrl = mapsDirectionsUrl(locationById.get(form.originLocationId), locationById.get(form.destinationLocationId))
+          return mapsUrl && (
+            <a
+              href={mapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, marginTop: 12, color: 'var(--primary)' }}
+            >
+              <Icon name="pin" size={13} /> เปิดดูระยะทางจริงใน Google Maps ↗
+            </a>
+          )
+        })()}
         <div className="grid-2" style={{ gap: 12, marginTop: 12 }}>
           <Field label="ระยะทางมาตรฐาน (กม.)">
             <input type="number" step="0.1" value={form.standardDistanceKm} onChange={e => setForm(f => ({ ...f, standardDistanceKm: e.target.value }))} placeholder="เช่น 85" />
