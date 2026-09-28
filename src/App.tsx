@@ -72,10 +72,10 @@ const crumbMap: Record<string, string> = {
   'dispatch.monthly': 'งานขนส่ง • รายงานประจำเดือน',
   'dispatch.vehicleMonthly': 'งานขนส่ง • สรุปรายเที่ยวรายเดือน (ต่อคัน)',
   'dispatch.report': 'งานขนส่ง • รายงานสรุป',
-  'dispatch.routeAnalysis': 'งานขนส่ง • วิเคราะห์เที่ยววิ่งตามเส้นทาง',
   'dispatch.history': 'งานขนส่ง • ประวัติงาน',
-  'dispatch.locations': 'งานขนส่ง • จัดการสถานที่',
   'dispatch.billing': 'งานขนส่ง • สรุป/วางบิลรายลูกค้า',
+  'routeAnalysis.trips': 'วิเคราะห์เส้นทาง • วิเคราะห์เที่ยววิ่ง',
+  'routeAnalysis.locations': 'วิเคราะห์เส้นทาง • ทะเบียนสถานที่',
   'settings.bankAccounts': 'ตั้งค่า • บัญชีธนาคารบริษัท',
   subcontractors: 'รถรับจ้างร่วม',
   'subcontractors.close': 'รถรับจ้างร่วม • ปิดงาน',
@@ -209,12 +209,16 @@ export default function App() {
         return <DispatchModule tab="monthly" setActive={setActive} user={legacyUser} />
       case 'dispatch.report':
         return <DispatchSummaryReport setActive={setActive} setSubject={setSubject} />
-      case 'dispatch.routeAnalysis':
-        return <RouteAnalysisReport setActive={setActive} setSubject={setSubject} />
       case 'dispatch.vehicleMonthly':
         return <DispatchVehicleMonthlyReport />
       case 'dispatch.history':
         return <DispatchHistory setActive={setActive} setSubject={setSubject} />
+
+      case 'routeAnalysis':
+      case 'routeAnalysis.trips':
+        return <RouteAnalysisReport setActive={setActive} setSubject={setSubject} />
+      case 'routeAnalysis.locations':
+        return <LocationsPage />
 
       case 'subcontractors':
         return <SubcontractorModule tab="open" setActive={setActive} user={legacyUser} />
@@ -253,8 +257,6 @@ export default function App() {
 
       case 'partners':
         return <PartnersPage />
-      case 'dispatch.locations':
-        return <LocationsPage />
       case 'dispatch.billing':
         return <CustomerBilling />
 

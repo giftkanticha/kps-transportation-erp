@@ -916,7 +916,7 @@ export function AlertsTasksPage({ user, setActive }: AlertsTasksPageProps) {
 
       <PendingApprovalsSection user={user} requests={pendingApprovals} onReview={reviewRequest} />
 
-      <RouteAnomalySection alerts={routeAnomalyAlerts} onOpen={() => setActive?.('dispatch.routeAnalysis')} />
+      <RouteAnomalySection alerts={routeAnomalyAlerts} onOpen={() => setActive?.('routeAnalysis.trips')} />
 
       <Section kind="tax" alerts={grouped.tax} onComplete={setSelectedAlert} />
       <Section kind="permit" alerts={grouped.permit} onComplete={setSelectedAlert} />

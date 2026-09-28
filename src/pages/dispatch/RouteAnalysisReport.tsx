@@ -284,7 +284,7 @@ export function RouteAnalysisReport({ setActive, setSubject }: Props) {
                   key={trip.round.id}
                   style={{ cursor: 'pointer', background: '#FEE2E2' }}
                   onClick={() => {
-                    setSubject({ type: 'round', id: trip.round.id, origin: 'dispatch.routeAnalysis' })
+                    setSubject({ type: 'round', id: trip.round.id, origin: 'routeAnalysis.trips' })
                     setActive('dispatch.round')
                   }}
                 >

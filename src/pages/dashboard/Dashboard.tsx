@@ -986,10 +986,16 @@ const REPORT_GROUPS: { title: string; reports: { id: string; label: string; desc
     title: 'งานขนส่ง',
     reports: [
       { id: 'dispatch.report',  label: 'รายงานสรุปงานขนส่ง',     desc: 'KPI ต่อรอบ + แบบฟอร์มรายเที่ยว · พิมพ์ PDF', icon: 'chart' },
-      { id: 'dispatch.routeAnalysis', label: 'วิเคราะห์เที่ยววิ่งตามเส้นทาง', desc: 'เทียบระยะทาง/อัตราน้ำมันกับค่าเฉลี่ยเส้นทาง · แจ้งเตือนเที่ยวผิดปกติ', icon: 'alert' },
       { id: 'dispatch.monthly', label: 'รายงานรายเดือน',          desc: 'สรุปงานขนส่งแยกตามเดือน',                  icon: 'calendar' },
       { id: 'dispatch.vehicleMonthly', label: 'สรุปรายเที่ยวรายเดือน (ต่อคัน)', desc: 'พิมพ์รายเที่ยวต่อทะเบียน · นับตามวันเปิดงาน', icon: 'calendar' },
       { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน',       desc: 'ดูประวัติงานทั้งหมด',                       icon: 'history' },
+    ],
+  },
+  {
+    title: 'วิเคราะห์เส้นทาง',
+    reports: [
+      { id: 'routeAnalysis.trips', label: 'วิเคราะห์เที่ยววิ่งตามเส้นทาง', desc: 'เทียบระยะทาง/อัตราน้ำมันกับค่าเฉลี่ยเส้นทาง · แจ้งเตือนเที่ยวผิดปกติ', icon: 'alert' },
+      { id: 'routeAnalysis.locations', label: 'ทะเบียนสถานที่', desc: 'จัดการชื่อต้นทาง/ปลายทางที่ใช้ในการวิเคราะห์', icon: 'pin' },
     ],
   },
   {
