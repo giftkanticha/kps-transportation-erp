@@ -20,11 +20,15 @@ export function FuelReconciliation() {
   const [syncLog, setSyncLog] = useState<string[]>([])
 
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
-  const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: allFuelTxs = [], isLoading: txsLoading } = useList<FuelTransaction>('fuel_transactions')
   const { data: dispatches = [] } = useDispatches()
   const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
-  const { data: legacyRecords = [] } = useList<FuelRecord>('fuel_records')
+  const { data: legacyRecords = [], isLoading: recordsLoading } = useList<FuelRecord>('fuel_records')
   const { data: fuelStock = [] } = useList<FuelStock>('fuel_stock')
+  // "ยังไม่ซิงค์" ต้องเทียบกับ fuel_transactions ที่โหลดครบแล้วเท่านั้น — ถ้ากด
+  // ซิงค์ตอนข้อมูลยังโหลดไม่เสร็จ (allFuelTxs ว่างชั่วคราว) รายการที่ซิงค์ไปแล้ว
+  // จะดูเหมือนยังไม่ซิงค์ และถูกสร้างซ้ำอีกรอบในตาราง fuel_transactions
+  const referenceDataLoading = txsLoading || recordsLoading
   const fuelTxs = useMemo(
     () => allFuelTxs.filter(t => t.status !== 'REVERSED'),
     [allFuelTxs],
@@ -78,6 +82,12 @@ export function FuelReconciliation() {
   // ── Sync: create FuelTransactions for legacy-only records ─────────────────
 
   const handleSync = async () => {
+    // กันพลาด: ถ้าข้อมูลอ้างอิงยังโหลดไม่เสร็จ legacyOnly จะยังไม่ตรงกับความจริง
+    // (เห็นรายการที่ซิงค์ไปแล้วเป็น "ยังไม่ซิงค์") กดตอนนี้จะสร้างรายการซ้ำ
+    if (referenceDataLoading) {
+      alert('ข้อมูลกำลังโหลด กรุณารอสักครู่แล้วลองใหม่')
+      return
+    }
     if (!confirm(`ซิงค์ ${legacyOnly.length} รายการ?\nระบบจะสร้าง FuelTransaction สำหรับรายการที่ยังไม่ได้ migrate`)) return
 
     setSyncing(true)
@@ -312,14 +322,18 @@ export function FuelReconciliation() {
               </div>
               <button
                 onClick={handleSync}
-                disabled={syncing}
+                disabled={syncing || referenceDataLoading}
                 style={{
-                  background: syncing ? '#9CA3AF' : '#0066CC', color: '#fff', border: 'none',
-                  borderRadius: 8, padding: '10px 24px', cursor: syncing ? 'default' : 'pointer',
+                  background: (syncing || referenceDataLoading) ? '#9CA3AF' : '#0066CC', color: '#fff', border: 'none',
+                  borderRadius: 8, padding: '10px 24px', cursor: (syncing || referenceDataLoading) ? 'default' : 'pointer',
                   fontSize: 14, fontWeight: 600, fontFamily: 'inherit',
                 }}
               >
-                {syncing ? '⏳ กำลังซิงค์...' : `🔄 ซิงค์ข้อมูล ${legacyOnly.length} รายการ`}
+                {syncing
+                  ? '⏳ กำลังซิงค์...'
+                  : referenceDataLoading
+                    ? '⏳ กำลังโหลดข้อมูล...'
+                    : `🔄 ซิงค์ข้อมูล ${legacyOnly.length} รายการ`}
               </button>
             </>
           )}
