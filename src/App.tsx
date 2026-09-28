@@ -23,6 +23,7 @@ import { DispatchRoundOpen } from './pages/dispatch/DispatchRoundOpen'
 import { DispatchRoundDetail } from './pages/dispatch/DispatchRoundDetail'
 import { DispatchRoundClose } from './pages/dispatch/DispatchRoundClose'
 import { DispatchSummaryReport } from './pages/dispatch/DispatchSummaryReport'
+import { RouteAnalysisReport } from './pages/dispatch/RouteAnalysisReport'
 import { DispatchVehicleMonthlyReport } from './pages/dispatch/DispatchVehicleMonthlyReport'
 import { DispatchHistory } from './pages/dispatch/DispatchHistory'
 import { SubcontractorModule } from './pages/subcontractors/SubcontractorModule'
@@ -71,6 +72,7 @@ const crumbMap: Record<string, string> = {
   'dispatch.monthly': 'งานขนส่ง • รายงานประจำเดือน',
   'dispatch.vehicleMonthly': 'งานขนส่ง • สรุปรายเที่ยวรายเดือน (ต่อคัน)',
   'dispatch.report': 'งานขนส่ง • รายงานสรุป',
+  'dispatch.routeAnalysis': 'งานขนส่ง • วิเคราะห์เที่ยววิ่งตามเส้นทาง',
   'dispatch.history': 'งานขนส่ง • ประวัติงาน',
   'dispatch.locations': 'งานขนส่ง • จัดการสถานที่',
   'dispatch.billing': 'งานขนส่ง • สรุป/วางบิลรายลูกค้า',
@@ -150,7 +152,7 @@ export default function App() {
         return <Dashboard user={legacyUser} setActive={setActive} />
 
       case 'alerts':
-        return <AlertsTasksPage user={legacyUser} />
+        return <AlertsTasksPage user={legacyUser} setActive={setActive} />
 
       case 'vehicles':
         return <VehiclesPage setActive={setActive} setSubject={setSubject} user={legacyUser} />
@@ -207,6 +209,8 @@ export default function App() {
         return <DispatchModule tab="monthly" setActive={setActive} user={legacyUser} />
       case 'dispatch.report':
         return <DispatchSummaryReport setActive={setActive} setSubject={setSubject} />
+      case 'dispatch.routeAnalysis':
+        return <RouteAnalysisReport setActive={setActive} setSubject={setSubject} />
       case 'dispatch.vehicleMonthly':
         return <DispatchVehicleMonthlyReport />
       case 'dispatch.history':

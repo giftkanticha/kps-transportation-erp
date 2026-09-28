@@ -1,10 +1,11 @@
 import { useState, useMemo, useEffect } from 'react'
-import { db } from '../../lib/db'
+import { db, ROUTE_ANOMALY_PCT } from '../../lib/db'
 import { useQueryClient } from '@tanstack/react-query'
 import { useList, useUpdate } from '../../hooks/useTable'
 import { callRpc } from '../../lib/crud'
 import { Icon } from '../../components/ui'
 import { can } from '../../lib/permissions'
+import { useRouteAnomalies, routeGroupKey, routeTripFlags } from '../../hooks/useRouteAnomalies'
 import type { Vehicle, Maintenance, EditApprovalRequest, Dispatch, User } from '../../types'
 
 // วันนี้จริง normalize เป็นเที่ยงคืน — daysTo นับเป็น "วัน" เต็มไม่คลาดตามเวลาในวัน
@@ -651,14 +652,94 @@ function PendingApprovalsSection({ user, requests, onReview }: PendingApprovalsS
   )
 }
 
-interface AlertsTasksPageProps {
-  user: User
+const ROUTE_ANOMALY_WINDOW_DAYS = 30
+
+interface RouteAnomalyAlert {
+  id: string
+  roundCode: string
+  date: string
+  plate: string
+  route: string
+  kind: 'loaded' | 'deadhead'
+  distancePct: number | null
+  fuelPct: number | null
+  severity: 'red' | 'amber'
 }
 
-export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
+function RouteAnomalySection({ alerts, onOpen }: { alerts: RouteAnomalyAlert[]; onOpen: () => void }) {
+  const redCount = alerts.filter(a => a.severity === 'red').length
+  const amberCount = alerts.filter(a => a.severity === 'amber').length
+  const pctText = (p: number | null) => (p == null ? '—' : `${p > 0 ? '+' : ''}${(p * 100).toFixed(0)}%`)
+
+  return (
+    <div style={{ marginBottom: 26 }}>
+      <div className="row" style={{ marginBottom: 12, gap: 10, alignItems: 'center' }}>
+        <Icon name="alert" size={18} style={{ color: 'var(--primary)' }} />
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>
+          เที่ยววิ่งผิดปกติ ({ROUTE_ANOMALY_WINDOW_DAYS} วันล่าสุด)
+        </h3>
+        {redCount > 0 && (
+          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: 'rgba(163,45,45,.10)', color: '#A32D2D' }}>
+            เร่งด่วน {redCount}
+          </span>
+        )}
+        {amberCount > 0 && (
+          <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: 'rgba(186,117,23,.10)', color: '#BA7517' }}>
+            ควรตรวจสอบ {amberCount}
+          </span>
+        )}
+        {alerts.length === 0 && <span className="muted" style={{ fontSize: 12 }}>— ไม่มีรายการ —</span>}
+      </div>
+
+      {alerts.length > 0 && (
+        <div className="grid-3" style={{ gap: 14 }}>
+          {alerts.map(a => {
+            const borderColor = a.severity === 'red' ? '#A32D2D' : '#BA7517'
+            return (
+              <div key={a.id} className="card" style={{ padding: 16, borderLeft: `4px solid ${borderColor}`, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div>
+                  <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                    <span className="mono" style={{ fontSize: 15, fontWeight: 700, color: 'var(--primary)' }}>{a.plate}</span>
+                    <span className="muted" style={{ fontSize: 11.5 }}>{a.roundCode}</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-2)', marginTop: 4 }}>
+                    {a.route} · {a.kind === 'deadhead' ? 'ตีเปล่า' : 'มีสินค้า'} · {db.thaiDate(a.date)}
+                  </div>
+                  <div style={{ fontSize: 12, marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {a.distancePct != null && a.distancePct > ROUTE_ANOMALY_PCT && (
+                      <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: '#FEE2E2', color: '#991B1B' }}>
+                        ระยะทางเกิน {pctText(a.distancePct)}
+                      </span>
+                    )}
+                    {a.fuelPct != null && a.fuelPct < -ROUTE_ANOMALY_PCT && (
+                      <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 999, background: '#FEE2E2', color: '#991B1B' }}>
+                        น้ำมันเกิน {pctText(a.fuelPct)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button onClick={onOpen} className="btn primary sm" style={{ alignSelf: 'flex-start' }}>
+                  <Icon name="chart" size={14} /> ดูรายละเอียด
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface AlertsTasksPageProps {
+  user: User
+  setActive?: (id: string) => void
+}
+
+export function AlertsTasksPage({ user, setActive }: AlertsTasksPageProps) {
   const qc = useQueryClient()
   const [selectedAlert, setSelectedAlert] = useState<AlertItem | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
+  const { trips: routeTrips, baselineMap } = useRouteAnomalies()
 
   const { data: editApprovals = [] } = useList<EditApprovalRequest>('edit_approvals')
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
@@ -743,6 +824,34 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
 
   const alerts = useMemo(() => buildAlerts(vehicles, maintenance), [vehicles, maintenance])
 
+  const routeAnomalyAlerts = useMemo<RouteAnomalyAlert[]>(() => {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - ROUTE_ANOMALY_WINDOW_DAYS)
+    const cutoffStr = cutoff.toISOString().slice(0, 10)
+    return routeTrips
+      .filter(t => t.date >= cutoffStr)
+      .map(t => ({ trip: t, flags: routeTripFlags(t, baselineMap.get(routeGroupKey(t.routeKey, t.kind))) }))
+      .filter(x => x.flags.anomaly)
+      .map(({ trip, flags }): RouteAnomalyAlert => {
+        const severity: 'red' | 'amber' =
+          (flags.distancePct != null && flags.distancePct > ROUTE_ANOMALY_PCT * 2) ||
+          (flags.fuelPct != null && flags.fuelPct < -ROUTE_ANOMALY_PCT * 2)
+            ? 'red' : 'amber'
+        return {
+          id: trip.round.id,
+          roundCode: trip.round.code,
+          date: trip.date,
+          plate: trip.vehicle?.plate ?? '—',
+          route: `${trip.origin} → ${trip.destination}`,
+          kind: trip.kind,
+          distancePct: flags.distancePct,
+          fuelPct: flags.fuelPct,
+          severity,
+        }
+      })
+      .sort((a, b) => (a.severity === b.severity ? b.date.localeCompare(a.date) : a.severity === 'red' ? -1 : 1))
+  }, [routeTrips, baselineMap])
+
   const grouped = useMemo(() => {
     const map: Record<AlertKind, AlertItem[]> = {
       tax: [],
@@ -807,13 +916,15 @@ export function AlertsTasksPage({ user }: AlertsTasksPageProps) {
 
       <PendingApprovalsSection user={user} requests={pendingApprovals} onReview={reviewRequest} />
 
+      <RouteAnomalySection alerts={routeAnomalyAlerts} onOpen={() => setActive?.('dispatch.routeAnalysis')} />
+
       <Section kind="tax" alerts={grouped.tax} onComplete={setSelectedAlert} />
       <Section kind="permit" alerts={grouped.permit} onComplete={setSelectedAlert} />
       <Section kind="insurance" alerts={grouped.insurance} onComplete={setSelectedAlert} />
       <Section kind="mileage" alerts={grouped.mileage} onComplete={setSelectedAlert} />
       <Section kind="repair" alerts={grouped.repair} onComplete={setSelectedAlert} />
 
-      {alerts.length === 0 && (
+      {alerts.length === 0 && routeAnomalyAlerts.length === 0 && (
         <div className="card pad" style={{ textAlign: 'center', padding: 40 }}>
           <div style={{ fontSize: 14, color: 'var(--text-2)' }}>
             ไม่มีรายการที่ต้องดำเนินการในตอนนี้

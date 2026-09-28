@@ -40,6 +40,7 @@ const MANAGER_PLUS_ROUTES = new Set<string>([
   'fuel.report', 'fuel.summary', 'fuel.reconcile', 'fuel.prices',
   'dispatch.report',  // drivers see 'dispatch.history' instead — money columns are hidden there
   'dispatch.vehicleMonthly',
+  'dispatch.routeAnalysis',
   'dispatch.locations',  // master data — managers/admins curate it
   'dispatch.billing',    // money — billing notes & receivables
 

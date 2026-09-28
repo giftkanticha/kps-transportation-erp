@@ -16,6 +16,12 @@ export const DSP_KMPL_THRESHOLD = 2.5
 export const DEFAULT_TANK_CAPACITY = 500
 export const HOME_BASE = 'โรงงาน KPS'
 
+// ── Route/trip analysis (วิเคราะห์เที่ยววิ่งตามเส้นทาง) ─────────────────────
+// ค่ามาตรฐานต่อเส้นทางคำนวณจากค่าเฉลี่ยเที่ยวย้อนหลังของเส้นทาง+ประเภทเดียวกัน
+// (ไป-กลับมีสินค้า แยกจากตีเปล่า) แล้วเทียบเที่ยวปัจจุบันกับค่าเฉลี่ยนั้น
+export const ROUTE_ANOMALY_PCT = 0.15 // ±15% ถือว่าผิดปกติเทียบค่าเฉลี่ยเส้นทางเดียวกัน
+export const ROUTE_MIN_SAMPLES = 3 // ต้องมีเที่ยวย้อนหลังอย่างน้อยเท่านี้จึงจะสรุปค่าเฉลี่ยได้
+
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 function load(): AppState | null {
