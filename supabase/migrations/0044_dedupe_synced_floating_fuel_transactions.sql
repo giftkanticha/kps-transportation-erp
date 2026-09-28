@@ -1,46 +1,57 @@
--- FuelReconciliation's "sync" tool (entry_method = 'MANUAL_ADMIN') matches a
--- legacy fuel_records row against fuel_transactions by vehicle + date +
--- liters, then inserts a fuel_transactions row for anything unmatched. If the
--- sync button was clicked before the fuel_transactions/fuel_records queries
--- had finished loading, every legacy record looked "unsynced" (the local list
--- was still empty), so records that already had a matching transaction got a
--- second (or third) row created for them. None of these extra rows touch
--- fuel_records, so the fuel history page (reads fuel_records) stayed correct
--- while the floating-fuel list (reads fuel_transactions) showed duplicates.
+-- Production tables live in the `kps` schema (confirmed via
+-- information_schema.tables), which is also what the Supabase client is
+-- configured to use (see src/lib/supabase.ts) — the SQL Editor's default
+-- search_path is `public`, so every table reference below is
+-- schema-qualified (as earlier migrations like 0043 had to learn too).
 --
--- Each sync-created row's note embeds its source fuel_records.id
--- ("Migrated from legacy FuelRecord <id>"), so rows created from the same
--- source record can be identified exactly (not just by matching values) and
--- collapsed to one. The earliest row per source record is kept; the rest are
--- marked REVERSED, the same soft-delete status the app already excludes
--- everywhere it reads fuel_transactions.
+-- Symptom: the dispatch round-close screen's "น้ำมันลอยรอผูก" list (reads
+-- kps.fuel_transactions where status = 'FLOATING') shows 2-3 rows with the
+-- same vehicle, date, liters and odometer, while the fuel history page
+-- (reads kps.fuel_records) shows a single row for that same fill — so the
+-- duplicates are extra fuel_transactions rows with no fuel_records
+-- counterpart, most likely created by FuelReconciliation's "sync" tool
+-- re-matching an already-synced legacy record as unsynced (see
+-- FuelReconciliation.tsx's loading-state guard fixed alongside this
+-- migration).
+--
+-- This collapses every group of FLOATING fuel_transactions rows that share
+-- vehicle + date + liters + total down to one (the earliest), marking the
+-- rest REVERSED — the same soft-delete status the app already excludes
+-- everywhere it reads fuel_transactions. Nothing is hard-deleted and
+-- kps.fuel_records is never touched, so this is safe to re-run and easy to
+-- undo (flip status back to 'FLOATING' and clear reversed_at/reversal_of)
+-- if a group turns out to be two genuinely distinct fills.
 
-WITH synced AS (
+WITH grouped AS (
   SELECT
     id,
+    vehicle_id,
+    date,
+    liters,
+    total,
     created_at,
-    substring(note FROM 'Migrated from legacy FuelRecord (.*)$') AS source_fuel_record_id,
     ROW_NUMBER() OVER (
-      PARTITION BY substring(note FROM 'Migrated from legacy FuelRecord (.*)$')
+      PARTITION BY vehicle_id, date, liters, total
       ORDER BY created_at ASC, id ASC
     ) AS rn
-  FROM fuel_transactions
-  WHERE entry_method = 'MANUAL_ADMIN'
-    AND status = 'FLOATING'
-    AND note LIKE 'Migrated from legacy FuelRecord %'
+  FROM kps.fuel_transactions
+  WHERE status = 'FLOATING'
 ),
 dupes AS (
-  SELECT s.id AS dupe_id, keep.id AS kept_id
-  FROM synced s
-  JOIN synced keep
-    ON keep.source_fuel_record_id = s.source_fuel_record_id
-   AND keep.rn = 1
-  WHERE s.rn > 1
+  SELECT d.id AS dupe_id, k.id AS kept_id
+  FROM grouped d
+  JOIN grouped k
+    ON k.vehicle_id = d.vehicle_id
+   AND k.date = d.date
+   AND k.liters = d.liters
+   AND k.total = d.total
+   AND k.rn = 1
+  WHERE d.rn > 1
 )
-UPDATE fuel_transactions ft
+UPDATE kps.fuel_transactions ft
 SET status = 'REVERSED',
     reversed_at = NOW(),
-    reversal_of = d.kept_id,
-    note = ft.note || ' [auto-dedup: duplicate created by re-running fuel sync before data finished loading]'
-FROM dupes d
-WHERE ft.id = d.dupe_id;
+    reversal_of = dp.kept_id,
+    note = COALESCE(ft.note, '') || ' [auto-dedup: duplicate floating fuel entry — same vehicle/date/liters/total]'
+FROM dupes dp
+WHERE ft.id = dp.dupe_id;
