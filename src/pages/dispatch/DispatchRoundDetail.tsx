@@ -3,6 +3,7 @@ import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
+import { FERTILIZER_DEPOT_CATEGORY, RETAIL_SHOP_CATEGORY } from '../../lib/locationCategories'
 import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole, Location } from '../../types'
 import { Icon, Field, LocationCombobox } from '../../components/ui'
 
@@ -112,6 +113,7 @@ function LegModal({
   const destIsCustomer = customerLocs.some(l => l.name === f.destination.trim())
   const set = <K extends keyof LegFormState>(k: K, v: LegFormState[K]) => setF(s => ({ ...s, [k]: v }))
   const isReturn = f.legType === 'return'
+  const isBackhaul = f.legType === 'backhaul'
   const isLump = f.priceMode === 'lump'
 
   // Switching priceMode auto-converts the weight value so the displayed number
@@ -199,10 +201,26 @@ function LegModal({
           </label>
           <div className="grid-2" style={{ gap: 12 }}>
             <Field label="ต้นทาง *">
-              <LocationCombobox value={f.origin} onChange={v => set('origin', v)} placeholder="เช่น โรงงาน KPS" />
+              <LocationCombobox
+                value={f.origin}
+                onChange={v => set('origin', v)}
+                placeholder={isBackhaul ? 'เช่น คลังปุ๋ยตราไก่แดง' : 'เช่น โรงงาน KPS'}
+                categoryFilter={isBackhaul ? FERTILIZER_DEPOT_CATEGORY : undefined}
+                defaultCategory={isBackhaul ? FERTILIZER_DEPOT_CATEGORY : undefined}
+              />
+              {isBackhaul && (
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  แสดงเฉพาะสถานที่หมวด "{FERTILIZER_DEPOT_CATEGORY}" — ไม่มีในรายการก็พิมพ์ชื่อใหม่ได้ตามปกติ
+                </div>
+              )}
             </Field>
             <Field label="ปลายทาง *">
-              <LocationCombobox value={f.destination} onChange={v => set('destination', v)} placeholder="เช่น กรุงเทพ" />
+              <LocationCombobox
+                value={f.destination}
+                onChange={v => set('destination', v)}
+                placeholder="เช่น กรุงเทพ"
+                defaultCategory={isBackhaul ? RETAIL_SHOP_CATEGORY : undefined}
+              />
             </Field>
           </div>
           <div className="grid-2" style={{ gap: 12 }}>
