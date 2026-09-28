@@ -28,7 +28,9 @@ function pctText(p: number | null): string {
 
 export function RouteAnalysisReport({ setActive, setSubject }: Props) {
   const today = new Date()
-  const [from, setFrom] = useSessionState('route_analysis_from', `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`)
+  // หน้านี้เอาไว้วิเคราะห์แนวโน้ม ไม่ใช่รายงานประจำเดือนแบบหน้าอื่น จึงเริ่มต้นแบบไม่จำกัด
+  // วันที่ (แสดงเที่ยวย้อนหลังทั้งหมด) แทนการเริ่มที่ต้นเดือนปัจจุบันซึ่งจะบังเที่ยวเก่ากว่านั้น
+  const [from, setFrom] = useSessionState('route_analysis_from', '')
   const [to, setTo] = useSessionState('route_analysis_to', today.toISOString().slice(0, 10))
   const [vehicleId, setVehicleId] = useSessionState('route_analysis_vehicle', '')
   const [kindFilter, setKindFilter] = useSessionState<KindFilter>('route_analysis_kind', 'all')
