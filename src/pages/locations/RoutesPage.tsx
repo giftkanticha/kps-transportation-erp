@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, StatusBadge, SearchInput } from '../../components/ui'
 import { db } from '../../lib/db'
+import { mapsDirectionsUrl } from '../../lib/mapsLink'
 import type { Location, Route } from '../../types'
 
 type PriceMode = 'per_ton' | 'per_kg' | 'lump'
@@ -25,21 +26,6 @@ const PRICE_MODE_LABEL: Record<PriceMode, string> = {
   per_ton: 'บาท/ตัน',
   per_kg: 'บาท/กก.',
   lump: 'บาท/เที่ยว (เหมา)',
-}
-
-// ใช้ชื่อ+ที่อยู่+จังหวัดที่มีอยู่แล้วในทะเบียนสถานที่ ประกอบเป็นคำค้นหาให้ Google Maps
-// เดาพิกัดเอง — ไม่ต้องผูก API/พิกัดจริง แค่เปิดดูระยะทางจริงแล้วพิมพ์ใส่เอง
-function mapsQueryFor(l?: Location): string {
-  if (!l) return ''
-  return [l.name, l.address, l.province].filter(Boolean).join(', ')
-}
-
-function mapsDirectionsUrl(origin?: Location, destination?: Location): string | null {
-  const o = mapsQueryFor(origin)
-  const d = mapsQueryFor(destination)
-  if (!o || !d) return null
-  const params = new URLSearchParams({ api: '1', origin: o, destination: d, travelmode: 'driving' })
-  return `https://www.google.com/maps/dir/?${params.toString()}`
 }
 
 function Modal({
