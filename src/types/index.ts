@@ -123,12 +123,16 @@ export interface Location {
 
 // เส้นทางมาตรฐาน (ต้นทาง→ปลายทาง) — ให้แอดมินตั้งระยะทาง/อัตราน้ำมันอ้างอิงเองได้
 // ใช้เป็น fallback baseline ตอนเส้นทางยังไม่มีประวัติพอ (ดู useRouteAnomalies.ts)
+// standardPriceMode/standardPrice = ค่าบรรทุกมาตรฐานของเส้นทางนี้ (เช่น KPS→CP-SR
+// เหมา 0.5 บาท/กก.) ใช้เป็นคำแนะนำราคาให้กดใช้ตอนกรอกขาใหม่ ไม่ได้บังคับ auto-fill ทับ
 export interface Route {
   id: string
   originLocationId: string
   destinationLocationId: string
   standardDistanceKm: number | null
   standardKmpl: number | null
+  standardPriceMode: 'per_ton' | 'per_kg' | 'lump' | null
+  standardPrice: number | null
   notes: string
   active: boolean
 }

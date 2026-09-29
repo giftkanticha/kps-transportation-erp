@@ -4,15 +4,28 @@ import { Icon, Field, StatusBadge, SearchInput } from '../../components/ui'
 import { db } from '../../lib/db'
 import type { Location, Route } from '../../types'
 
+type PriceMode = 'per_ton' | 'per_kg' | 'lump'
+
 interface RouteForm {
   originLocationId: string
   destinationLocationId: string
   standardDistanceKm: string
   standardKmpl: string
+  standardPriceMode: PriceMode
+  standardPrice: string
   notes: string
 }
 
-const EMPTY: RouteForm = { originLocationId: '', destinationLocationId: '', standardDistanceKm: '', standardKmpl: '', notes: '' }
+const EMPTY: RouteForm = {
+  originLocationId: '', destinationLocationId: '', standardDistanceKm: '', standardKmpl: '',
+  standardPriceMode: 'per_ton', standardPrice: '', notes: '',
+}
+
+const PRICE_MODE_LABEL: Record<PriceMode, string> = {
+  per_ton: 'บาท/ตัน',
+  per_kg: 'บาท/กก.',
+  lump: 'บาท/เที่ยว (เหมา)',
+}
 
 // ใช้ชื่อ+ที่อยู่+จังหวัดที่มีอยู่แล้วในทะเบียนสถานที่ ประกอบเป็นคำค้นหาให้ Google Maps
 // เดาพิกัดเอง — ไม่ต้องผูก API/พิกัดจริง แค่เปิดดูระยะทางจริงแล้วพิมพ์ใส่เอง
@@ -100,6 +113,8 @@ export function RoutesPage() {
       destinationLocationId: r.destinationLocationId,
       standardDistanceKm: r.standardDistanceKm != null ? String(r.standardDistanceKm) : '',
       standardKmpl: r.standardKmpl != null ? String(r.standardKmpl) : '',
+      standardPriceMode: r.standardPriceMode ?? 'per_ton',
+      standardPrice: r.standardPrice != null ? String(r.standardPrice) : '',
       notes: r.notes ?? '',
     })
     setShow(true)
@@ -125,6 +140,8 @@ export function RoutesPage() {
       destinationLocationId: form.destinationLocationId,
       standardDistanceKm: form.standardDistanceKm.trim() ? Number(form.standardDistanceKm) : null,
       standardKmpl: form.standardKmpl.trim() ? Number(form.standardKmpl) : null,
+      standardPriceMode: form.standardPrice.trim() ? form.standardPriceMode : null,
+      standardPrice: form.standardPrice.trim() ? Number(form.standardPrice) : null,
       notes: form.notes,
     }
     setBusy(true)
@@ -178,6 +195,7 @@ export function RoutesPage() {
               <th>ปลายทาง</th>
               <th className="num">ระยะทางมาตรฐาน (กม.)</th>
               <th className="num">อัตรามาตรฐาน (กม./ลิตร)</th>
+              <th className="num">ค่าบรรทุกมาตรฐาน</th>
               <th>หมายเหตุ</th>
               <th>สถานะ</th>
               <th></th>
@@ -192,6 +210,11 @@ export function RoutesPage() {
                 <td>{nameOf(r.destinationLocationId)}</td>
                 <td className="num">{r.standardDistanceKm != null ? db.fmt(r.standardDistanceKm) : <span className="muted">—</span>}</td>
                 <td className="num">{r.standardKmpl != null ? r.standardKmpl.toFixed(2) : <span className="muted">—</span>}</td>
+                <td className="num">
+                  {r.standardPrice != null && r.standardPriceMode
+                    ? `${db.fmt2(r.standardPrice)} ${PRICE_MODE_LABEL[r.standardPriceMode]}`
+                    : <span className="muted">—</span>}
+                </td>
                 <td className="muted" style={{ fontSize: 12.5 }}>{r.notes || '—'}</td>
                 <td><StatusBadge status={r.active ? 'active' : 'inactive'} /></td>
                 <td>
@@ -222,7 +245,7 @@ export function RoutesPage() {
               )
             })}
             {rows.length === 0 && (
-              <tr><td colSpan={7} className="empty" style={{ padding: 32 }}>ยังไม่มีเส้นทาง — กด "เพิ่มเส้นทางใหม่"</td></tr>
+              <tr><td colSpan={8} className="empty" style={{ padding: 32 }}>ยังไม่มีเส้นทาง — กด "เพิ่มเส้นทางใหม่"</td></tr>
             )}
           </tbody>
         </table>
@@ -286,13 +309,25 @@ export function RoutesPage() {
             <input type="number" step="0.01" value={form.standardKmpl} onChange={e => setForm(f => ({ ...f, standardKmpl: e.target.value }))} placeholder="เช่น 3.2" />
           </Field>
         </div>
+        <div className="grid-2" style={{ gap: 12, marginTop: 12 }}>
+          <Field label="รูปแบบค่าบรรทุกมาตรฐาน">
+            <select value={form.standardPriceMode} onChange={e => setForm(f => ({ ...f, standardPriceMode: e.target.value as PriceMode }))}>
+              <option value="per_ton">ต่อตัน</option>
+              <option value="per_kg">ต่อกิโลกรัม</option>
+              <option value="lump">เหมา (ต่อเที่ยว)</option>
+            </select>
+          </Field>
+          <Field label={`ค่าบรรทุกมาตรฐาน (${PRICE_MODE_LABEL[form.standardPriceMode]})`}>
+            <input type="number" step="0.01" value={form.standardPrice} onChange={e => setForm(f => ({ ...f, standardPrice: e.target.value }))} placeholder="เช่น 0.5" />
+          </Field>
+        </div>
         <div style={{ marginTop: 12 }}>
           <Field label="หมายเหตุ">
             <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} style={{ width: '100%', resize: 'vertical' }} />
           </Field>
         </div>
         <div className="muted" style={{ fontSize: 11.5, marginTop: 10 }}>
-          💡 เว้นว่างช่องไหนได้ถ้ายังไม่รู้ค่า — ระบบจะใช้ค่าเฉลี่ยจากเที่ยวย้อนหลังแทนถ้ามีเที่ยวพอ (≥3 เที่ยว) และใช้ค่าที่ตั้งไว้นี้เมื่อยังไม่มีประวัติพอ
+          💡 เว้นว่างช่องไหนได้ถ้ายังไม่รู้ค่า — ระบบจะใช้ค่าเฉลี่ยจากเที่ยวย้อนหลังแทนถ้ามีเที่ยวพอ (≥3 เที่ยว) และใช้ค่าที่ตั้งไว้นี้เมื่อยังไม่มีประวัติพอ ส่วนค่าบรรทุกมาตรฐานจะขึ้นเป็นคำแนะนำให้กดใช้ตอนกรอกขาใหม่ที่ต้นทาง-ปลายทางตรงกัน
         </div>
       </Modal>
     </div>
