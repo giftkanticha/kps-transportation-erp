@@ -58,6 +58,23 @@ const EMPTY_LEG: LegFormState = {
   loadDate: '', unloadDate: '',
 }
 
+function addDays(ymd: string, n: number): string {
+  const d = new Date(ymd + 'T00:00:00Z')
+  if (Number.isNaN(d.getTime())) return ''
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+// ค่าเริ่มต้นวันที่ของขาใหม่ (แก้ไขได้ในฟอร์ม): ขาแรกขึ้นของวันเปิดงาน ลงวันถัดไป;
+// ขาถัดไป (เช่น ขากลับ) ขึ้นวันเดียวกับที่ขาก่อนหน้าลงของ แล้วลงวันถัดไป
+function newLegDefaults(round: Dispatch, legs: DispatchLeg[]): LegFormState {
+  const prev = legs[legs.length - 1]
+  const openDate = (round.depart || round.date || '').slice(0, 10)
+  const prevUnload = prev ? (prev.unloadDate || (prev.loadDate ? addDays(prev.loadDate, 1) : '')) : ''
+  const loadDate = prevUnload || openDate
+  return { ...EMPTY_LEG, loadDate, unloadDate: loadDate ? addDays(loadDate, 1) : '' }
+}
+
 function legTypeLabel(t?: string): string {
   if (t === 'backhaul') return 'Backhaul'
   if (t === 'return') return 'Return (เปล่า)'
@@ -899,7 +916,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             <div className="right">
               <button
                 className="btn primary sm"
-                onClick={() => setEditingLeg({ index: -1, data: { ...EMPTY_LEG, loadDate: (round.depart || round.date || '').slice(0, 10) } })}
+                onClick={() => setEditingLeg({ index: -1, data: newLegDefaults(round, legs) })}
               >
                 <Icon name="plus" size={14} /> เพิ่มขาใหม่
               </button>
@@ -911,7 +928,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             ยังไม่มีขา —{' '}
             {!isClosed && (
               <a
-                onClick={() => setEditingLeg({ index: -1, data: { ...EMPTY_LEG, loadDate: (round.depart || round.date || '').slice(0, 10) } })}
+                onClick={() => setEditingLeg({ index: -1, data: newLegDefaults(round, legs) })}
                 style={{ cursor: 'pointer', color: 'var(--primary)' }}
               >
                 เพิ่มขาแรก
