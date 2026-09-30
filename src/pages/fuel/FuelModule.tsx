@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { db, uid } from '../../lib/db'
 import { callRpc } from '../../lib/crud'
-import { useList, useInsert } from '../../hooks/useTable'
+import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon } from '../../components/ui/Icon'
 import { Field } from '../../components/ui/Field'
 import { VehiclePickerSidebar } from '../../components/ui/VehiclePickerSidebar'
@@ -10,7 +10,7 @@ import { FontScaleControl } from '../../components/ui/FontScaleControl'
 import { usePrint } from '../../hooks/usePrint'
 import { useAuth } from '../../context/AuthContext'
 import type { CSSProperties } from 'react'
-import type { FuelRecord, Vehicle, Employee } from '../../types'
+import type { FuelRecord, FuelTransaction, Dispatch, Vehicle, Employee } from '../../types'
 import { FuelStockDashboard } from './FuelStockDashboard'
 import { FuelInventorySummary } from './FuelInventorySummary'
 import { ExpressFuelLog } from './ExpressFuelLog'
@@ -71,9 +71,72 @@ function FuelRecord({ historyOnly = false }: { historyOnly?: boolean }) {
   const { data: employees = [] } = useList<Employee>('employees')
   const { data: fuel = [] } = useList<FuelRecord>('fuel_records')
   const insertFuel = useInsert<FuelRecord>('fuel_records')
+  const deleteFuel = useDelete('fuel_records')
+  const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
+  const { data: fuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
+  const { data: rounds = [] } = useList<Dispatch>('dispatch')
   const [editing, setEditing] = useState<FuelRecord | null>(null)
   const [editForm, setEditForm] = useState({ liters: '', pricePerL: '', odometer: '' })
   const [savingEdit, setSavingEdit] = useState(false)
+
+  // ── สถานะผูกรอบ + ตรวจรายการซ้ำ (ประวัติการเติมน้ำมัน) ──────────────────────────
+  // fuel_records ไม่มี FK ไปรอบ: รายการที่ปิดรอบสร้างขึ้นมีรหัส TRIP-{รหัสรอบ}-…;
+  // รายการจากคีย์ด่วนจับคู่กับ fuel_transactions (รถ+วัน+ลิตร) แล้วดู tripId/status
+  const day10 = (d: string) => (d ?? '').slice(0, 10)
+  const linkInfo = useMemo(() => {
+    const m = new Map<string, { txId: string | null; roundCode: string | null; floating: boolean; tripMirror: boolean }>()
+    const usedTx = new Set<string>()
+    const roundById = new Map(rounds.map(r => [r.id, r]))
+    for (const f of fuel) {
+      const tripRound = rounds.find(r => r.code && f.code?.startsWith(`TRIP-${r.code}-`))
+      const tx = fuelTxs.find(t =>
+        !usedTx.has(t.id) && t.status !== 'REVERSED'
+        && t.vehicleId === f.vehicleId && day10(t.date) === day10(f.date)
+        && Math.abs(t.liters - f.liters) < 0.01,
+      )
+      if (tx) usedTx.add(tx.id)
+      const txRound = tx?.tripId ? roundById.get(tx.tripId) : undefined
+      m.set(f.id, {
+        txId: tx?.id ?? null,
+        roundCode: tripRound?.code ?? txRound?.code ?? null,
+        floating: tx?.status === 'FLOATING',
+        tripMirror: !!tripRound,
+      })
+    }
+    return m
+  }, [fuel, fuelTxs, rounds])
+
+  const dupKey = (f: FuelRecord) =>
+    [f.vehicleId, day10(f.date), Number(f.liters).toFixed(2), Number(f.total).toFixed(2), f.station].join('|')
+  const dupCount = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const f of fuel) m.set(dupKey(f), (m.get(dupKey(f)) ?? 0) + 1)
+    return m
+  }, [fuel])
+
+  const removeRecord = async (f: FuelRecord) => {
+    const info = linkInfo.get(f.id)
+    const plate = vehicles.find(v => v.id === f.vehicleId)?.plate ?? '—'
+    if (info?.tripMirror) {
+      alert(`รายการนี้เกิดจากการปิดรอบ ${info.roundCode} — ลบตรงนี้ไม่ได้\nให้แก้ไขจากหน้ารอบงาน (ปลดรอบ/ลบรอบ) เพื่อไม่ให้ต้นทุนรอบเพี้ยน`)
+      return
+    }
+    const warn = info?.roundCode ? `\n\n⚠ รายการนี้ผูกกับรอบ ${info.roundCode} — ต้นทุนน้ำมันของรอบจะลดลง` : ''
+    if (!confirm(`ลบรายการเติมน้ำมันนี้?\n${db.thaiDate(day10(f.date))} · ${plate} · ${f.liters} ลิตร · ${db.fmt(f.total)} บาท${warn}`)) return
+    try {
+      if (info?.txId) {
+        await updateFuelTx.mutateAsync({ id: info.txId, patch: { status: 'REVERSED', reversedAt: new Date().toISOString() } })
+      }
+      await deleteFuel.mutateAsync(f.id)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['fuel_records'] }),
+        queryClient.invalidateQueries({ queryKey: ['fuel_transactions'] }),
+        queryClient.invalidateQueries({ queryKey: ['fuel_stock'] }),
+      ])
+    } catch (e) {
+      alert('ลบไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
 
   const openEdit = (record: FuelRecord) => {
     setEditing(record)
@@ -129,6 +192,13 @@ function FuelRecord({ historyOnly = false }: { historyOnly?: boolean }) {
       alert('กรุณาเลือกรถ คนขับ และระบุปริมาณ')
       return
     }
+    const station = form.source === 'tank' ? 'ถังโรงงาน' : 'ปั๊มภายนอก'
+    const today10 = new Date().toISOString().slice(0, 10)
+    const dup = fuel.find(f =>
+      f.vehicleId === form.vehicleId && day10(f.date) === today10
+      && f.station === station && Math.abs(f.liters - +form.liters) < 0.01,
+    )
+    if (dup && !confirm(`⚠ มีรายการเติมน้ำมันแบบเดียวกันบันทึกไว้แล้ว\n(รถคันนี้ · วันนี้ · ${form.liters} ลิตร · ${station})\n\nต้องการบันทึกซ้ำจริงหรือไม่?`)) return
     const recId = uid('f')
     try {
       await insertFuel.mutateAsync({
@@ -303,12 +373,16 @@ function FuelRecord({ historyOnly = false }: { historyOnly?: boolean }) {
                 {isManager && <th className="right">จำนวนเงิน</th>}
                 <th>คนขับ</th>
                 <th>แหล่งน้ำมัน</th>
+                <th>ผูกรอบ</th>
                 {isManager && <th style={{ textAlign: 'center' }}>ดำเนินการ</th>}
               </tr>
             </thead>
             <tbody>
-              {fuel.map((f) => (
-                <tr key={f.id}>
+              {fuel.map((f) => {
+                const info = linkInfo.get(f.id)
+                const isDup = (dupCount.get(dupKey(f)) ?? 0) > 1
+                return (
+                <tr key={f.id} style={isDup ? { background: 'rgba(220,38,38,.07)' } : undefined}>
                   <td className="num muted">{db.thaiDate(f.date.slice(0, 10))}</td>
                   <td>
                     <a style={{ color: 'var(--primary)', fontWeight: 600 }} className="mono">
@@ -329,15 +403,29 @@ function FuelRecord({ historyOnly = false }: { historyOnly?: boolean }) {
                       <span className="badge blue">ถังโรงงาน</span>
                     )}
                   </td>
+                  <td>
+                    {info?.roundCode ? (
+                      <span className="badge green">ผูกรอบ {info.roundCode}</span>
+                    ) : info?.floating ? (
+                      <span className="badge amber">น้ำมันลอย</span>
+                    ) : (
+                      <span className="muted" style={{ fontSize: 12 }}>ยังไม่ผูกรอบ</span>
+                    )}
+                    {isDup && <span className="badge red" style={{ marginLeft: 6 }} title="มีรายการเหมือนกันทุกช่อง (วัน/รถ/ลิตร/ยอด/แหล่ง)">⚠ ซ้ำ</span>}
+                  </td>
                   {isManager && (
-                    <td style={{ textAlign: 'center' }}>
+                    <td style={{ textAlign: 'center', whiteSpace: 'nowrap' }}>
                       <button className="btn ghost icon sm" onClick={() => openEdit(f)} title="แก้ไขรายการน้ำมัน">
                         <Icon name="edit" size={14} />
+                      </button>
+                      <button className="btn ghost icon sm" onClick={() => void removeRecord(f)} title="ลบรายการนี้" style={{ color: 'var(--danger, #dc2626)' }}>
+                        <Icon name="trash" size={14} />
                       </button>
                     </td>
                   )}
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>

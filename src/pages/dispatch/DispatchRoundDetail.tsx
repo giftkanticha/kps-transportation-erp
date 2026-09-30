@@ -698,6 +698,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
 
   const [editingLeg, setEditingLeg] = useState<{ index: number; data: LegFormState } | null>(null)
   const [deletingIndex, setDeletingIndex] = useState<number | null>(null)
+  const [redirectIndex, setRedirectIndex] = useState<number | null>(null)
   const [toast, setToast] = useState<ToastState | null>(null)
 
   if (!round) {
@@ -773,6 +774,65 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       setToast({ kind: 'success', msg: '✅ บันทึกขาเรียบร้อย' })
     } catch (e) {
       setToast({ kind: 'error', msg: '❌ บันทึกไม่สำเร็จ: ' + (e as Error).message })
+    }
+  }
+
+  // สินค้าไม่ผ่านที่ปลายทาง → ตีกลับแล้วส่งต่อที่อื่น: ขาเดิมกลายเป็นขาตีกลับ (ไม่วางบิล,
+  // ไม่นับรายได้, ส่งจริง 0) และเพิ่มขาใหม่จากปลายทางเดิมไปปลายทางใหม่ ต่อจากขาเดิม
+  const redirectLeg = async (i: number, newDestination: string, priceStr: string, date: string) => {
+    const orig = legs[i]
+    if (!orig?.id) return
+    const dest = newDestination.trim()
+    const mode = orig.priceMode || 'per_ton'
+    const price = Number(priceStr) || 0
+    const weight = orig.weight || 0
+    const note = `ตีกลับ: สินค้าไม่ผ่านที่ ${orig.destination} → ส่งต่อ ${dest}`
+    try {
+      await updateLeg.mutateAsync({
+        id: orig.id,
+        patch: {
+          noBill: true, billToLocationId: null, amount: 0, deliveredWeight: 0, wht: false,
+          unloadDate: date || orig.unloadDate || null,
+          notes: [orig.notes, note].filter(Boolean).join(' | '),
+        } as Partial<DispatchLeg>,
+      })
+      // เลื่อนขาหลังขาเดิมลง 1 ลำดับ เพื่อแทรกขาใหม่ต่อจากขาเดิม
+      for (let k = i + 1; k < legs.length; k++) {
+        const l = legs[k]
+        if (l.id) await updateLeg.mutateAsync({ id: l.id, patch: { sortOrder: k + 1 } as Partial<DispatchLeg> })
+      }
+      const fields: Record<string, unknown> = {
+        origin: orig.destination,
+        destination: dest,
+        billToLocationId: null,
+        cargo: orig.cargo,
+        cargoType: orig.cargoType,
+        priceMode: mode,
+        weight,
+        price,
+        amount: calcLegAmount(mode, weight, price),
+        legType: 'outbound',
+        notes: `ส่งต่อจากขาที่ตีกลับ (${orig.origin} → ${orig.destination})`,
+        wht: false,
+        noBill: false,
+        dispatchId: round.id,
+        sortOrder: i + 1,
+        deliveredWeight: null,
+        perDiem: 0,
+        closed: false,
+      }
+      if (date) { fields.loadDate = date; fields.unloadDate = addDays(date, 1) || date }
+      const created = await insertLeg.mutateAsync(fields as Partial<DispatchLeg> as DispatchLeg)
+      const nextLegs = legs.flatMap((l, ix) => {
+        if (ix === i) return [{ ...l, amount: 0, noBill: true }, created]
+        return [l]
+      })
+      const newRevenue = nextLegs.reduce((sum, l) => sum + (l.amount || 0), 0)
+      await updateDispatch.mutateAsync({ id: round.id, patch: { totalAmount: newRevenue, revenue: newRevenue } })
+      setRedirectIndex(null)
+      setToast({ kind: 'success', msg: price > 0 ? '✅ ย้ายปลายทางแล้ว — สร้างขาใหม่ให้เรียบร้อย' : '✅ ย้ายปลายทางแล้ว — อย่าลืมกรอกค่าขนส่งของขาใหม่' })
+    } catch (e) {
+      setToast({ kind: 'error', msg: '❌ ย้ายปลายทางไม่สำเร็จ: ' + (e as Error).message })
     }
   }
 
@@ -1009,6 +1069,16 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                           >
                             <Icon name="edit" size={14} />
                           </button>
+                          {l.legType !== 'return' && !l.noBill && (
+                            <button
+                              className="btn ghost icon sm"
+                              title="ย้ายปลายทาง (สินค้าไม่ผ่าน/ตีกลับ)"
+                              onClick={() => setRedirectIndex(i)}
+                              style={{ color: 'var(--amber)' }}
+                            >
+                              <Icon name="truck" size={14} />
+                            </button>
+                          )}
                           <button
                             className="btn ghost icon sm"
                             title="ลบ"
@@ -1044,6 +1114,15 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       </div>
 
       {isClosed && <ClosedSummary round={round} fuelRound={fuelRound} isManager={isManager} />}
+
+      {redirectIndex !== null && legs[redirectIndex] && (
+        <RedirectLegModal
+          leg={legs[redirectIndex]}
+          defaultDate={legs[redirectIndex].unloadDate || legs[redirectIndex].loadDate || (round.date || '').slice(0, 10)}
+          onCancel={() => setRedirectIndex(null)}
+          onConfirm={(dest, price, date) => redirectLeg(redirectIndex, dest, price, date)}
+        />
+      )}
 
       {editingLeg && (
         <LegModal
@@ -1213,6 +1292,61 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
           }}
         />
       )}
+    </div>
+  )
+}
+
+// ─── ย้ายปลายทาง (สินค้าไม่ผ่าน/ตีกลับ) ───────────────────────────────────────────
+function RedirectLegModal({
+  leg, defaultDate, onCancel, onConfirm,
+}: {
+  leg: DispatchLeg
+  defaultDate: string
+  onCancel: () => void
+  onConfirm: (destination: string, price: string, date: string) => Promise<void>
+}) {
+  const [dest, setDest] = useState('')
+  const [price, setPrice] = useState('')
+  const [date, setDate] = useState(defaultDate)
+  const [busy, setBusy] = useState(false)
+  const modeLabel = leg.priceMode === 'per_kg' ? 'บาท/กก.' : leg.priceMode === 'lump' ? 'บาท (เหมา)' : 'บาท/ตัน'
+  const same = dest.trim() !== '' && dest.trim() === leg.destination.trim()
+  return (
+    <div className="modal-bg" onClick={() => !busy && onCancel()}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 520 }}>
+        <div className="head"><h3>↩️ ย้ายปลายทาง (สินค้าไม่ผ่าน)</h3></div>
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: 13 }}>
+            ขาเดิม: <strong>{leg.origin} → {leg.destination}</strong>
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              ระบบจะตั้งขานี้เป็น "ตีกลับ" (ไม่วางบิล ไม่นับรายได้ ส่งจริง 0) แล้วเพิ่มขาใหม่
+              {' '}{leg.destination} → ปลายทางใหม่ ต่อจากขานี้ โดยคัดลอกสินค้าและน้ำหนักมาให้
+            </div>
+          </div>
+          <Field label="ปลายทางใหม่ *">
+            <LocationCombobox value={dest} onChange={setDest} placeholder="เช่น เซียมฮวด" usageField="destination" />
+          </Field>
+          <div className="grid-2" style={{ gap: 12 }}>
+            <Field label={`ค่าขนส่งขาใหม่ (${modeLabel})`}>
+              <input type="number" min="0" step="0.01" value={price} onChange={e => setPrice(e.target.value)} placeholder="กรอกทีหลังได้" />
+            </Field>
+            <Field label="วันที่ขึ้นสินค้า (ขาใหม่)">
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} />
+            </Field>
+          </div>
+          {same && <div style={{ fontSize: 12, color: 'var(--red)' }}>ปลายทางใหม่ซ้ำกับปลายทางเดิม</div>}
+          <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
+            <button className="btn" onClick={onCancel} disabled={busy}>ยกเลิก</button>
+            <button
+              className="btn primary"
+              disabled={busy || !dest.trim() || same}
+              onClick={async () => { setBusy(true); try { await onConfirm(dest, price, date) } finally { setBusy(false) } }}
+            >
+              {busy ? 'กำลังบันทึก…' : 'ยืนยันย้ายปลายทาง'}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
