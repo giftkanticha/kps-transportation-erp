@@ -20,6 +20,10 @@ interface BillableLeg {
 
 const roundMonth = (d: Dispatch) => (d.returnAt || d.depart || d.date || '').slice(0, 7)
 
+// เส้นทางของขา รวมจุดขึ้น/ลงเพิ่มเติม (ค่าบรรทุกยังคิดตามน้ำหนักขาเดียว)
+const legRoute = (l: { origin: string; destination: string; extraOrigins?: string[]; extraDestinations?: string[] }) =>
+  `${[l.origin, ...(l.extraOrigins ?? [])].join(' + ')} → ${[l.destination, ...(l.extraDestinations ?? [])].join(' + ')}`
+
 export function CustomerBilling() {
   const thisMonth = new Date().toISOString().slice(0, 7)
   const [customerId, setCustomerId] = useState('')   // = location id (is_customer)
@@ -351,7 +355,7 @@ export function CustomerBilling() {
     const body = rows.map(b => [
       db.thaiDate(legLoadDate(b)),
       db.thaiDate(legUnloadDate(b)),
-      `${b.leg.origin} → ${b.leg.destination}`,
+      legRoute(b.leg),
       b.leg.weight || 0,
       b.leg.deliveredWeight ?? '',
       lossKgOf(b.leg) ?? '',
@@ -501,7 +505,7 @@ export function CustomerBilling() {
                     <td className="mono">{plateOf(b.round)}</td>
                     <td>{db.thaiDate(legLoadDate(b))}</td>
                     <td>{db.thaiDate(legUnloadDate(b))}</td>
-                    <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
+                    <td style={{ fontSize: 12.5 }}>{legRoute(b.leg)}</td>
                     <td className="num right">{db.thb(b.gross)}</td>
                     <td>
                       <select value="" onChange={e => { pickBillTo(b.leg, e.target.value); e.target.value = '' }} disabled={updateLeg.isPending || insertLocation.isPending} style={{ minWidth: 200 }}>
@@ -541,7 +545,7 @@ export function CustomerBilling() {
                     <td className="mono">{plateOf(b.round)}</td>
                     <td>{db.thaiDate(legLoadDate(b))}</td>
                     <td>{db.thaiDate(legUnloadDate(b))}</td>
-                    <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
+                    <td style={{ fontSize: 12.5 }}>{legRoute(b.leg)}</td>
                     <td className="num right">{db.thb(b.gross)}</td>
                     <td className="right">
                       <button className="btn ghost sm" onClick={() => restoreNoBill(b.leg.id!)} disabled={updateLeg.isPending}>เอากลับมา</button>
@@ -590,7 +594,7 @@ export function CustomerBilling() {
                         <td className="mono">{plateOf(b.round)}</td>
                         <td>{db.thaiDate(legLoadDate(b))}</td>
                         <td>{db.thaiDate(legUnloadDate(b))}</td>
-                        <td style={{ fontSize: 12.5 }}>{b.leg.origin} → {b.leg.destination}</td>
+                        <td style={{ fontSize: 12.5 }}>{legRoute(b.leg)}</td>
                         <td style={{ fontSize: 12.5 }}>{b.leg.cargoType || '—'}</td>
                         <td className="num right">{db.thb2(b.gross)}</td>
                         <td className="num right" onClick={e => e.stopPropagation()}>
@@ -751,7 +755,7 @@ export function CustomerBilling() {
                 <tr key={b.leg.id}>
                   <td>{db.thaiDate(legLoadDate(b))}</td>
                   <td>{db.thaiDate(legUnloadDate(b))}</td>
-                  <td>{b.leg.origin} → {b.leg.destination}</td>
+                  <td>{legRoute(b.leg)}</td>
                   <td className="num right">{db.fmt((b.leg.weight || 0) * 1000)}</td>
                   <td className="num right">{b.leg.deliveredWeight != null ? db.fmt(b.leg.deliveredWeight * 1000) : '—'}</td>
                   <td className="num right" style={{ width: 38 }}>{lossLabel(lossKgOf(b.leg))}</td>

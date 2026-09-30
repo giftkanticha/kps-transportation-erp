@@ -187,6 +187,10 @@ export interface DispatchLeg {
   loadDate?: string | null
   /** วันที่ลงสินค้า/ส่งของปลายทาง */
   unloadDate?: string | null
+  /** จุดขึ้นสินค้าเพิ่มเติม (นอกจากต้นทางหลัก) — ค่าบรรทุกยังคิดตามน้ำหนัก/ราคาของขาเดียว */
+  extraOrigins?: string[]
+  /** จุดลงสินค้าเพิ่มเติม (นอกจากปลายทางหลัก) */
+  extraDestinations?: string[]
 }
 
 export interface OtherExpense {
