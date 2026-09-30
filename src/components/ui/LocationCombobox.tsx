@@ -1,4 +1,4 @@
-import { useId, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useList, useInsert } from '../../hooks/useTable'
 import type { Location } from '../../types'
 import { Icon } from './Icon'
@@ -23,7 +23,10 @@ interface Props {
  * master ทันที (กันการพิมพ์ซ้ำซ้อนคนละแบบในครั้งต่อๆ ไป).
  */
 export function LocationCombobox({ value, onChange, placeholder, categoryFilter, defaultCategory }: Props) {
-  const listId = useId()
+  const [open, setOpen] = useState(false)
+  // true = ผู้ใช้กำลังพิมพ์ค้นหา (กรองรายการ); false = เปิดด้วยลูกศร/โฟกัส (แสดงทั้งหมด)
+  const [filtering, setFiltering] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
   const { data: locations = [] } = useList<Location>('locations')
   const insertLocation = useInsert<Location>('locations')
 
@@ -38,6 +41,22 @@ export function LocationCombobox({ value, onChange, placeholder, categoryFilter,
   )
 
   const trimmed = value.trim()
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const options = useMemo(
+    () => (filtering && trimmed
+      ? active.filter(l => l.name.toLowerCase().includes(trimmed.toLowerCase()))
+      : active),
+    [active, filtering, trimmed],
+  )
   // มีอยู่แล้วใน master หรือยัง (เทียบแบบไม่สนตัวพิมพ์/ช่องว่างหัวท้าย)
   const existsInMaster = useMemo(
     () => trimmed !== '' && allActive.some(l => l.name.trim().toLowerCase() === trimmed.toLowerCase()),
@@ -53,18 +72,53 @@ export function LocationCombobox({ value, onChange, placeholder, categoryFilter,
   }
 
   return (
-    <div>
-      <input
-        list={listId}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-      />
-      <datalist id={listId}>
-        {active.map(l => (
-          <option key={l.id} value={l.name} />
-        ))}
-      </datalist>
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <div style={{ position: 'relative' }}>
+        <input
+          value={value}
+          onChange={e => { onChange(e.target.value); setFiltering(true); setOpen(true) }}
+          onFocus={() => { setFiltering(false); setOpen(true) }}
+          onKeyDown={e => { if (e.key === 'Escape') setOpen(false) }}
+          placeholder={placeholder}
+          autoComplete="off"
+          style={{ paddingRight: 32 }}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label="แสดงรายการสถานที่"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => { setFiltering(false); setOpen(o => !o) }}
+          style={{
+            position: 'absolute', right: 0, top: 0, bottom: 0, width: 32,
+            border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--muted, #666)',
+          }}
+        >▾</button>
+      </div>
+      {open && options.length > 0 && (
+        <ul
+          role="listbox"
+          style={{
+            position: 'absolute', zIndex: 50, left: 0, right: 0, top: '100%', margin: '4px 0 0', padding: 4,
+            listStyle: 'none', maxHeight: 220, overflowY: 'auto', background: 'var(--card, #fff)',
+            border: '1px solid var(--line, #ddd)', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,.15)',
+          }}
+        >
+          {options.map(l => (
+            <li
+              key={l.id}
+              role="option"
+              aria-selected={l.name === value}
+              onMouseDown={e => { e.preventDefault(); onChange(l.name); setOpen(false) }}
+              style={{ padding: '7px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 14 }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'var(--line, #eee)' }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+            >
+              {l.name}
+            </li>
+          ))}
+        </ul>
+      )}
       {trimmed !== '' && !existsInMaster && (
         <button
           type="button"
