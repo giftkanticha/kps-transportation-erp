@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useList, useInsert } from '../../hooks/useTable'
-import type { Location } from '../../types'
+import type { Location, DispatchLeg } from '../../types'
 import { Icon } from './Icon'
 
 interface Props {
@@ -12,6 +12,8 @@ interface Props {
   categoryFilter?: string
   /** หมวดที่จะตั้งให้อัตโนมัติเมื่อกด "+ เพิ่มสถานที่นี้เข้าทะเบียน" สำหรับชื่อที่พิมพ์ใหม่ */
   defaultCategory?: string
+  /** เรียงตัวเลือกตามสถิติการใช้ในขา (ใช้บ่อยขึ้นก่อน): นับจากช่องต้นทางหรือปลายทาง */
+  usageField?: 'origin' | 'destination'
 }
 
 /**
@@ -22,22 +24,35 @@ interface Props {
  * ถ้าพิมพ์ชื่อที่ยังไม่อยู่ใน master จะมีปุ่ม "+ เพิ่มสถานที่นี้" ให้บันทึกเข้า
  * master ทันที (กันการพิมพ์ซ้ำซ้อนคนละแบบในครั้งต่อๆ ไป).
  */
-export function LocationCombobox({ value, onChange, placeholder, categoryFilter, defaultCategory }: Props) {
+export function LocationCombobox({ value, onChange, placeholder, categoryFilter, defaultCategory, usageField }: Props) {
   const [open, setOpen] = useState(false)
   // true = ผู้ใช้กำลังพิมพ์ค้นหา (กรองรายการ); false = เปิดด้วยลูกศร/โฟกัส (แสดงทั้งหมด)
   const [filtering, setFiltering] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
   const { data: locations = [] } = useList<Location>('locations')
+  const { data: legs = [] } = useList<DispatchLeg>('dispatch_legs', 'sort_order', true)
   const insertLocation = useInsert<Location>('locations')
 
   const allActive = useMemo(() => locations.filter(l => l.active), [locations])
   // ตัวเลือกใน datalist กรองตามหมวด (ถ้าระบุ) — แต่เช็ค "มีอยู่แล้วในทะเบียนไหม" ต้องดู
   // ทุกหมวด ไม่งั้นชื่อที่ลงทะเบียนไว้คนละหมวดจะโดนเสนอปุ่ม "เพิ่ม" ซ้ำจนกลายเป็นชื่อซ้ำ
+  // สถิติจำนวนครั้งที่สถานที่ถูกใช้ในขา (ตามช่องที่ระบุ) — ใช้บ่อยขึ้นก่อน เท่ากันเรียง ก-ฮ
+  const usage = useMemo(() => {
+    const m = new Map<string, number>()
+    if (!usageField) return m
+    for (const leg of legs) {
+      const k = (leg[usageField] ?? '').trim().toLowerCase()
+      if (k) m.set(k, (m.get(k) ?? 0) + 1)
+    }
+    return m
+  }, [legs, usageField])
   const active = useMemo(
     () => allActive
       .filter(l => !categoryFilter || l.category === categoryFilter)
-      .sort((a, b) => a.name.localeCompare(b.name, 'th')),
-    [allActive, categoryFilter],
+      .sort((a, b) =>
+        (usage.get(b.name.trim().toLowerCase()) ?? 0) - (usage.get(a.name.trim().toLowerCase()) ?? 0)
+        || a.name.localeCompare(b.name, 'th')),
+    [allActive, categoryFilter, usage],
   )
 
   const trimmed = value.trim()

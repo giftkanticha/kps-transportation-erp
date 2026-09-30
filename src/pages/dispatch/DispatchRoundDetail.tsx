@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
+import { db, DSP_KMPL_THRESHOLD, HOME_BASE } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
@@ -72,7 +72,7 @@ function newLegDefaults(round: Dispatch, legs: DispatchLeg[]): LegFormState {
   const openDate = (round.depart || round.date || '').slice(0, 10)
   const prevUnload = prev ? (prev.unloadDate || (prev.loadDate ? addDays(prev.loadDate, 1) : '')) : ''
   const loadDate = prevUnload || openDate
-  return { ...EMPTY_LEG, loadDate, unloadDate: loadDate ? addDays(loadDate, 1) : '' }
+  return { ...EMPTY_LEG, origin: HOME_BASE, loadDate, unloadDate: loadDate ? addDays(loadDate, 1) : '' }
 }
 
 function legTypeLabel(t?: string): string {
@@ -226,7 +226,13 @@ function LegModal({
         <div style={{ padding: '18px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className="grid-2" style={{ gap: 12 }}>
             <Field label="ประเภทขา">
-              <select value={f.legType} onChange={e => set('legType', e.target.value as LegFormState['legType'])}>
+              <select value={f.legType} onChange={e => {
+                const t = e.target.value as LegFormState['legType']
+                set('legType', t)
+                // ต้นทางเริ่มต้น (KPS) ใช้กับขาไปเท่านั้น — ขากลับต้องเลือกใหม่; สลับกลับขาไปแล้วช่องว่างให้เติม KPS
+                if (t !== 'outbound' && f.origin === HOME_BASE) set('origin', '')
+                else if (t === 'outbound' && !f.origin) set('origin', HOME_BASE)
+              }}>
                 <option value="outbound">Outbound (เที่ยวไป)</option>
                 <option value="backhaul">Backhaul (เที่ยวกลับ มีสินค้า)</option>
                 <option value="return">Return (เที่ยวกลับ เปล่า)</option>
@@ -250,6 +256,7 @@ function LegModal({
               <LocationCombobox
                 value={f.origin}
                 onChange={v => set('origin', v)}
+                usageField="origin"
                 placeholder={isBackhaul ? 'เช่น คลังปุ๋ยตราไก่แดง' : 'เช่น โรงงาน KPS'}
                 defaultCategory={isBackhaul ? FERTILIZER_DEPOT_CATEGORY : undefined}
               />
@@ -258,6 +265,7 @@ function LegModal({
               <LocationCombobox
                 value={f.destination}
                 onChange={v => set('destination', v)}
+                usageField="destination"
                 placeholder="เช่น กรุงเทพ"
                 defaultCategory={isBackhaul ? RETAIL_SHOP_CATEGORY : undefined}
               />
