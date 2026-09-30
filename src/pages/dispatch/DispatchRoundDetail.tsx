@@ -905,7 +905,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             <div className="right">
               <button
                 className="btn primary sm"
-                onClick={() => setEditingLeg({ index: -1, data: { ...EMPTY_LEG } })}
+                onClick={() => setEditingLeg({ index: -1, data: { ...EMPTY_LEG, loadDate: (round.depart || round.date || '').slice(0, 10) } })}
               >
                 <Icon name="plus" size={14} /> เพิ่มขาใหม่
               </button>
@@ -917,7 +917,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
             ยังไม่มีขา —{' '}
             {!isClosed && (
               <a
-                onClick={() => setEditingLeg({ index: -1, data: { ...EMPTY_LEG } })}
+                onClick={() => setEditingLeg({ index: -1, data: { ...EMPTY_LEG, loadDate: (round.depart || round.date || '').slice(0, 10) } })}
                 style={{ cursor: 'pointer', color: 'var(--primary)' }}
               >
                 เพิ่มขาแรก
