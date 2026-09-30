@@ -6,6 +6,7 @@ import { useAuth } from '../../context/AuthContext'
 import { FERTILIZER_DEPOT_CATEGORY, RETAIL_SHOP_CATEGORY } from '../../lib/locationCategories'
 import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole, Location, Route } from '../../types'
 import { Icon, Field, LocationCombobox, CargoTypeSelect } from '../../components/ui'
+import { enterToNext } from '../../lib/enterToNext'
 
 interface Props {
   setActive: (id: string) => void
@@ -226,7 +227,7 @@ function LegModal({
         <div style={{ padding: '20px 24px 14px', borderBottom: '1px solid var(--line)' }}>
           <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>ข้อมูลขา</h2>
         </div>
-        <div style={{ padding: '18px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div onKeyDown={enterToNext} style={{ padding: '18px 24px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className="grid-2" style={{ gap: 12 }}>
             <Field label="ประเภทขา">
               <select value={f.legType} onChange={e => {
@@ -435,7 +436,7 @@ function LegModal({
             >
               <Icon name="edit" size={15} /> บันทึกร่าง
             </button>
-            <button className="btn primary" onClick={submit}>
+            <button className="btn primary" onClick={submit} data-enter-final>
               <Icon name="check" size={15} /> บันทึก
             </button>
           </div>

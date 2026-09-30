@@ -28,6 +28,7 @@ export function LocationCombobox({ value, onChange, placeholder, categoryFilter,
   const [open, setOpen] = useState(false)
   // true = ผู้ใช้กำลังพิมพ์ค้นหา (กรองรายการ); false = เปิดด้วยลูกศร/โฟกัส (แสดงทั้งหมด)
   const [filtering, setFiltering] = useState(false)
+  const [activeIdx, setActiveIdx] = useState(-1)
   const wrapRef = useRef<HTMLDivElement>(null)
   const { data: locations = [] } = useList<Location>('locations')
   const { data: legs = [] } = useList<DispatchLeg>('dispatch_legs', 'sort_order', true)
@@ -91,9 +92,24 @@ export function LocationCombobox({ value, onChange, placeholder, categoryFilter,
       <div style={{ position: 'relative' }}>
         <input
           value={value}
-          onChange={e => { onChange(e.target.value); setFiltering(true); setOpen(true) }}
+          onChange={e => { onChange(e.target.value); setFiltering(true); setOpen(true); setActiveIdx(-1) }}
           onFocus={() => { setFiltering(false); setOpen(true) }}
-          onKeyDown={e => { if (e.key === 'Escape') setOpen(false) }}
+          onKeyDown={e => {
+            if (e.key === 'Escape') { setOpen(false); return }
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+              if (options.length === 0) return
+              e.preventDefault()
+              setOpen(true)
+              setActiveIdx(i => (e.key === 'ArrowDown' ? Math.min(options.length - 1, i + 1) : Math.max(0, i - 1)))
+              return
+            }
+            // Enter: เลือกตัวเลือกที่ไฮไลต์ (หรือตัวแรกที่ตรงกับที่พิมพ์) แล้วปล่อยให้ฟอร์มย้ายไปช่องถัดไป
+            if (e.key === 'Enter' && open && options.length > 0 && (activeIdx >= 0 || (filtering && trimmed !== ''))) {
+              onChange(options[activeIdx >= 0 ? activeIdx : 0].name)
+              setOpen(false)
+              setActiveIdx(-1)
+            }
+          }}
           placeholder={placeholder}
           autoComplete="off"
           style={{ paddingRight: 32 }}
@@ -124,10 +140,11 @@ export function LocationCombobox({ value, onChange, placeholder, categoryFilter,
               key={l.id}
               role="option"
               aria-selected={l.name === value}
+              ref={el => { if (el && options[activeIdx]?.id === l.id) el.scrollIntoView({ block: 'nearest' }) }}
               onMouseDown={e => { e.preventDefault(); onChange(l.name); setOpen(false) }}
-              style={{ padding: '7px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 14 }}
+              style={{ padding: '7px 10px', borderRadius: 6, cursor: 'pointer', fontSize: 14, background: options[activeIdx]?.id === l.id ? 'var(--line, #eee)' : 'transparent' }}
               onMouseEnter={e => { e.currentTarget.style.background = 'var(--line, #eee)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}
+              onMouseLeave={e => { e.currentTarget.style.background = options[activeIdx]?.id === l.id ? 'var(--line, #eee)' : 'transparent' }}
             >
               {l.name}
             </li>
