@@ -234,14 +234,8 @@ function LegModal({
                 value={f.origin}
                 onChange={v => set('origin', v)}
                 placeholder={isBackhaul ? 'เช่น คลังปุ๋ยตราไก่แดง' : 'เช่น โรงงาน KPS'}
-                categoryFilter={isBackhaul ? FERTILIZER_DEPOT_CATEGORY : undefined}
                 defaultCategory={isBackhaul ? FERTILIZER_DEPOT_CATEGORY : undefined}
               />
-              {isBackhaul && (
-                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                  แสดงเฉพาะสถานที่หมวด "{FERTILIZER_DEPOT_CATEGORY}" — ไม่มีในรายการก็พิมพ์ชื่อใหม่ได้ตามปกติ
-                </div>
-              )}
             </Field>
             <Field label="ปลายทาง *">
               <LocationCombobox
