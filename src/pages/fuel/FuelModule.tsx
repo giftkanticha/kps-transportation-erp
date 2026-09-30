@@ -84,7 +84,7 @@ function FuelRecord({ historyOnly = false }: { historyOnly?: boolean }) {
   // รายการจากคีย์ด่วนจับคู่กับ fuel_transactions (รถ+วัน+ลิตร) แล้วดู tripId/status
   const day10 = (d: string) => (d ?? '').slice(0, 10)
   const linkInfo = useMemo(() => {
-    const m = new Map<string, { txId: string | null; roundCode: string | null; floating: boolean; tripMirror: boolean }>()
+    const m = new Map<string, { txId: string | null; roundCode: string | null; floating: boolean; noRound: boolean; tripMirror: boolean }>()
     const usedTx = new Set<string>()
     const roundById = new Map(rounds.map(r => [r.id, r]))
     for (const f of fuel) {
@@ -100,6 +100,7 @@ function FuelRecord({ historyOnly = false }: { historyOnly?: boolean }) {
         txId: tx?.id ?? null,
         roundCode: tripRound?.code ?? txRound?.code ?? null,
         floating: tx?.status === 'FLOATING',
+        noRound: tx?.status === 'INTERNAL_DEDUCTED' && !tx.tripId,
         tripMirror: !!tripRound,
       })
     }
@@ -408,6 +409,8 @@ function FuelRecord({ historyOnly = false }: { historyOnly?: boolean }) {
                       <span className="badge green">ผูกรอบ {info.roundCode}</span>
                     ) : info?.floating ? (
                       <span className="badge amber">น้ำมันลอย</span>
+                    ) : info?.noRound ? (
+                      <span className="muted" style={{ fontSize: 12 }}>ไม่ผูกรอบ (ตัดสต็อก)</span>
                     ) : (
                       <span className="muted" style={{ fontSize: 12 }}>ยังไม่ผูกรอบ</span>
                     )}

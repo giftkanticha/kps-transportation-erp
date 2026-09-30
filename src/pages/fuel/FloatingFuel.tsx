@@ -107,6 +107,17 @@ export function FloatingFuel() {
     }
   }
 
+  // ไม่ผูกรอบ: ตัดสต็อกน้ำมันตามปกติ แต่ไม่ต้องผูกกับใบงาน (เช่น เติมนอกรอบ) — ไม่แตะ fuel_records
+  // จึงยังใช้เลขไมล์/ยอดน้ำมันของรายการนี้ปรับข้อมูลรถได้ตามเดิม และหลุดจากรายการ "น้ำมันลอย"
+  const markNoRound = async (tx: FuelTransaction) => {
+    if (!confirm(`ตั้งเป็น "ไม่ผูกรอบ"?\n${thaiDate(tx.date)} · ${fmt(tx.liters)} ลิตร\n\nยังตัดสต็อกและใช้เลขไมล์ตามเดิม แต่จะไม่นับเป็นต้นทุนน้ำมันของรอบงานใด และหายจากรายการน้ำมันลอย`)) return
+    try {
+      await updateFuelTx.mutateAsync({ id: tx.id, patch: { tripId: null, status: 'INTERNAL_DEDUCTED' } })
+    } catch (e) {
+      alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
+    }
+  }
+
   const removeTx = async (tx: FuelTransaction) => {
     if (!confirm(`ลบรายการน้ำมันลอยนี้?\n${thaiDate(tx.date)} · ${fmt(tx.liters)} ลิตร`)) return
     try {
@@ -136,7 +147,7 @@ export function FloatingFuel() {
       <div className="page-head no-print">
         <div>
           <h1 className="page-title">🟡 น้ำมันลอย (Floating Fuel)</h1>
-          <div className="page-sub">รายการที่ยังไม่ได้ผูกรอบงาน — กด "ผูกรอบ" เพื่อเชื่อมกับใบงาน{isAdmin && ' · แอดมินแก้ไข/ลบรายการได้'}</div>
+          <div className="page-sub">รายการที่ยังไม่ได้ผูกรอบงาน — กด "ผูกรอบ" เพื่อเชื่อมกับใบงาน หรือ "ไม่ผูกรอบ" ถ้าตัดสต็อกแต่ไม่เกี่ยวกับรอบ{isAdmin && ' · แอดมินแก้ไข/ลบรายการได้'}</div>
         </div>
       </div>
 
@@ -237,6 +248,18 @@ export function FloatingFuel() {
                           onMouseLeave={e => (e.currentTarget.style.background = '#0066CC')}
                         >
                           ผูกรอบ
+                        </button>
+                        <button
+                          onClick={() => void markNoRound(tx)}
+                          title="ตัดสต็อกแต่ไม่ผูกรอบงาน (ยังใช้เลขไมล์ตามเดิม)"
+                          style={{
+                            background: 'var(--card)', color: '#475569', border: '1px solid var(--line)',
+                            borderRadius: 7, padding: '6px 12px', cursor: 'pointer',
+                            fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          ไม่ผูกรอบ
                         </button>
                         {isAdmin && (
                           <>
