@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
+import { enterToNext } from '../../lib/enterToNext'
 import { db, uid, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
@@ -707,7 +708,7 @@ function CloseForm({
   }
 
   return (
-    <div>
+    <div onKeyDown={enterToNext}>
       <div className="page-head">
         <div>
           <div
