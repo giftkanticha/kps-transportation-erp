@@ -64,7 +64,14 @@ const MENU: MenuItem[] = [
       { id: 'dispatch.vehicleMonthly', label: 'สรุปรายเที่ยวรายเดือน (ต่อคัน)', icon: 'calendar' },
       { id: 'dispatch.history', label: 'ประวัติการวิ่งงาน', icon: 'history' },
       { id: 'dispatch.billing', label: 'สรุป/วางบิลรายลูกค้า', icon: 'money' },
-      { id: 'dispatch.locations', label: 'จัดการสถานที่', icon: 'pin' },
+    ],
+  },
+  {
+    id: 'routeAnalysis', label: 'วิเคราะห์เส้นทาง', icon: 'alert', roles: ['admin', 'manager'],
+    sub: [
+      { id: 'routeAnalysis.trips', label: 'วิเคราะห์เที่ยววิ่ง', icon: 'chart' },
+      { id: 'routeAnalysis.routes', label: 'จัดการเส้นทางมาตรฐาน', icon: 'gauge' },
+      { id: 'routeAnalysis.locations', label: 'ทะเบียนสถานที่', icon: 'pin' },
     ],
   },
   {

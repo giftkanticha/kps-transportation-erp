@@ -40,8 +40,10 @@ const MANAGER_PLUS_ROUTES = new Set<string>([
   'fuel.report', 'fuel.summary', 'fuel.reconcile', 'fuel.prices',
   'dispatch.report',  // drivers see 'dispatch.history' instead — money columns are hidden there
   'dispatch.vehicleMonthly',
-  'dispatch.locations',  // master data — managers/admins curate it
   'dispatch.billing',    // money — billing notes & receivables
+  'routeAnalysis.trips',
+  'routeAnalysis.routes',     // master data — managers/admins curate it
+  'routeAnalysis.locations',  // master data — managers/admins curate it
 
   'expenses.finance', 'expenses.report',
 ])
@@ -57,6 +59,7 @@ export const ASSIGNABLE_MENUS: { key: string; label: string }[] = [
   { key: 'tires',          label: 'ระบบยาง' },
   { key: 'fuel',           label: 'ระบบน้ำมัน' },
   { key: 'dispatch',       label: 'งานขนส่ง' },
+  { key: 'routeAnalysis',  label: 'วิเคราะห์เส้นทาง' },
   { key: 'subcontractors', label: 'รถรับจ้างร่วม' },
   { key: 'expenses',       label: 'ค่าใช้จ่าย' },
   { key: 'finance',        label: 'การเงิน' },

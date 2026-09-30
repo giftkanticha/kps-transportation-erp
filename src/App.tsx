@@ -23,6 +23,7 @@ import { DispatchRoundOpen } from './pages/dispatch/DispatchRoundOpen'
 import { DispatchRoundDetail } from './pages/dispatch/DispatchRoundDetail'
 import { DispatchRoundClose } from './pages/dispatch/DispatchRoundClose'
 import { DispatchSummaryReport } from './pages/dispatch/DispatchSummaryReport'
+import { RouteAnalysisReport } from './pages/dispatch/RouteAnalysisReport'
 import { DispatchVehicleMonthlyReport } from './pages/dispatch/DispatchVehicleMonthlyReport'
 import { DispatchHistory } from './pages/dispatch/DispatchHistory'
 import { SubcontractorModule } from './pages/subcontractors/SubcontractorModule'
@@ -36,6 +37,7 @@ import { VehicleManagement } from './pages/vehicles/VehicleManagement'
 import { MaintenancePage } from './pages/maintenance/MaintenancePage'
 import { PartnersPage } from './pages/customers/PartnersPage'
 import { LocationsPage } from './pages/locations/LocationsPage'
+import { RoutesPage } from './pages/locations/RoutesPage'
 import { CustomerBilling } from './pages/dispatch/CustomerBilling'
 import { CompanyBankAccountsPage } from './pages/settings/CompanyBankAccountsPage'
 import { SettingsUsers } from './pages/settings/SettingsUsers'
@@ -72,8 +74,10 @@ const crumbMap: Record<string, string> = {
   'dispatch.vehicleMonthly': 'งานขนส่ง • สรุปรายเที่ยวรายเดือน (ต่อคัน)',
   'dispatch.report': 'งานขนส่ง • รายงานสรุป',
   'dispatch.history': 'งานขนส่ง • ประวัติงาน',
-  'dispatch.locations': 'งานขนส่ง • จัดการสถานที่',
   'dispatch.billing': 'งานขนส่ง • สรุป/วางบิลรายลูกค้า',
+  'routeAnalysis.trips': 'วิเคราะห์เส้นทาง • วิเคราะห์เที่ยววิ่ง',
+  'routeAnalysis.routes': 'วิเคราะห์เส้นทาง • จัดการเส้นทางมาตรฐาน',
+  'routeAnalysis.locations': 'วิเคราะห์เส้นทาง • ทะเบียนสถานที่',
   'settings.bankAccounts': 'ตั้งค่า • บัญชีธนาคารบริษัท',
   subcontractors: 'รถรับจ้างร่วม',
   'subcontractors.close': 'รถรับจ้างร่วม • ปิดงาน',
@@ -150,7 +154,7 @@ export default function App() {
         return <Dashboard user={legacyUser} setActive={setActive} />
 
       case 'alerts':
-        return <AlertsTasksPage user={legacyUser} />
+        return <AlertsTasksPage user={legacyUser} setActive={setActive} />
 
       case 'vehicles':
         return <VehiclesPage setActive={setActive} setSubject={setSubject} user={legacyUser} />
@@ -212,6 +216,14 @@ export default function App() {
       case 'dispatch.history':
         return <DispatchHistory setActive={setActive} setSubject={setSubject} />
 
+      case 'routeAnalysis':
+      case 'routeAnalysis.trips':
+        return <RouteAnalysisReport setActive={setActive} setSubject={setSubject} />
+      case 'routeAnalysis.routes':
+        return <RoutesPage />
+      case 'routeAnalysis.locations':
+        return <LocationsPage />
+
       case 'subcontractors':
         return <SubcontractorModule tab="open" setActive={setActive} user={legacyUser} />
       case 'subcontractors.close':
@@ -249,8 +261,6 @@ export default function App() {
 
       case 'partners':
         return <PartnersPage />
-      case 'dispatch.locations':
-        return <LocationsPage />
       case 'dispatch.billing':
         return <CustomerBilling />
 

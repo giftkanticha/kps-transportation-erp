@@ -992,6 +992,14 @@ const REPORT_GROUPS: { title: string; reports: { id: string; label: string; desc
     ],
   },
   {
+    title: 'วิเคราะห์เส้นทาง',
+    reports: [
+      { id: 'routeAnalysis.trips', label: 'วิเคราะห์เที่ยววิ่งตามเส้นทาง', desc: 'เทียบระยะทาง/อัตราน้ำมันกับค่าเฉลี่ยเส้นทาง · แจ้งเตือนเที่ยวผิดปกติ', icon: 'alert' },
+      { id: 'routeAnalysis.routes', label: 'จัดการเส้นทางมาตรฐาน', desc: 'ตั้งระยะทาง/อัตราน้ำมันมาตรฐานต่อเส้นทาง', icon: 'gauge' },
+      { id: 'routeAnalysis.locations', label: 'ทะเบียนสถานที่', desc: 'จัดการชื่อต้นทาง/ปลายทางที่ใช้ในการวิเคราะห์', icon: 'pin' },
+    ],
+  },
+  {
     title: 'น้ำมัน',
     reports: [
       { id: 'fuel.report',  label: 'รายงานน้ำมันรายเดือน', desc: 'การใช้น้ำมันแยกตามเดือน/รถ', icon: 'chart' },
