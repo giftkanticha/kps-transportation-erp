@@ -50,12 +50,15 @@ interface LegFormState {
   noBill: boolean
   loadDate: string
   unloadDate: string
+  extraOrigins: string[]
+  extraDestinations: string[]
 }
 
 const EMPTY_LEG: LegFormState = {
   origin: '', destination: '', billToLocationId: '', cargo: '', cargoType: '',
   priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '', wht: false, noBill: false,
   loadDate: '', unloadDate: '',
+  extraOrigins: [], extraDestinations: [],
 }
 
 function addDays(ymd: string, n: number): string {
@@ -260,6 +263,12 @@ function LegModal({
                 placeholder={isBackhaul ? 'เช่น คลังปุ๋ยตราไก่แดง' : 'เช่น โรงงาน KPS'}
                 defaultCategory={isBackhaul ? FERTILIZER_DEPOT_CATEGORY : undefined}
               />
+              <ExtraStops
+                label="จุดขึ้นสินค้าเพิ่ม"
+                stops={f.extraOrigins}
+                onChange={v => set('extraOrigins', v)}
+                usageField="origin"
+              />
             </Field>
             <Field label="ปลายทาง *">
               <LocationCombobox
@@ -268,6 +277,12 @@ function LegModal({
                 usageField="destination"
                 placeholder="เช่น กรุงเทพ"
                 defaultCategory={isBackhaul ? RETAIL_SHOP_CATEGORY : undefined}
+              />
+              <ExtraStops
+                label="จุดลงสินค้าเพิ่ม"
+                stops={f.extraDestinations}
+                onChange={v => set('extraDestinations', v)}
+                usageField="destination"
               />
             </Field>
           </div>
@@ -751,6 +766,12 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
     // ส่งคอลัมน์วันที่เฉพาะเมื่อมีค่า — กัน error ถ้า DB ยังไม่ได้เพิ่มคอลัมน์ (migration 0041)
     if (form.loadDate) (fields as Record<string, unknown>).loadDate = form.loadDate
     if (form.unloadDate) (fields as Record<string, unknown>).unloadDate = form.unloadDate
+    // จุดขึ้น/ลงเพิ่มเติม — ส่งเมื่อมีค่า หรือเมื่อล้างค่าเดิมของขาที่มีอยู่ (กัน error ถ้า DB ยังไม่ได้ทำ migration 0050)
+    const cleanStops = (a: string[]) => a.map(x => x.trim()).filter(Boolean)
+    const exO = cleanStops(form.extraOrigins), exD = cleanStops(form.extraDestinations)
+    const prevLeg = editingLeg.index >= 0 ? legs[editingLeg.index] : undefined
+    if (exO.length || (prevLeg?.extraOrigins?.length ?? 0) > 0) (fields as Record<string, unknown>).extraOrigins = exO
+    if (exD.length || (prevLeg?.extraDestinations?.length ?? 0) > 0) (fields as Record<string, unknown>).extraDestinations = exD
     try {
       let nextLegs: DispatchLeg[]
       if (editingLeg.index < 0) {
@@ -1023,7 +1044,13 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                     <td style={{ fontWeight: 600 }}>{i + 1}</td>
                     <td>
                       <div style={{ fontSize: 13 }}>{l.origin}</div>
+                      {(l.extraOrigins?.length ?? 0) > 0 && (
+                        <div className="muted" style={{ fontSize: 11 }}>ขึ้นเพิ่ม: {l.extraOrigins!.join(', ')}</div>
+                      )}
                       <div className="muted" style={{ fontSize: 11.5 }}>→ {l.destination}</div>
+                      {(l.extraDestinations?.length ?? 0) > 0 && (
+                        <div className="muted" style={{ fontSize: 11 }}>ลงเพิ่ม: {l.extraDestinations!.join(', ')}</div>
+                      )}
                     </td>
                     <td>{l.cargoType || <span className="muted">—</span>}</td>
                     <td><span className="badge" style={{ fontSize: 11 }}>{legTypeLabel(l.legType)}</span></td>
@@ -1063,6 +1090,8 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                                   wht: l.wht ?? false,
                                   loadDate: l.loadDate ?? '',
                                   unloadDate: l.unloadDate ?? '',
+                                  extraOrigins: l.extraOrigins ?? [],
+                                  extraDestinations: l.extraDestinations ?? [],
                                 },
                               })
                             }}
@@ -1292,6 +1321,51 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
           }}
         />
       )}
+    </div>
+  )
+}
+
+// จุดขึ้น/ลงสินค้าเพิ่มเติมของขา (เช่น ทวีชัย ขึ้น-ลงหลายที่) — ไม่กระทบการคิดค่าบรรทุก
+function ExtraStops({
+  label, stops, onChange, usageField,
+}: {
+  label: string
+  stops: string[]
+  onChange: (v: string[]) => void
+  usageField: 'origin' | 'destination'
+}) {
+  return (
+    <div style={{ marginTop: 6 }}>
+      {stops.map((st, k) => (
+        <div key={k} className="row" style={{ gap: 6, marginTop: 6, alignItems: 'flex-start' }}>
+          <div style={{ flex: 1 }}>
+            <LocationCombobox
+              value={st}
+              onChange={v => onChange(stops.map((x, ix) => (ix === k ? v : x)))}
+              placeholder={`${label} #${k + 2}`}
+              usageField={usageField}
+            />
+          </div>
+          <button
+            type="button"
+            className="btn ghost icon sm"
+            title="ลบจุดนี้"
+            onClick={() => onChange(stops.filter((_, ix) => ix !== k))}
+            style={{ color: 'var(--red)', marginTop: 2 }}
+          >
+            <Icon name="close" size={14} />
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        className="btn ghost sm"
+        onClick={() => onChange([...stops, ''])}
+        style={{ marginTop: 6, fontSize: 12, color: 'var(--primary)' }}
+        title="ค่าบรรทุกยังคิดตามน้ำหนักของขานี้ตามปกติ"
+      >
+        <Icon name="plus" size={13} /> เพิ่ม{label}
+      </button>
     </div>
   )
 }

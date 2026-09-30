@@ -752,7 +752,22 @@ function CloseForm({
       </div>
 
       {/* Per-leg close form */}
-      <h3 className="section-title" style={{ marginBottom: 10 }}>บันทึกข้อมูลปลายทางทุกขา</h3>
+      <div className="row" style={{ marginBottom: 10, justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 className="section-title" style={{ margin: 0 }}>บันทึกข้อมูลปลายทางทุกขา</h3>
+        {!isClosed && (
+          <button
+            type="button"
+            className="btn sm"
+            title="ตั้งน้ำหนักปลายทางเท่ากับต้นทางทุกขาที่ยังไม่กรอก (ไม่ทับค่าที่กรอกแล้ว)"
+            onClick={() => legs.forEach((l, i) => {
+              if (l.legType === 'return' || !(l.weight || 0) || legStates[i]?.deliveredWeight) return
+              updateLegState(i, { deliveredWeight: String(l.priceMode === 'per_kg' ? (l.weight || 0) * 1000 : (l.weight || 0)) })
+            })}
+          >
+            น้ำหนักปลายทาง = ต้นทาง (ทุกขาที่ยังไม่กรอก)
+          </button>
+        )}
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 16 }}>
         {legs.map((l, i) => {
           const ls = legStates[i]
@@ -782,6 +797,12 @@ function CloseForm({
                   <div style={{ fontSize: 14, fontWeight: 600 }}>
                     ขา {i + 1} — {l.origin} → {l.destination}
                   </div>
+                  {((l.extraOrigins?.length ?? 0) > 0 || (l.extraDestinations?.length ?? 0) > 0) && (
+                    <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+                      {(l.extraOrigins?.length ?? 0) > 0 && <>ขึ้นเพิ่ม: {l.extraOrigins!.join(', ')} </>}
+                      {(l.extraDestinations?.length ?? 0) > 0 && <>ลงเพิ่ม: {l.extraDestinations!.join(', ')}</>}
+                    </div>
+                  )}
                   <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
                     {billToName(l)}
                     {' • '}{l.cargoType || '—'}
@@ -823,6 +844,7 @@ function CloseForm({
                 </Field>
                 {!isReturn && (
                   <Field label={`น้ำหนักปลายทาง (${wUnit})${isLump ? '' : ' *'}`}>
+                    <div className="row" style={{ gap: 6, alignItems: 'center' }}>
                     <input
                       type="number"
                       step={isPerKg ? '1' : '0.001'}
@@ -831,6 +853,18 @@ function CloseForm({
                       placeholder={isPerKg ? '0' : '0.00'}
                       disabled={isClosed}
                     />
+                    {!isClosed && (l.weight || 0) > 0 && (
+                      <button
+                        type="button"
+                        className="btn sm"
+                        style={{ whiteSpace: 'nowrap' }}
+                        title="ตั้งน้ำหนักปลายทางเท่ากับน้ำหนักต้นทาง"
+                        onClick={() => updateLegState(i, { deliveredWeight: String(loadedWeightDisplay) })}
+                      >
+                        = ต้นทาง
+                      </button>
+                    )}
+                    </div>
                     {/* For per_ton: when the entered value would be more than
                         100 ตัน or 3x the loaded weight, assume the user typed
                         the kg figure from the weighbridge by mistake and offer
