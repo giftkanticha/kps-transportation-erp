@@ -105,6 +105,12 @@ export interface BillingNote {
   notes: string
 }
 
+export interface CargoType {
+  id: string
+  name: string
+  active: boolean
+}
+
 export interface Location {
   id: string
   name: string

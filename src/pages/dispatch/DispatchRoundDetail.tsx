@@ -4,7 +4,7 @@ import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
 import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole, Location } from '../../types'
-import { Icon, Field, LocationCombobox } from '../../components/ui'
+import { Icon, Field, LocationCombobox, CargoTypeSelect } from '../../components/ui'
 
 interface Props {
   setActive: (id: string) => void
@@ -219,7 +219,7 @@ function LegModal({
             <>
               <div className="grid-2" style={{ gap: 12 }}>
                 <Field label="ประเภทสินค้า">
-                  <input value={f.cargoType} onChange={e => set('cargoType', e.target.value)} placeholder="เช่น ปูนซีเมนต์" />
+                  <CargoTypeSelect value={f.cargoType} onChange={v => set('cargoType', v)} />
                 </Field>
                 <Field label="รายละเอียดสินค้า">
                   <input value={f.cargo} onChange={e => set('cargo', e.target.value)} placeholder="Optional" />
