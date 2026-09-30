@@ -2,7 +2,11 @@ import React, { useState, useMemo } from 'react'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { Icon, Field, StatusBadge, SearchInput } from '../../components/ui'
+import { LOCATION_CATEGORIES } from '../../lib/locationCategories'
+import { mapsPlaceUrl, extractLatLng } from '../../lib/mapsLink'
 import type { Location, DispatchLeg } from '../../types'
+
+const CUSTOM_CATEGORY = '__custom__'
 
 interface LocationForm {
   name: string
@@ -15,9 +19,10 @@ interface LocationForm {
   taxId: string
   phone: string
   contact: string
+  mapsUrl: string
 }
 
-const EMPTY: LocationForm = { name: '', category: '', province: '', address: '', notes: '', isCustomer: false, credit: 30, taxId: '', phone: '', contact: '' }
+const EMPTY: LocationForm = { name: '', category: '', province: '', address: '', notes: '', isCustomer: false, credit: 30, taxId: '', phone: '', contact: '', mapsUrl: '' }
 
 // แต่ละแถว = ชื่อสถานที่ที่ใช้จริง (จากทะเบียน ∪ ที่พิมพ์ไว้ในงาน) พร้อมจำนวนขาที่ใช้
 interface Row {
@@ -67,6 +72,10 @@ export function LocationsPage() {
   const [mergeRow, setMergeRow] = useState<Row | null>(null)
   const [mergeTarget, setMergeTarget] = useState('')
   const [busy, setBusy] = useState(false)
+  // หมวดมีชุดค่ามาตรฐาน (LOCATION_CATEGORIES) แต่ข้อมูลเก่าอาจมีข้อความอิสระอยู่
+  // (เช่น "โรงงาน"/"ท่าเรือ") — catMode ควบคุมว่า select จะโชว์ตัวเลือกมาตรฐาน
+  // หรือสลับไปช่องพิมพ์เองสำหรับค่าที่ไม่อยู่ในชุดมาตรฐาน
+  const [catMode, setCatMode] = useState<'preset' | 'custom'>('preset')
 
   const { data: locations = [] } = useList<Location>('locations')
   const { data: dispatches = [] } = useDispatches()
@@ -120,12 +129,13 @@ export function LocationsPage() {
     }
   }
 
-  const openCreate = () => { setEditRow(null); setForm(EMPTY); setShow(true) }
+  const openCreate = () => { setEditRow(null); setForm(EMPTY); setCatMode('preset'); setShow(true) }
   const openEdit = (r: Row) => {
     setEditRow(r)
+    const category = r.master?.category ?? ''
     setForm({
       name: r.name,
-      category: r.master?.category ?? '',
+      category,
       province: r.master?.province ?? '',
       address: r.master?.address ?? '',
       notes: r.master?.notes ?? '',
@@ -134,7 +144,9 @@ export function LocationsPage() {
       taxId: r.master?.taxId ?? '',
       phone: r.master?.phone ?? '',
       contact: r.master?.contact ?? '',
+      mapsUrl: r.master?.mapsUrl ?? '',
     })
+    setCatMode(category && !LOCATION_CATEGORIES.includes(category as typeof LOCATION_CATEGORIES[number]) ? 'custom' : 'preset')
     setShow(true)
   }
 
@@ -156,7 +168,7 @@ export function LocationsPage() {
       setBusy(true)
       try {
         if (newName !== oldName) await renameInLegs(oldName, newName)
-        const fields = { name: newName, category: form.category, province: form.province, address: form.address, notes: form.notes, isCustomer: form.isCustomer, credit: +form.credit || 0, taxId: form.taxId, phone: form.phone, contact: form.contact }
+        const fields = { name: newName, category: form.category, province: form.province, address: form.address, notes: form.notes, isCustomer: form.isCustomer, credit: +form.credit || 0, taxId: form.taxId, phone: form.phone, contact: form.contact, mapsUrl: form.mapsUrl }
         if (editRow.master) {
           await updateLocation.mutateAsync({ id: editRow.master.id, patch: fields })
         } else {
@@ -172,7 +184,7 @@ export function LocationsPage() {
     // สร้างใหม่
     setBusy(true)
     try {
-      await insertLocation.mutateAsync({ name: newName, category: form.category, province: form.province, address: form.address, notes: form.notes, isCustomer: form.isCustomer, credit: +form.credit || 0, taxId: form.taxId, phone: form.phone, contact: form.contact, active: true })
+      await insertLocation.mutateAsync({ name: newName, category: form.category, province: form.province, address: form.address, notes: form.notes, isCustomer: form.isCustomer, credit: +form.credit || 0, taxId: form.taxId, phone: form.phone, contact: form.contact, mapsUrl: form.mapsUrl, active: true })
       setShow(false); setForm(EMPTY)
     } catch (e) {
       alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
@@ -260,6 +272,17 @@ export function LocationsPage() {
                 </td>
                 <td>
                   <div className="row" style={{ gap: 4, justifyContent: 'flex-end' }}>
+                    {r.master && mapsPlaceUrl(r.master) && (
+                      <a
+                        className="btn ghost sm"
+                        title="เปิดดูใน Google Maps"
+                        href={mapsPlaceUrl(r.master)!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Icon name="pin" size={13} /> Maps
+                      </a>
+                    )}
                     <button className="btn ghost icon sm" title="แก้ไขชื่อ / ลงทะเบียน" onClick={() => openEdit(r)} disabled={busy}>
                       <Icon name="edit" size={14} />
                     </button>
@@ -311,13 +334,49 @@ export function LocationsPage() {
             <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="เช่น ท่าทราย เวียงสา" />
           </Field>
           <Field label="หมวด">
-            <input value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} placeholder="เช่น โรงงาน / ท่าเรือ / ท่าทราย" />
+            <select
+              value={catMode === 'custom' ? CUSTOM_CATEGORY : form.category}
+              onChange={e => {
+                const v = e.target.value
+                if (v === CUSTOM_CATEGORY) { setCatMode('custom'); return }
+                setCatMode('preset')
+                setForm(f => ({ ...f, category: v }))
+              }}
+            >
+              <option value="">— ไม่ระบุ —</option>
+              {LOCATION_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              <option value={CUSTOM_CATEGORY}>อื่นๆ (ระบุเอง)…</option>
+            </select>
+            {catMode === 'custom' && (
+              <input
+                style={{ marginTop: 6 }}
+                value={form.category}
+                onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                placeholder="เช่น โรงงาน / ท่าเรือ / ท่าทราย"
+              />
+            )}
           </Field>
           <Field label="จังหวัด">
             <input value={form.province} onChange={e => setForm(f => ({ ...f, province: e.target.value }))} />
           </Field>
           <Field label="ที่อยู่">
             <input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} />
+          </Field>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <Field label="ลิงก์ Google Maps">
+            <input
+              value={form.mapsUrl}
+              onChange={e => setForm(f => ({ ...f, mapsUrl: e.target.value }))}
+              placeholder="วางลิงก์จาก Google Maps (กดแชร์ในแอป/เว็บ Maps แล้วคัดลอกมาวาง)"
+            />
+            <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+              {form.mapsUrl.trim()
+                ? (extractLatLng(form.mapsUrl)
+                  ? '✓ อ่านพิกัดจากลิงก์นี้ได้ — เส้นทาง/ระยะทางที่คำนวณจากสถานที่นี้จะแม่นขึ้น'
+                  : 'อ่านพิกัดจากลิงก์นี้ไม่ได้ (มักเป็นลิงก์ย่อ) — ยังใช้เปิดดูสถานที่ได้ปกติ แต่คำนวณระยะทางจะใช้ชื่อ/ที่อยู่แทน ลองวางลิงก์เต็มจากปุ่ม "แชร์" ดู')
+                : 'ไม่บังคับ — ถ้าเว้นว่างไว้ ระบบจะค้นหาด้วยชื่อ+ที่อยู่+จังหวัดแทน'}
+            </div>
           </Field>
         </div>
         <div style={{ marginTop: 12 }}>

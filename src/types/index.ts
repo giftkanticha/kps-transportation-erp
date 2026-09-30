@@ -125,6 +125,25 @@ export interface Location {
   taxId?: string
   phone?: string
   contact?: string
+  // ลิงก์ Google Maps ที่วางไว้เอง (แชร์จากแอป/เว็บ Maps) — ถ้าลิงก์มีพิกัดฝังอยู่
+  // (ลิงก์เต็ม ไม่ใช่ลิงก์ย่อ) จะใช้พิกัดนั้นคำนวณระยะทาง/เส้นทางแทนการค้นด้วยชื่อ
+  mapsUrl?: string
+}
+
+// เส้นทางมาตรฐาน (ต้นทาง→ปลายทาง) — ให้แอดมินตั้งระยะทาง/อัตราน้ำมันอ้างอิงเองได้
+// ใช้เป็น fallback baseline ตอนเส้นทางยังไม่มีประวัติพอ (ดู useRouteAnomalies.ts)
+// standardPriceMode/standardPrice = ค่าบรรทุกมาตรฐานของเส้นทางนี้ (เช่น KPS→CP-SR
+// เหมา 0.5 บาท/กก.) ใช้เป็นคำแนะนำราคาให้กดใช้ตอนกรอกขาใหม่ ไม่ได้บังคับ auto-fill ทับ
+export interface Route {
+  id: string
+  originLocationId: string
+  destinationLocationId: string
+  standardDistanceKm: number | null
+  standardKmpl: number | null
+  standardPriceMode: 'per_ton' | 'per_kg' | 'lump' | null
+  standardPrice: number | null
+  notes: string
+  active: boolean
 }
 
 export interface Subcontractor {

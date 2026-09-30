@@ -3,7 +3,8 @@ import { db, DSP_KMPL_THRESHOLD } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
-import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole, Location } from '../../types'
+import { FERTILIZER_DEPOT_CATEGORY, RETAIL_SHOP_CATEGORY } from '../../lib/locationCategories'
+import type { Vehicle, Employee, Dispatch, DispatchLeg, FuelRound, FuelTransaction, FuelRecord, EditApprovalRequest, KPSRole, Location, Route } from '../../types'
 import { Icon, Field, LocationCombobox, CargoTypeSelect } from '../../components/ui'
 
 interface Props {
@@ -96,6 +97,17 @@ function priceUnitLabel(mode: LegFormState['priceMode']): string {
   return 'บาท/ตัน'
 }
 
+function priceModeShortLabel(mode: LegFormState['priceMode']): string {
+  if (mode === 'lump') return 'บาท/เที่ยว (เหมา)'
+  if (mode === 'per_kg') return 'บาท/กก.'
+  return 'บาท/ตัน'
+}
+
+// เทียบแบบไม่สนช่องว่างหัวท้าย/ตัวพิมพ์ — ให้ตรงกับตรรกะเช็คซ้ำใน LocationCombobox
+function normKey(s: string): string {
+  return (s ?? '').trim().toLowerCase()
+}
+
 function LegModal({
   initial,
   onSave,
@@ -107,12 +119,31 @@ function LegModal({
 }) {
   const [f, setF] = useState(initial)
   const { data: locations = [] } = useList<Location>('locations')
+  const { data: routes = [] } = useList<Route>('routes')
   const customerLocs = locations.filter(l => l.isCustomer && l.active).sort((a, b) => a.name.localeCompare(b.name, 'th'))
   // ปลายทางเป็นลูกค้าไหม → ใช้เป็นค่าเริ่มต้นผู้รับบิล
   const destIsCustomer = customerLocs.some(l => l.name === f.destination.trim())
   const set = <K extends keyof LegFormState>(k: K, v: LegFormState[K]) => setF(s => ({ ...s, [k]: v }))
   const isReturn = f.legType === 'return'
+  const isBackhaul = f.legType === 'backhaul'
   const isLump = f.priceMode === 'lump'
+
+  // ต้นทาง-ปลายทางตรงกับเส้นทางที่ตั้งค่าบรรทุกมาตรฐานไว้ไหม (จัดการเส้นทางมาตรฐาน) —
+  // ใช้เป็นคำแนะนำให้กดใช้ราคานั้น ไม่ auto-fill ทับค่าที่พิมพ์เองอยู่แล้ว
+  const suggestedRoute = useMemo(() => {
+    if (isReturn) return null
+    const originId = locations.find(l => normKey(l.name) === normKey(f.origin))?.id
+    const destId = locations.find(l => normKey(l.name) === normKey(f.destination))?.id
+    if (!originId || !destId) return null
+    return routes.find(r =>
+      r.active && r.originLocationId === originId && r.destinationLocationId === destId &&
+      r.standardPrice != null && r.standardPriceMode,
+    ) ?? null
+  }, [isReturn, locations, routes, f.origin, f.destination])
+  const applySuggestedPrice = () => {
+    if (!suggestedRoute?.standardPriceMode || suggestedRoute.standardPrice == null) return
+    setF(s => ({ ...s, priceMode: suggestedRoute.standardPriceMode as LegFormState['priceMode'], price: String(suggestedRoute.standardPrice) }))
+  }
 
   // Switching priceMode auto-converts the weight value so the displayed number
   // represents the same load in the new unit.
@@ -199,10 +230,26 @@ function LegModal({
           </label>
           <div className="grid-2" style={{ gap: 12 }}>
             <Field label="ต้นทาง *">
-              <LocationCombobox value={f.origin} onChange={v => set('origin', v)} placeholder="เช่น โรงงาน KPS" />
+              <LocationCombobox
+                value={f.origin}
+                onChange={v => set('origin', v)}
+                placeholder={isBackhaul ? 'เช่น คลังปุ๋ยตราไก่แดง' : 'เช่น โรงงาน KPS'}
+                categoryFilter={isBackhaul ? FERTILIZER_DEPOT_CATEGORY : undefined}
+                defaultCategory={isBackhaul ? FERTILIZER_DEPOT_CATEGORY : undefined}
+              />
+              {isBackhaul && (
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  แสดงเฉพาะสถานที่หมวด "{FERTILIZER_DEPOT_CATEGORY}" — ไม่มีในรายการก็พิมพ์ชื่อใหม่ได้ตามปกติ
+                </div>
+              )}
             </Field>
             <Field label="ปลายทาง *">
-              <LocationCombobox value={f.destination} onChange={v => set('destination', v)} placeholder="เช่น กรุงเทพ" />
+              <LocationCombobox
+                value={f.destination}
+                onChange={v => set('destination', v)}
+                placeholder="เช่น กรุงเทพ"
+                defaultCategory={isBackhaul ? RETAIL_SHOP_CATEGORY : undefined}
+              />
             </Field>
           </div>
           <div className="grid-2" style={{ gap: 12 }}>
@@ -226,6 +273,20 @@ function LegModal({
                 </Field>
               </div>
 
+              {suggestedRoute && (
+                <div
+                  className="row"
+                  style={{
+                    gap: 10, alignItems: 'center', justifyContent: 'space-between',
+                    padding: '8px 12px', borderRadius: 8, background: '#EFF6FF', border: '1px solid #BFDBFE', fontSize: 12.5,
+                  }}
+                >
+                  <span>
+                    💡 เส้นทางนี้มีค่าบรรทุกมาตรฐานตั้งไว้: <strong>{db.fmt2(suggestedRoute.standardPrice)} {priceModeShortLabel(suggestedRoute.standardPriceMode as LegFormState['priceMode'])}</strong>
+                  </span>
+                  <button type="button" className="btn ghost sm" onClick={applySuggestedPrice}>ใช้ราคานี้</button>
+                </div>
+              )}
               <Field label="รูปแบบราคา *">
                 <div className="row" style={{ gap: 16, paddingTop: 4 }}>
                   {([
