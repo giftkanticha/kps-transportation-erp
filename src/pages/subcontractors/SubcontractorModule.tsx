@@ -709,7 +709,7 @@ function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () =>
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
-      <div className="card" style={{ width: 540, maxWidth: '95vw' }}>
+      <div className="card" style={{ width: 760, maxWidth: '95vw' }}>
         <div className="row" style={{ padding: '16px 22px', borderBottom: '1px solid var(--line)', gap: 12, whiteSpace: 'nowrap' }}>
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, flex: 1, minWidth: 0 }}>ยืนยันการชำระเงิน</h3>
           <button className="btn ghost icon sm" onClick={onClose} style={{ flexShrink: 0 }}><Icon name="close" size={16} /></button>
@@ -720,7 +720,7 @@ function PayConfirmModal({ job, onClose, onPaid }: { job: SubJob; onClose: () =>
             <strong style={{ color: 'var(--green)', whiteSpace: 'nowrap' }}>ชำระแล้ว</strong>
           </p>
           <div style={{ padding: 16, background: 'var(--bg-sunk)', borderRadius: 10 }}>
-            <div className="grid-2" style={{ gap: 10 }}>
+            <div className="grid-2" style={{ gap: 10, whiteSpace: 'nowrap' }}>
               <Info label="Job No" value={<span className="mono">{job.code}</span>} />
               <Info label="ทะเบียน" value={<span className="mono">{job.plate}</span>} />
               <Info label="คนขับ" value={job.driverName} />
