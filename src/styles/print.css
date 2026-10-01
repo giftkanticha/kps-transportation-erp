@@ -247,3 +247,12 @@ body.print-landscape { page: kps-land; }
 
 /* ── Screen: hide hist-print-all ──────────────────────────────── */
 .hist-print-all { display: none; }
+
+/* ── ใบสรุปโอน: พิมพ์เฉพาะ .transfer-print-root ─────────────────── */
+.transfer-print-root { display: none; }
+@media print {
+  body.printing-transfer > *:not(.transfer-print-root) { display: none !important; }
+  body.printing-transfer .transfer-print-root { display: block !important; }
+  .transfer-print-sig { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; margin-top: 36px; page-break-inside: avoid; }
+  .transfer-print-sig .line { border-top: 1px solid #000; padding-top: 4px; text-align: center; font-size: 10pt; margin-top: 30px; }
+}

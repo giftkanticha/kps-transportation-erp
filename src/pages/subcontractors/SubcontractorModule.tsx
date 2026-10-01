@@ -1,8 +1,10 @@
 import { useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import type { SubDriver, SubJob, Subcontractor, User, Vehicle } from '../../types'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { Icon, Field, Info, PrintButton, SearchInput } from '../../components/ui'
+import { usePrint } from '../../hooks/usePrint'
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -869,6 +871,122 @@ function JobDetailDrawer({ job, onClose }: { job: SubJob; onClose: () => void })
   )
 }
 
+// ─── Transfer Summary (ใบสรุปโอน หลายคัน) ─────────────────────────────────────
+
+function TransferSummaryModal({ jobs, onClose }: { jobs: SubJob[]; onClose: () => void }) {
+  const { data: subDrivers = [] } = useList<SubDriver>('sub_drivers')
+  const { print } = usePrint()
+
+  const rows = jobs.map(j => {
+    const d = subDrivers.find(x => x.id === j.driverId)
+    const gross = j.total || 0
+    const wht = j.wht ? gross * 0.01 : 0
+    return { job: j, driver: d, gross, wht, net: gross - wht }
+  })
+  const totGross = rows.reduce((s, r) => s + r.gross, 0)
+  const totWht = rows.reduce((s, r) => s + r.wht, 0)
+  const totNet = totGross - totWht
+
+  const doPrint = () => {
+    document.body.classList.add('printing-transfer')
+    window.addEventListener('afterprint', () => document.body.classList.remove('printing-transfer'), { once: true })
+    print('landscape')
+  }
+
+  const table = (
+    <table className="tbl">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Job No</th>
+          <th>ทะเบียน</th>
+          <th>คนขับ</th>
+          <th>ธนาคาร</th>
+          <th>เลขบัญชี</th>
+          <th>ชื่อบัญชี</th>
+          <th className="right">ค่าบรรทุก</th>
+          <th className="right">หัก ณ ที่จ่าย 1%</th>
+          <th className="right">ยอดโอนสุทธิ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={r.job.id}>
+            <td className="num">{i + 1}</td>
+            <td className="mono" style={{ whiteSpace: 'nowrap' }}>{r.job.code}</td>
+            <td className="mono" style={{ whiteSpace: 'nowrap' }}>{r.job.plate}</td>
+            <td>{r.job.driverName}</td>
+            <td>{r.driver?.accountBank || '—'}</td>
+            <td className="mono" style={{ whiteSpace: 'nowrap' }}>{r.driver?.accountNo || '—'}</td>
+            <td>{r.driver?.name || '—'}</td>
+            <td className="num right mono">{db.thb(r.gross)}</td>
+            <td className="num right mono">{r.wht > 0 ? `− ${db.thb(r.wht)}` : '—'}</td>
+            <td className="num right mono" style={{ fontWeight: 700 }}>{db.thb(r.net)}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr style={{ fontWeight: 700 }}>
+          <td colSpan={7} className="right">รวม {rows.length} รายการ</td>
+          <td className="num right mono">{db.thb(totGross)}</td>
+          <td className="num right mono">{totWht > 0 ? `− ${db.thb(totWht)}` : '—'}</td>
+          <td className="num right mono">{db.thb(totNet)}</td>
+        </tr>
+      </tfoot>
+    </table>
+  )
+
+  return (
+    <>
+      <div
+        className="no-print"
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}
+        onClick={onClose}
+      >
+        <div
+          className="card"
+          style={{ width: 1100, maxWidth: '96vw', maxHeight: '88vh', display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fff' }}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="row" style={{ padding: '16px 22px', borderBottom: '1px solid var(--line)', gap: 12 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, flex: 1 }}>ใบสรุปโอนเงิน ({rows.length} รายการ)</h3>
+            <button className="btn ghost icon sm" onClick={onClose}><Icon name="close" size={16} /></button>
+          </div>
+          <div style={{ padding: 22, overflow: 'auto' }}>
+            <div className="tbl-wrap" style={{ border: '1px solid var(--line)', borderRadius: 8, overflowX: 'auto' }}>{table}</div>
+            <div style={{ marginTop: 16, padding: 16, background: 'var(--bg-sunk)', borderRadius: 10 }}>
+              <div className="muted" style={{ fontSize: 12 }}>ยอดที่ต้องโอนรวมทั้งหมด (สุทธิ)</div>
+              <span className="mono" style={{ fontSize: 28, fontWeight: 800, color: 'var(--primary)' }}>{db.thb(totNet)}</span>
+            </div>
+          </div>
+          <div className="row" style={{ padding: '14px 22px', borderTop: '1px solid var(--line)', justifyContent: 'flex-end', gap: 8 }}>
+            <button className="btn" onClick={onClose}>ปิด</button>
+            <button className="btn primary" onClick={doPrint}><Icon name="download" size={15} /> พิมพ์ใบสรุปโอน</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Print-only copy, mounted directly under <body> so print CSS can isolate it */}
+      {createPortal(
+        <div className="transfer-print-root">
+          <div className="kps-print-header">
+            <p className="co">KPS Transportations</p>
+            <p className="ttl">ใบสรุปการโอนเงินรถรับจ้างร่วม</p>
+            <p className="sub">{rows.length} รายการ · ยอดโอนสุทธิรวม {db.thb(totNet)}</p>
+            <p className="ts">พิมพ์เมื่อ {new Date().toLocaleString('th-TH')}</p>
+          </div>
+          {table}
+          <div className="transfer-print-sig">
+            <div><div className="line">ผู้จัดทำ</div></div>
+            <div><div className="line">ผู้อนุมัติ</div></div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
 // ─── Tab 3: ประวัติการจ้าง ────────────────────────────────────────────────────
 
 function SubHistoryTab() {
@@ -878,6 +996,8 @@ function SubHistoryTab() {
   const [statusF, setStatusF] = useState('all')
   const [payJob, setPayJob] = useState<SubJob | null>(null)
   const [viewJob, setViewJob] = useState<SubJob | null>(null)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [showSummary, setShowSummary] = useState(false)
 
   const filtered = all.filter(j => {
     if (plateF !== 'all' && j.plate !== plateF) return false
@@ -887,6 +1007,15 @@ function SubHistoryTab() {
   })
 
   const plates = [...new Set(all.map(j => j.plate))]
+
+  // เลือกได้เฉพาะงานที่รอชำระ (ต้องโอน)
+  const selectable = filtered.filter(j => j.status === 'unpaid')
+  const selectedJobs = selectable.filter(j => selected.has(j.id))
+  const allSelected = selectable.length > 0 && selectedJobs.length === selectable.length
+  const toggleOne = (id: string) =>
+    setSelected(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n })
+  const toggleAll = () =>
+    setSelected(allSelected ? new Set() : new Set(selectable.map(j => j.id)))
 
   const statusBadge = (status: string) => {
     const s = STATUS_LABEL[status]
@@ -925,6 +1054,11 @@ function SubHistoryTab() {
         <div className="row sub-hist-actions">
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>ประวัติการจ้างรถรับจ้าง</h3>
           <div className="spacer" />
+          {selectedJobs.length > 0 && (
+            <button className="btn primary" onClick={() => setShowSummary(true)} style={{ marginRight: 8 }}>
+              <Icon name="download" size={15} /> พิมพ์ใบสรุปโอน ({selectedJobs.length})
+            </button>
+          )}
           <PrintButton orientation="landscape" label="พิมพ์รายงาน" />
         </div>
 
@@ -1018,6 +1152,9 @@ function SubHistoryTab() {
         <table className="tbl">
           <thead>
             <tr>
+              <th className="no-print" style={{ width: 36 }}>
+                <input type="checkbox" checked={allSelected} onChange={toggleAll} disabled={selectable.length === 0} title="เลือกงานรอชำระทั้งหมด" />
+              </th>
               <th>Job No</th>
               <th>วันที่</th>
               <th>ทะเบียน</th>
@@ -1034,6 +1171,11 @@ function SubHistoryTab() {
               const modeShort = j.mode === 'per_ton' ? '/ตัน' : j.mode === 'per_kg' ? '/กก.' : ' เหมา'
               return (
                 <tr key={j.id}>
+                  <td className="no-print">
+                    {j.status === 'unpaid' && (
+                      <input type="checkbox" checked={selected.has(j.id)} onChange={() => toggleOne(j.id)} />
+                    )}
+                  </td>
                   <td className="mono" style={{ fontWeight: 600 }}>{j.code}</td>
                   <td className="num muted">{db.thaiDate(j.date)}</td>
                   <td><span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{j.plate}</span></td>
@@ -1073,7 +1215,7 @@ function SubHistoryTab() {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9}>
+                <td colSpan={10}>
                   <div className="empty">ไม่พบข้อมูลการจ้าง</div>
                 </td>
               </tr>
@@ -1084,6 +1226,9 @@ function SubHistoryTab() {
 
       {viewJob && (
         <JobDetailDrawer job={viewJob} onClose={() => setViewJob(null)} />
+      )}
+      {showSummary && (
+        <TransferSummaryModal jobs={selectedJobs} onClose={() => setShowSummary(false)} />
       )}
       {payJob && (
         <PayConfirmModal
