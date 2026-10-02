@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react'
+import React, { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { db } from '../../lib/db'
 import { callRpc } from '../../lib/crud'
@@ -2158,6 +2158,7 @@ function PivotTab() {
   const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: allPartners = [] } = useList<Partner>('partners')
   const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
+  const [printUnpaid, setPrintUnpaid] = useState(false)
   const [pivotYear,  setPivotYear]  = useState(today.getFullYear())
   const [pivotMonth, setPivotMonth] = useState<number>(today.getMonth() + 1) // 1-12, 0 = ทุกเดือน
 
@@ -2211,6 +2212,30 @@ function PivotTab() {
 
   const activeVehicles = vehicles.filter(v => matrix[v.id])
 
+  // Unpaid bills in the selected period, grouped by partner × month (for the combined printout)
+  const unpaidGroups = useMemo(() => {
+    const map = new Map<string, { key: string; partner?: Partner; month: string; bills: ExpenseHeader[]; total: number }>()
+    for (const h of headers) {
+      if (h.paid) continue
+      const month = h.date.slice(0, 7)
+      const key = `${h.partnerId}|${month}`
+      const g = map.get(key) ?? { key, partner: allPartners.find(p => p.id === h.partnerId), month, bills: [], total: 0 }
+      g.bills.push(h)
+      g.total += h.total
+      map.set(key, g)
+    }
+    return Array.from(map.values()).sort((a, b) => a.month.localeCompare(b.month) || b.total - a.total)
+  }, [headers, allPartners])
+  const unpaidBillCount = unpaidGroups.reduce((s, g) => s + g.bills.length, 0)
+  const unpaidTotal = unpaidGroups.reduce((s, g) => s + g.total, 0)
+
+  useEffect(() => {
+    if (!printUnpaid) return
+    window.addEventListener('afterprint', () => setPrintUnpaid(false), { once: true })
+    print('landscape')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printUnpaid])
+
   const selStyle: React.CSSProperties = {
     height: 38, padding: '0 12px', borderRadius: 8,
     border: '1px solid #CBD5E1', background: '#ffffff', fontSize: 13,
@@ -2218,7 +2243,7 @@ function PivotTab() {
   }
 
   return (
-    <div>
+    <div className={printUnpaid ? 'print-one-page' : undefined}>
       {/* ── Filter bar ── */}
       <div
         className="no-print"
@@ -2268,6 +2293,10 @@ function PivotTab() {
           <FontScaleControl />
           <button className="btn" onClick={() => print('landscape')}>
             <Icon name="download" size={14} /> พิมพ์รายงาน
+          </button>
+          <button className="btn primary" onClick={() => setPrintUnpaid(true)} disabled={unpaidGroups.length === 0}
+            title={unpaidGroups.length === 0 ? 'ไม่มีบิลค้างชำระในช่วงที่เลือก' : undefined}>
+            <Icon name="download" size={14} /> พิมพ์ค้างชำระ
           </button>
         </div>
       </div>
@@ -2350,8 +2379,55 @@ function PivotTab() {
         )}
       </div>
 
+      {/* ── Unpaid summary (printed together with the pivot via "พิมพ์ค้างชำระ") ── */}
+      {printUnpaid && (
+        <div className="print-only" style={{ marginTop: 12, fontSize: 14 }}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700 }}>
+            สรุปบิลค้างชำระ — {periodLabel}
+          </div>
+          <div style={{ textAlign: 'center', fontSize: 13, color: '#444', margin: '4px 0 8px' }}>
+            {unpaidBillCount} บิล · ยอดรวม {fmtMoney(unpaidTotal)} บาท
+          </div>
+          <table className="tbl unpaid-print-tbl" style={{ width: '100%', fontSize: 14 }}>
+            <thead>
+              <tr>
+                <th>ร้านค้า / ช่าง</th>
+                <th>เดือน</th>
+                <th className="num right">จำนวนบิล</th>
+                <th className="num right">ยอดรวม (บาท)</th>
+                <th>ธนาคาร / เลขบัญชี</th>
+              </tr>
+            </thead>
+            <tbody>
+              {unpaidGroups.map(g => (
+                <tr key={g.key}>
+                  <td style={{ fontWeight: 600 }}>{g.partner?.name ?? '—'}</td>
+                  <td>{g.month ? PIVOT_MONTHS[Number(g.month.slice(5, 7)) - 1] : '—'}</td>
+                  <td className="num right">{g.bills.length}</td>
+                  <td className="num right mono" style={{ fontWeight: 700 }}>{fmtMoney(g.total)}</td>
+                  <td>
+                    {g.partner?.account ? (
+                      <>
+                        <span className="mono" style={{ fontWeight: 600 }}>{g.partner.account}</span>
+                        <div style={{ fontSize: 12 }}>{[g.partner.bank, g.partner.accountName].filter(Boolean).join(' · ')}</div>
+                      </>
+                    ) : '—'}
+                  </td>
+                </tr>
+              ))}
+              <tr style={{ fontWeight: 700 }}>
+                <td colSpan={2} className="right">รวมทั้งหมด</td>
+                <td className="num right">{unpaidBillCount}</td>
+                <td className="num right mono">{fmtMoney(unpaidTotal)}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* ── Print footer (matches P&L รายคัน) ── */}
-      <div className="print-only" style={{ marginTop: 12, fontSize: 10, color: '#666', textAlign: 'center' }}>
+      <div className="print-only kps-print-footer" style={{ marginTop: 12, fontSize: 10, color: '#666', textAlign: 'center' }}>
         * รายงานนี้สร้างจากข้อมูล Real-time · สรุปยอดค่าใช้จ่ายรายคัน × คู่ค้า · ระบบ KPS Transportation ERP
       </div>
     </div>
@@ -2373,6 +2449,48 @@ function ExpReport() {
   const [vehicleFilter, setVehicleFilter] = useState('')
   const [detailHeader, setDetailHeader] = useState<ExpenseHeader | null>(null)
   const [editingHeader, setEditingHeader] = useState<ExpenseHeader | null>(null)
+  const [unpaidMonth, setUnpaidMonth] = useState('')
+  const [unpaidPartner, setUnpaidPartner] = useState('')
+
+  const unpaidAll = useMemo(() => headers.filter((h) => !h.paid), [headers])
+  const unpaidMonths = useMemo(
+    () => Array.from(new Set(unpaidAll.map((h) => h.date.slice(0, 7)).filter(Boolean))).sort().reverse(),
+    [unpaidAll],
+  )
+  const unpaidRows = useMemo(
+    () =>
+      unpaidAll
+        .filter((h) => (!unpaidMonth || h.date.startsWith(unpaidMonth)) && (!unpaidPartner || h.partnerId === unpaidPartner))
+        .sort((a, b) => b.date.localeCompare(a.date)),
+    [unpaidAll, unpaidMonth, unpaidPartner],
+  )
+  const unpaidPartners = useMemo(
+    () => partners.filter((p) => unpaidAll.some((h) => h.partnerId === p.id)),
+    [partners, unpaidAll],
+  )
+  const unpaidGroups = useMemo(() => {
+    const map = new Map<string, { key: string; partnerId: string; month: string; bills: ExpenseHeader[]; total: number }>()
+    for (const h of unpaidRows) {
+      const month = h.date.slice(0, 7)
+      const key = `${h.partnerId}|${month}`
+      const g = map.get(key) ?? { key, partnerId: h.partnerId, month, bills: [], total: 0 }
+      g.bills.push(h)
+      g.total += h.total
+      map.set(key, g)
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => b.month.localeCompare(a.month) || b.total - a.total,
+    )
+  }, [unpaidRows])
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
+  const toggleGroup = (key: string) =>
+    setOpenGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  const monthLabel = (ym: string) => db.thaiDate(`${ym}-01`).replace(/^\d+\s*/, '')
 
   const filteredHeaders = headers.filter((h) => {
     if (vehicleFilter && h.vehicleId !== vehicleFilter) return false
@@ -2431,6 +2549,7 @@ function ExpReport() {
     ['repair', 'ประวัติการซ่อม'],
     ['lines', 'รายละเอียดรายการ'],
     ['pivot', 'สรุปรายคัน × คู่ค้า'],
+    ['unpaid', 'ค้างชำระ'],
   ]
 
   return (
@@ -2676,6 +2795,130 @@ function ExpReport() {
         </>
       )}
       {innerTab === 'pivot' && <PivotTab />}
+
+      {innerTab === 'unpaid' && (
+        <>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
+            <div className="row" style={{ gap: 14, alignItems: 'flex-end' }}>
+              <Field label="เดือน">
+                <select value={unpaidMonth} onChange={(e) => setUnpaidMonth(e.target.value)} style={{ width: 190 }}>
+                  <option value="">ทั้งหมด</option>
+                  {unpaidMonths.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+                </select>
+              </Field>
+              <Field label="ร้านค้า / ช่าง">
+                <select value={unpaidPartner} onChange={(e) => setUnpaidPartner(e.target.value)} style={{ width: 220 }}>
+                  <option value="">ทั้งหมด</option>
+                  {unpaidPartners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </Field>
+              <div className="muted" style={{ fontSize: 12, paddingBottom: 10 }}>
+                ค้างชำระ {unpaidRows.length} บิล · รวม{' '}
+                <b style={{ color: 'var(--text)' }}>{db.fmt(unpaidRows.reduce((sum, h) => sum + h.total, 0))} ฿</b>
+              </div>
+            </div>
+          </div>
+          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0, overflow: 'auto' }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th style={{ width: 28 }}></th>
+                  <th>ร้านค้า / ช่าง</th>
+                  <th>เดือน</th>
+                  <th className="right">จำนวนบิล</th>
+                  <th className="right">ยอดรวม</th>
+                  <th>ธนาคาร / เลขบัญชี</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unpaidGroups.map((g) => {
+                  const p = partners.find((x) => x.id === g.partnerId)
+                  const open = openGroups.has(g.key)
+                  return (
+                    <Fragment key={g.key}>
+                      <tr style={{ cursor: 'pointer' }} onClick={() => toggleGroup(g.key)}>
+                        <td className="muted">{open ? '▾' : '▸'}</td>
+                        <td style={{ fontWeight: 600 }}>{p?.name ?? '—'}</td>
+                        <td>{g.month ? monthLabel(g.month) : '—'}</td>
+                        <td className="num right">{g.bills.length} บิล</td>
+                        <td className="num right" style={{ fontWeight: 700 }}>{db.fmt(g.total)} ฿</td>
+                        <td>
+                          {p?.account ? (
+                            <>
+                              <span className="mono">{p.account}</span>
+                              <div className="muted" style={{ fontSize: 11 }}>
+                                {[p.bank, p.accountName].filter(Boolean).join(' · ')}
+                              </div>
+                            </>
+                          ) : '—'}
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr>
+                          <td></td>
+                          <td colSpan={5} style={{ background: 'var(--bg-2, #F8FAFC)', padding: '8px 12px' }}>
+                            {g.bills.map((h) => {
+                              const v = vehicles.find((x) => x.id === h.vehicleId)
+                              const billLines = allLines.filter((l) => l.headerId === h.id)
+                              const invoices = Array.from(new Set(billLines.map((l) => l.invoiceNo).filter(Boolean))).join(', ')
+                              return (
+                                <div key={h.id} style={{ marginBottom: 10 }}>
+                                  <div className="row" style={{ gap: 12, fontSize: 13, fontWeight: 600 }}>
+                                    <span className="mono">{toBeCode(h.code)}</span>
+                                    <span className="muted">{db.thaiDate(h.date)}</span>
+                                    <span className="mono" style={{ color: 'var(--primary)' }}>{v?.plate ?? '—'}</span>
+                                    {invoices && <span>บิล {invoices}</span>}
+                                    <span style={{ marginLeft: 'auto' }}>{db.fmt(h.total)} ฿</span>
+                                    <button className="btn ghost icon sm" title="แก้ไขรายการ/วันที่" onClick={() => setEditingHeader(h)}>
+                                      <Icon name="edit" size={14} />
+                                    </button>
+                                  </div>
+                                  <table className="tbl" style={{ width: '100%', marginTop: 4 }}>
+                                    <tbody>
+                                      {billLines.map((l) => (
+                                        <tr key={l.id}>
+                                          <td style={{ paddingLeft: 24 }}>{l.item || '—'}</td>
+                                          <td><span className="badge gray">{l.category}</span></td>
+                                          <td className="num right">{l.qty}</td>
+                                          <td className="num right">{db.fmt(l.unitPrice)} ฿</td>
+                                          <td className="num right">{db.fmt(l.amount)} ฿</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )
+                            })}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })}
+                {unpaidGroups.length === 0 && (
+                  <tr><td colSpan={6}><div className="empty">ไม่มีบิลค้างชำระในช่วงที่เลือก</div></td></tr>
+                )}
+                <tr style={{ background: 'var(--primary-50)', fontWeight: 700 }}>
+                  <td colSpan={3} className="right">รวมค้างชำระ</td>
+                  <td className="num right">{unpaidRows.length} บิล</td>
+                  <td className="num right">{db.fmt(unpaidRows.reduce((sum, h) => sum + h.total, 0))} ฿</td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {editingHeader && innerTab === 'unpaid' && (
+            <ExpenseEditModal
+              header={editingHeader}
+              vehicles={vehicles}
+              partners={partners}
+              stocks={stock}
+              onClose={() => setEditingHeader(null)}
+              onSaved={() => setEditingHeader(null)}
+            />
+          )}
+        </>
+      )}
     </div>
   )
 }

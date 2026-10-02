@@ -247,3 +247,18 @@ body.print-landscape { page: kps-land; }
 
 /* ── Screen: hide hist-print-all ──────────────────────────────── */
 .hist-print-all { display: none; }
+
+/* Unpaid summary printed under the pivot — larger text than the generic compact tables */
+@media print {
+  .unpaid-print-tbl th, .unpaid-print-tbl td { font-size: 13.5px !important; padding: 5px 8px !important; }
+}
+
+/* "พิมพ์ค้างชำระ": pivot + unpaid summary squeezed onto a single A4 landscape sheet */
+@media print {
+  .print-one-page { zoom: 0.66; }
+  .print-one-page .print-area .tbl th,
+  .print-one-page .print-area .tbl td { padding: 2px 6px !important; white-space: nowrap; }
+  .print-one-page .unpaid-print-tbl th,
+  .print-one-page .unpaid-print-tbl td { padding: 3px 8px !important; }
+  .print-one-page .kps-print-footer { display: none !important; }
+}
