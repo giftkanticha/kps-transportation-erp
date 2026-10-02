@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react'
+import React, { useState, useMemo, useEffect, useRef, Fragment } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { db } from '../../lib/db'
 import { callRpc } from '../../lib/crud'
@@ -2392,6 +2392,28 @@ function ExpReport() {
     () => partners.filter((p) => unpaidAll.some((h) => h.partnerId === p.id)),
     [partners, unpaidAll],
   )
+  const unpaidGroups = useMemo(() => {
+    const map = new Map<string, { key: string; partnerId: string; month: string; bills: ExpenseHeader[]; total: number }>()
+    for (const h of unpaidRows) {
+      const month = h.date.slice(0, 7)
+      const key = `${h.partnerId}|${month}`
+      const g = map.get(key) ?? { key, partnerId: h.partnerId, month, bills: [], total: 0 }
+      g.bills.push(h)
+      g.total += h.total
+      map.set(key, g)
+    }
+    return Array.from(map.values()).sort(
+      (a, b) => b.month.localeCompare(a.month) || b.total - a.total,
+    )
+  }, [unpaidRows])
+  const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
+  const toggleGroup = (key: string) =>
+    setOpenGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
   const monthLabel = (ym: string) => db.thaiDate(`${ym}-01`).replace(/^\d+\s*/, '')
 
   const filteredHeaders = headers.filter((h) => {
@@ -2724,52 +2746,85 @@ function ExpReport() {
             <table className="tbl">
               <thead>
                 <tr>
-                  <th>วันที่</th>
-                  <th>เลขที่เอกสาร</th>
-                  <th>เลขที่บิล</th>
-                  <th>ทะเบียนรถ</th>
+                  <th style={{ width: 28 }}></th>
                   <th>ร้านค้า / ช่าง</th>
-                  <th>ธนาคาร</th>
-                  <th>เลขบัญชี</th>
-                  <th>ครบกำหนด</th>
-                  <th className="right">จำนวนเงิน</th>
-                  <th></th>
+                  <th>เดือน</th>
+                  <th className="right">จำนวนบิล</th>
+                  <th className="right">ยอดรวม</th>
+                  <th>ธนาคาร / เลขบัญชี</th>
                 </tr>
               </thead>
               <tbody>
-                {unpaidRows.map((h) => {
-                  const v = vehicles.find((x) => x.id === h.vehicleId)
-                  const p = partners.find((x) => x.id === h.partnerId)
-                  const invoices = Array.from(
-                    new Set(allLines.filter((l) => l.headerId === h.id).map((l) => l.invoiceNo).filter(Boolean)),
-                  ).join(', ')
+                {unpaidGroups.map((g) => {
+                  const p = partners.find((x) => x.id === g.partnerId)
+                  const open = openGroups.has(g.key)
                   return (
-                    <tr key={h.id}>
-                      <td className="num muted">{db.thaiDate(h.date)}</td>
-                      <td className="mono" style={{ fontSize: 12 }}>{toBeCode(h.code)}</td>
-                      <td>{invoices || '—'}</td>
-                      <td><span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{v?.plate ?? '—'}</span></td>
-                      <td>{p?.name ?? '—'}</td>
-                      <td>{p?.bank || '—'}</td>
-                      <td>
-                        <span className="mono">{p?.account || '—'}</span>
-                        {p?.accountName && <div className="muted" style={{ fontSize: 11 }}>{p.accountName}</div>}
-                      </td>
-                      <td className="num muted">{h.dueDate ? db.thaiDate(h.dueDate) : '—'}</td>
-                      <td className="num right" style={{ fontWeight: 600 }}>{db.fmt(h.total)} ฿</td>
-                      <td>
-                        <button className="btn ghost icon sm" title="แก้ไขรายการ/วันที่" onClick={() => setEditingHeader(h)}>
-                          <Icon name="edit" size={14} />
-                        </button>
-                      </td>
-                    </tr>
+                    <Fragment key={g.key}>
+                      <tr style={{ cursor: 'pointer' }} onClick={() => toggleGroup(g.key)}>
+                        <td className="muted">{open ? '▾' : '▸'}</td>
+                        <td style={{ fontWeight: 600 }}>{p?.name ?? '—'}</td>
+                        <td>{g.month ? monthLabel(g.month) : '—'}</td>
+                        <td className="num right">{g.bills.length} บิล</td>
+                        <td className="num right" style={{ fontWeight: 700 }}>{db.fmt(g.total)} ฿</td>
+                        <td>
+                          {p?.account ? (
+                            <>
+                              <span className="mono">{p.account}</span>
+                              <div className="muted" style={{ fontSize: 11 }}>
+                                {[p.bank, p.accountName].filter(Boolean).join(' · ')}
+                              </div>
+                            </>
+                          ) : '—'}
+                        </td>
+                      </tr>
+                      {open && (
+                        <tr>
+                          <td></td>
+                          <td colSpan={5} style={{ background: 'var(--bg-2, #F8FAFC)', padding: '8px 12px' }}>
+                            {g.bills.map((h) => {
+                              const v = vehicles.find((x) => x.id === h.vehicleId)
+                              const billLines = allLines.filter((l) => l.headerId === h.id)
+                              const invoices = Array.from(new Set(billLines.map((l) => l.invoiceNo).filter(Boolean))).join(', ')
+                              return (
+                                <div key={h.id} style={{ marginBottom: 10 }}>
+                                  <div className="row" style={{ gap: 12, fontSize: 13, fontWeight: 600 }}>
+                                    <span className="mono">{toBeCode(h.code)}</span>
+                                    <span className="muted">{db.thaiDate(h.date)}</span>
+                                    <span className="mono" style={{ color: 'var(--primary)' }}>{v?.plate ?? '—'}</span>
+                                    {invoices && <span>บิล {invoices}</span>}
+                                    <span style={{ marginLeft: 'auto' }}>{db.fmt(h.total)} ฿</span>
+                                    <button className="btn ghost icon sm" title="แก้ไขรายการ/วันที่" onClick={() => setEditingHeader(h)}>
+                                      <Icon name="edit" size={14} />
+                                    </button>
+                                  </div>
+                                  <table className="tbl" style={{ width: '100%', marginTop: 4 }}>
+                                    <tbody>
+                                      {billLines.map((l) => (
+                                        <tr key={l.id}>
+                                          <td style={{ paddingLeft: 24 }}>{l.item || '—'}</td>
+                                          <td><span className="badge gray">{l.category}</span></td>
+                                          <td className="num right">{l.qty}</td>
+                                          <td className="num right">{db.fmt(l.unitPrice)} ฿</td>
+                                          <td className="num right">{db.fmt(l.amount)} ฿</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )
+                            })}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   )
                 })}
-                {unpaidRows.length === 0 && (
-                  <tr><td colSpan={10}><div className="empty">ไม่มีบิลค้างชำระในช่วงที่เลือก</div></td></tr>
+                {unpaidGroups.length === 0 && (
+                  <tr><td colSpan={6}><div className="empty">ไม่มีบิลค้างชำระในช่วงที่เลือก</div></td></tr>
                 )}
                 <tr style={{ background: 'var(--primary-50)', fontWeight: 700 }}>
-                  <td colSpan={8} className="right">รวมค้างชำระ</td>
+                  <td colSpan={3} className="right">รวมค้างชำระ</td>
+                  <td className="num right">{unpaidRows.length} บิล</td>
                   <td className="num right">{db.fmt(unpaidRows.reduce((sum, h) => sum + h.total, 0))} ฿</td>
                   <td></td>
                 </tr>
