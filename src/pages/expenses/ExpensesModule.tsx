@@ -2243,7 +2243,7 @@ function PivotTab() {
   }
 
   return (
-    <div>
+    <div className={printUnpaid ? 'print-one-page' : undefined}>
       {/* ── Filter bar ── */}
       <div
         className="no-print"
@@ -2381,7 +2381,7 @@ function PivotTab() {
 
       {/* ── Unpaid summary (printed together with the pivot via "พิมพ์ค้างชำระ") ── */}
       {printUnpaid && (
-        <div className="print-only" style={{ marginTop: 16, pageBreakInside: 'avoid', fontSize: 14 }}>
+        <div className="print-only" style={{ marginTop: 12, fontSize: 14 }}>
           <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700 }}>
             สรุปบิลค้างชำระ — {periodLabel}
           </div>
@@ -2427,7 +2427,7 @@ function PivotTab() {
       )}
 
       {/* ── Print footer (matches P&L รายคัน) ── */}
-      <div className="print-only" style={{ marginTop: 12, fontSize: 10, color: '#666', textAlign: 'center' }}>
+      <div className="print-only kps-print-footer" style={{ marginTop: 12, fontSize: 10, color: '#666', textAlign: 'center' }}>
         * รายงานนี้สร้างจากข้อมูล Real-time · สรุปยอดค่าใช้จ่ายรายคัน × คู่ค้า · ระบบ KPS Transportation ERP
       </div>
     </div>
