@@ -2158,7 +2158,6 @@ function PivotTab() {
   const { data: allHeaders = [] } = useList<ExpenseHeader>('expense_headers')
   const { data: allPartners = [] } = useList<Partner>('partners')
   const { data: allVehicles = [] } = useList<Vehicle>('vehicles')
-  const { data: allLines = [] } = useList<ExpenseLine>('expense_lines')
   const [printUnpaid, setPrintUnpaid] = useState(false)
   const [pivotYear,  setPivotYear]  = useState(today.getFullYear())
   const [pivotMonth, setPivotMonth] = useState<number>(today.getMonth() + 1) // 1-12, 0 = ทุกเดือน
@@ -2382,14 +2381,14 @@ function PivotTab() {
 
       {/* ── Unpaid summary (printed together with the pivot via "พิมพ์ค้างชำระ") ── */}
       {printUnpaid && (
-        <div className="print-only" style={{ marginTop: 20, pageBreakBefore: 'always' }}>
-          <div style={{ textAlign: 'center', fontSize: 16, fontWeight: 700 }}>
+        <div className="print-only" style={{ marginTop: 16, pageBreakInside: 'avoid', fontSize: 14 }}>
+          <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 700 }}>
             สรุปบิลค้างชำระ — {periodLabel}
           </div>
-          <div style={{ textAlign: 'center', fontSize: 11, color: '#444', margin: '4px 0 10px' }}>
+          <div style={{ textAlign: 'center', fontSize: 13, color: '#444', margin: '4px 0 8px' }}>
             {unpaidBillCount} บิล · ยอดรวม {fmtMoney(unpaidTotal)} บาท
           </div>
-          <table className="tbl" style={{ width: '100%' }}>
+          <table className="tbl unpaid-print-tbl" style={{ width: '100%', fontSize: 14 }}>
             <thead>
               <tr>
                 <th>ร้านค้า / ช่าง</th>
@@ -2397,7 +2396,6 @@ function PivotTab() {
                 <th className="num right">จำนวนบิล</th>
                 <th className="num right">ยอดรวม (บาท)</th>
                 <th>ธนาคาร / เลขบัญชี</th>
-                <th>เลขที่เอกสาร / เลขที่บิล</th>
               </tr>
             </thead>
             <tbody>
@@ -2411,15 +2409,9 @@ function PivotTab() {
                     {g.partner?.account ? (
                       <>
                         <span className="mono" style={{ fontWeight: 600 }}>{g.partner.account}</span>
-                        <div style={{ fontSize: 10 }}>{[g.partner.bank, g.partner.accountName].filter(Boolean).join(' · ')}</div>
+                        <div style={{ fontSize: 12 }}>{[g.partner.bank, g.partner.accountName].filter(Boolean).join(' · ')}</div>
                       </>
                     ) : '—'}
-                  </td>
-                  <td style={{ fontSize: 10 }}>
-                    {g.bills.map(h => {
-                      const inv = Array.from(new Set(allLines.filter(l => l.headerId === h.id).map(l => l.invoiceNo).filter(Boolean))).join('/')
-                      return toBeCode(h.code) + (inv ? ` (${inv})` : '')
-                    }).join(', ')}
                   </td>
                 </tr>
               ))}
@@ -2427,7 +2419,7 @@ function PivotTab() {
                 <td colSpan={2} className="right">รวมทั้งหมด</td>
                 <td className="num right">{unpaidBillCount}</td>
                 <td className="num right mono">{fmtMoney(unpaidTotal)}</td>
-                <td colSpan={2}></td>
+                <td></td>
               </tr>
             </tbody>
           </table>

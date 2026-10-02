@@ -247,3 +247,8 @@ body.print-landscape { page: kps-land; }
 
 /* ── Screen: hide hist-print-all ──────────────────────────────── */
 .hist-print-all { display: none; }
+
+/* Unpaid summary printed under the pivot — larger text than the generic compact tables */
+@media print {
+  .unpaid-print-tbl th, .unpaid-print-tbl td { font-size: 13.5px !important; padding: 5px 8px !important; }
+}
