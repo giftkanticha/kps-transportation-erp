@@ -2372,6 +2372,7 @@ function ExpReport() {
   const [dateTo, setDateTo] = useState('')
   const [vehicleFilter, setVehicleFilter] = useState('')
   const [detailHeader, setDetailHeader] = useState<ExpenseHeader | null>(null)
+  const [editingHeader, setEditingHeader] = useState<ExpenseHeader | null>(null)
 
   const filteredHeaders = headers.filter((h) => {
     if (vehicleFilter && h.vehicleId !== vehicleFilter) return false
@@ -2389,6 +2390,7 @@ function ExpReport() {
       if (dateTo && header.date > dateTo) return []
       return [{
         id: `expense-${line.id}`,
+        headerId: header.id as string | undefined,
         date: header.date,
         source: 'ค่าใช้จ่ายรถ',
         vehicle: vehicles.find((v) => v.id === header.vehicleId)?.plate ?? '—',
@@ -2409,6 +2411,7 @@ function ExpReport() {
       const item = stock.find((s) => s.id === receipt.stockItemId)
       return [{
         id: `receipt-${receipt.id}`,
+        headerId: undefined as string | undefined,
         date: receipt.date,
         source: 'รับเข้าคลัง KPS',
         vehicle: 'ส่วนกลาง',
@@ -2621,6 +2624,7 @@ function ExpReport() {
                   <th className="right">จำนวน</th>
                   <th className="right">ราคา/หน่วย</th>
                   <th className="right">รวมเงิน</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -2635,18 +2639,40 @@ function ExpReport() {
                     <td className="num right">{line.qty}</td>
                     <td className="num right">{db.fmt(line.unitPrice)} ฿</td>
                     <td className="num right" style={{ fontWeight: 600 }}>{db.fmt(line.total)} ฿</td>
+                    <td>
+                      {line.headerId && (
+                        <button
+                          className="btn ghost icon sm"
+                          title="แก้ไขรายการ/วันที่"
+                          onClick={() => setEditingHeader(headers.find((h) => h.id === line.headerId) ?? null)}
+                        >
+                          <Icon name="edit" size={14} />
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
                 {reportLines.length === 0 && (
-                  <tr><td colSpan={9}><div className="empty">ไม่พบรายการในช่วงที่เลือก</div></td></tr>
+                  <tr><td colSpan={10}><div className="empty">ไม่พบรายการในช่วงที่เลือก</div></td></tr>
                 )}
                 <tr style={{ background: 'var(--primary-50)', fontWeight: 700 }}>
                   <td colSpan={8} className="right">รวม</td>
                   <td className="num right">{db.fmt(reportLines.reduce((sum, line) => sum + Number(line.total), 0))} ฿</td>
+                  <td></td>
                 </tr>
               </tbody>
             </table>
           </div>
+          {editingHeader && (
+            <ExpenseEditModal
+              header={editingHeader}
+              vehicles={vehicles}
+              partners={partners}
+              stocks={stock}
+              onClose={() => setEditingHeader(null)}
+              onSaved={() => setEditingHeader(null)}
+            />
+          )}
         </>
       )}
       {innerTab === 'pivot' && <PivotTab />}
