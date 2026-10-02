@@ -2373,6 +2373,26 @@ function ExpReport() {
   const [vehicleFilter, setVehicleFilter] = useState('')
   const [detailHeader, setDetailHeader] = useState<ExpenseHeader | null>(null)
   const [editingHeader, setEditingHeader] = useState<ExpenseHeader | null>(null)
+  const [unpaidMonth, setUnpaidMonth] = useState('')
+  const [unpaidPartner, setUnpaidPartner] = useState('')
+
+  const unpaidAll = useMemo(() => headers.filter((h) => !h.paid), [headers])
+  const unpaidMonths = useMemo(
+    () => Array.from(new Set(unpaidAll.map((h) => h.date.slice(0, 7)).filter(Boolean))).sort().reverse(),
+    [unpaidAll],
+  )
+  const unpaidRows = useMemo(
+    () =>
+      unpaidAll
+        .filter((h) => (!unpaidMonth || h.date.startsWith(unpaidMonth)) && (!unpaidPartner || h.partnerId === unpaidPartner))
+        .sort((a, b) => b.date.localeCompare(a.date)),
+    [unpaidAll, unpaidMonth, unpaidPartner],
+  )
+  const unpaidPartners = useMemo(
+    () => partners.filter((p) => unpaidAll.some((h) => h.partnerId === p.id)),
+    [partners, unpaidAll],
+  )
+  const monthLabel = (ym: string) => db.thaiDate(`${ym}-01`).replace(/^\d+\s*/, '')
 
   const filteredHeaders = headers.filter((h) => {
     if (vehicleFilter && h.vehicleId !== vehicleFilter) return false
@@ -2431,6 +2451,7 @@ function ExpReport() {
     ['repair', 'ประวัติการซ่อม'],
     ['lines', 'รายละเอียดรายการ'],
     ['pivot', 'สรุปรายคัน × คู่ค้า'],
+    ['unpaid', 'ค้างชำระ'],
   ]
 
   return (
@@ -2676,6 +2697,97 @@ function ExpReport() {
         </>
       )}
       {innerTab === 'pivot' && <PivotTab />}
+
+      {innerTab === 'unpaid' && (
+        <>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--line)' }}>
+            <div className="row" style={{ gap: 14, alignItems: 'flex-end' }}>
+              <Field label="เดือน">
+                <select value={unpaidMonth} onChange={(e) => setUnpaidMonth(e.target.value)} style={{ width: 190 }}>
+                  <option value="">ทั้งหมด</option>
+                  {unpaidMonths.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
+                </select>
+              </Field>
+              <Field label="ร้านค้า / ช่าง">
+                <select value={unpaidPartner} onChange={(e) => setUnpaidPartner(e.target.value)} style={{ width: 220 }}>
+                  <option value="">ทั้งหมด</option>
+                  {unpaidPartners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </Field>
+              <div className="muted" style={{ fontSize: 12, paddingBottom: 10 }}>
+                ค้างชำระ {unpaidRows.length} บิล · รวม{' '}
+                <b style={{ color: 'var(--text)' }}>{db.fmt(unpaidRows.reduce((sum, h) => sum + h.total, 0))} ฿</b>
+              </div>
+            </div>
+          </div>
+          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0, overflow: 'auto' }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>วันที่</th>
+                  <th>เลขที่เอกสาร</th>
+                  <th>เลขที่บิล</th>
+                  <th>ทะเบียนรถ</th>
+                  <th>ร้านค้า / ช่าง</th>
+                  <th>ธนาคาร</th>
+                  <th>เลขบัญชี</th>
+                  <th>ครบกำหนด</th>
+                  <th className="right">จำนวนเงิน</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {unpaidRows.map((h) => {
+                  const v = vehicles.find((x) => x.id === h.vehicleId)
+                  const p = partners.find((x) => x.id === h.partnerId)
+                  const invoices = Array.from(
+                    new Set(allLines.filter((l) => l.headerId === h.id).map((l) => l.invoiceNo).filter(Boolean)),
+                  ).join(', ')
+                  return (
+                    <tr key={h.id}>
+                      <td className="num muted">{db.thaiDate(h.date)}</td>
+                      <td className="mono" style={{ fontSize: 12 }}>{toBeCode(h.code)}</td>
+                      <td>{invoices || '—'}</td>
+                      <td><span className="mono" style={{ color: 'var(--primary)', fontWeight: 600 }}>{v?.plate ?? '—'}</span></td>
+                      <td>{p?.name ?? '—'}</td>
+                      <td>{p?.bank || '—'}</td>
+                      <td>
+                        <span className="mono">{p?.account || '—'}</span>
+                        {p?.accountName && <div className="muted" style={{ fontSize: 11 }}>{p.accountName}</div>}
+                      </td>
+                      <td className="num muted">{h.dueDate ? db.thaiDate(h.dueDate) : '—'}</td>
+                      <td className="num right" style={{ fontWeight: 600 }}>{db.fmt(h.total)} ฿</td>
+                      <td>
+                        <button className="btn ghost icon sm" title="แก้ไขรายการ/วันที่" onClick={() => setEditingHeader(h)}>
+                          <Icon name="edit" size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  )
+                })}
+                {unpaidRows.length === 0 && (
+                  <tr><td colSpan={10}><div className="empty">ไม่มีบิลค้างชำระในช่วงที่เลือก</div></td></tr>
+                )}
+                <tr style={{ background: 'var(--primary-50)', fontWeight: 700 }}>
+                  <td colSpan={8} className="right">รวมค้างชำระ</td>
+                  <td className="num right">{db.fmt(unpaidRows.reduce((sum, h) => sum + h.total, 0))} ฿</td>
+                  <td></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          {editingHeader && innerTab === 'unpaid' && (
+            <ExpenseEditModal
+              header={editingHeader}
+              vehicles={vehicles}
+              partners={partners}
+              stocks={stock}
+              onClose={() => setEditingHeader(null)}
+              onSaved={() => setEditingHeader(null)}
+            />
+          )}
+        </>
+      )}
     </div>
   )
 }
