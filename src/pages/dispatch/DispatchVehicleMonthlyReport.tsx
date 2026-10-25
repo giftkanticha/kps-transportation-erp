@@ -64,12 +64,17 @@ export function DispatchVehicleMonthlyReport() {
     ? snapshots.find(s => s.periodId === period?.id && s.vehicleId === vehicleId)
     : null
 
-  // รอบที่เปิดงาน (depart) อยู่ในเดือน/ปีที่เลือก + เป็นรถคันนั้น
+  // รอบที่อยู่ในงวด/เดือนที่เลือก + เป็นรถคันนั้น
+  // ยึดงวดบัญชีแบบเดียวกับหน้า P&L รายคัน (FinancePL → dispatchInPeriod):
+  //   - ถ้ารอบถูกกำหนดงวด (accountingPeriodId) และมีงวดของเดือนนี้ → ยึดตามงวด
+  //     (รองรับการยกยอดข้ามเดือน — carry-forward)
+  //   - มิฉะนั้น fallback ไปที่วันเปิดงาน (depart || date) ให้ตกในเดือนที่เลือก
   const rounds = useMemo<Dispatch[]>(() => {
     if (!vehicleId) return []
     return dispatch
       .filter(d => d.vehicleId === vehicleId)
       .filter(d => {
+        if (d.accountingPeriodId && period) return d.accountingPeriodId === period.id
         const basis = (d.depart || d.date || '').slice(0, 10)
         if (!basis) return false
         return basis >= start && basis < endExclusive
@@ -79,7 +84,7 @@ export function DispatchVehicleMonthlyReport() {
         return d.roundStatus === 'draft' || d.roundStatus === 'closed' || d.status === 'completed'
       })
       .sort((a, b) => (a.depart || a.date || '').localeCompare(b.depart || b.date || ''))
-  }, [dispatch, vehicleId, start, endExclusive, statusFilter])
+  }, [dispatch, vehicleId, start, endExclusive, statusFilter, period])
 
   // เรียงเที่ยว: ทุก leg ของทุกรอบ — ถ้ารอบไม่มี leg ก็ใส่เป็น 1 แถว
   const legRows = useMemo<LegRow[]>(() => {
@@ -209,7 +214,7 @@ export function DispatchVehicleMonthlyReport() {
         <div>
           <h1 className="page-title">สรุปรายเที่ยวรายเดือน (ต่อคัน)</h1>
           <div className="page-sub">
-            เลือกทะเบียน + เดือน — นับเฉพาะรอบที่ <strong>วันเปิดงาน</strong> อยู่ในเดือนนั้น (เที่ยวคร่อมเดือนยังคงอยู่ในเดือนที่เปิด)
+            เลือกทะเบียน + เดือน — นับตาม <strong>งวดบัญชี</strong> เหมือนหน้า P&L รายคัน: รอบที่ถูกยกยอดเข้างวดยึดตามงวด ที่เหลือยึด<strong>วันเปิดงาน</strong> (เที่ยวคร่อมเดือนยังคงอยู่ในเดือนที่เปิด)
           </div>
         </div>
         <div className="actions" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
