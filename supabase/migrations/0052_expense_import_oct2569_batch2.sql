@@ -20,8 +20,8 @@ DECLARE
   missing TEXT;
 BEGIN
   SELECT string_agg(n.name, ', ') INTO missing
-  FROM unnest(ARRAY['โกลบอล','พยุง','ยางอื่นๆ','ช่างโจ','บิ๊กจิ๋ว','อื่นๆ','PT','ช่างเชน','แสงจันทร์มอเตอร์แอร์','จินตนาผ้าใบ','บางจาก','เฌอไทร์','ธัญญากลกิจ','ง่วน','กพ.แทรคเตอร์']) AS n(name)
-  WHERE (SELECT count(*) FROM kps.partners p WHERE p.name = n.name) <> 1;
+  FROM unnest(ARRAY['โกลบอล','พยุง','ยางอื่นๆ','ช่างโจ','บิ๊กจิ๋ว','อื่นๆ','PT','ช่างเชน','แสงจันทร์มอเตอร์แอร์','จินตนาผ้าใบ','บริษัท บางจาก','เฌอไทร์','ธัญญากลกิจ','ง่วน','กพ.แทรคเตอร์']) AS n(name)
+  WHERE (SELECT count(*) FROM kps.partners p WHERE btrim(p.name) = n.name) <> 1;
   IF missing IS NOT NULL THEN
     RAISE EXCEPTION 'ร้านที่ไม่พบหรือซ้ำในระบบ: %', missing;
   END IF;
@@ -53,7 +53,7 @@ WITH rcpt(seq, rcpt_date, vendor, invoice_no, plate, total, paid, note) AS (VALU
   (15, '2026-10-01', 'ช่างเชน',                  'เล่ม 50 เลขที่ 2469',      '83-6069',  6000, false, 'ไฟล์: รายการรวมไม่เท่ายอดใบ'),
   (16, '2026-10-20', 'แสงจันทร์มอเตอร์แอร์',       'เล่ม 002 เลขที่ 080',      '82-6081',  1290, false, ''),
   (17, '2026-10-15', 'จินตนาผ้าใบ',               'CA2-691000304',           '83-6133',   400, false, ''),
-  (18, '2026-10-22', 'บางจาก',                   '10027784',                'ลาน1',    23540, false, 'ยอดรวมรวม VAT ตรวจรถที่รับน้ำมัน'),
+  (18, '2026-10-22', 'บริษัท บางจาก',                   '10027784',                'ลาน1',    23540, false, 'ยอดรวมรวม VAT ตรวจรถที่รับน้ำมัน'),
   (19, '2026-10-10', 'เฌอไทร์',                  'IV69-04187',              '83-6069', 17300, false, 'ไฟล์: ถอดใส่ยาง 2 เส้น 300 (ส่วนลด)'),
   (20, '2026-10-01', 'เฌอไทร์',                  '',                        '82-6125',  71750, false, 'ไฟล์: ถอดใส่ยาง 8 เส้น 1200 (ส่วนลด) ไม่ได้หักในยอด'),
   (21, '2026-10-05', 'ธัญญากลกิจ',               '',                        'ลาน1',    57194, false, ''),
@@ -75,7 +75,7 @@ SELECT
   0,
   r.note
 FROM rcpt r
-JOIN kps.partners p ON p.name = r.vendor
+JOIN kps.partners p ON btrim(p.name) = r.vendor
 JOIN kps.vehicles v ON split_part(v.plate, ' ', 1) = r.plate
 ON CONFLICT (code) DO NOTHING;
 
