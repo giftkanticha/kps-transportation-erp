@@ -57,7 +57,7 @@ interface LegFormState {
 
 const EMPTY_LEG: LegFormState = {
   origin: '', destination: '', billToLocationId: '', cargo: '', cargoType: '',
-  priceMode: 'per_ton', weight: '', price: '', legType: 'outbound', notes: '', wht: false, noBill: false,
+  priceMode: 'per_kg', weight: '', price: '', legType: 'outbound', notes: '', wht: false, noBill: false,
   loadDate: '', unloadDate: '',
   extraOrigins: [], extraDestinations: [],
 }
@@ -129,18 +129,32 @@ function normKey(s: string): string {
   return (s ?? '').trim().toLowerCase()
 }
 
+// แปลงน้ำหนักที่กรอกไว้ให้ตรงหน่วยใหม่เมื่อสลับรูปแบบราคา (ตัน ↔ กก.)
+function convertWeightForMode(weight: string, from: LegFormState['priceMode'], to: LegFormState['priceMode']): string {
+  if (!weight) return weight
+  if (from === 'per_ton' && to === 'per_kg') return String(Number(weight) * 1000)
+  if (from === 'per_kg' && to === 'per_ton') return String(Number(weight) / 1000)
+  return weight
+}
+
+interface LastPrice { priceMode: LegFormState['priceMode']; price: number; date: string }
+
 function LegModal({
   initial,
+  editingLegId,
   onSave,
   onCancel,
 }: {
   initial: LegFormState
+  /** id ของขาที่กำลังแก้ (ถ้ามี) — ไม่นับเป็นราคาล่าสุดของตัวเอง */
+  editingLegId?: string
   onSave: (f: LegFormState) => void
   onCancel: () => void
 }) {
   const [f, setF] = useState(initial)
   const { data: locations = [] } = useList<Location>('locations')
   const { data: routes = [] } = useList<Route>('routes')
+  const { data: allDispatches = [] } = useDispatches()
   const customerLocs = locations.filter(l => l.isCustomer && l.active).sort((a, b) => a.name.localeCompare(b.name, 'th'))
   // ปลายทางเป็นลูกค้าไหม → ใช้เป็นค่าเริ่มต้นผู้รับบิล
   const destIsCustomer = customerLocs.some(l => l.name === f.destination.trim())
@@ -161,6 +175,45 @@ function LegModal({
       r.standardPrice != null && r.standardPriceMode,
     ) ?? null
   }, [isReturn, locations, routes, f.origin, f.destination])
+
+  // ราคาค่าบรรทุกล่าสุดที่เคยบันทึกไว้ของต้นทาง-ปลายทางนี้ (จากขาที่มีราคาแล้ว)
+  const lastPrice = useMemo<LastPrice | null>(() => {
+    if (isReturn) return null
+    const o = normKey(f.origin), d = normKey(f.destination)
+    if (!o || !d) return null
+    let best: (LastPrice & { order: number }) | null = null
+    for (const disp of allDispatches) {
+      const dispDate = (disp.depart || disp.date || '').slice(0, 10)
+      for (const l of disp.legs ?? []) {
+        if (l.id && l.id === editingLegId) continue
+        if (l.legType === 'return' || !(Number(l.price) > 0)) continue
+        if (normKey(l.origin) !== o || normKey(l.destination) !== d) continue
+        const date = (l.loadDate || dispDate || '').slice(0, 10)
+        const order = l.sortOrder ?? 0
+        if (!best || date > best.date || (date === best.date && order > best.order)) {
+          best = { priceMode: (l.priceMode || 'per_ton') as LegFormState['priceMode'], price: Number(l.price), date, order }
+        }
+      }
+    }
+    return best ? { priceMode: best.priceMode, price: best.price, date: best.date } : null
+  }, [isReturn, allDispatches, editingLegId, f.origin, f.destination])
+
+  // เติมราคาล่าสุดให้อัตโนมัติเมื่อช่องราคายังว่าง (หรือยังเป็นค่าที่ระบบเติมให้เอง) —
+  // ถ้าผู้ใช้พิมพ์ราคาเองแล้วจะไม่ทับ และแก้ไขราคาที่เติมให้ได้ตามปกติ
+  const [autoPrice, setAutoPrice] = useState<string | null>(null)
+  const applyLastPrice = (lp: LastPrice) => {
+    const v = String(lp.price)
+    setF(s => ({ ...s, priceMode: lp.priceMode, price: v, weight: convertWeightForMode(s.weight, s.priceMode, lp.priceMode) }))
+    setAutoPrice(v)
+  }
+  useEffect(() => {
+    if (!lastPrice) return
+    if (f.price !== '' && f.price !== autoPrice) return
+    applyLastPrice(lastPrice)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastPrice])
+  const priceIsAuto = lastPrice != null && autoPrice != null && f.price === autoPrice
+
   const applySuggestedPrice = () => {
     if (!suggestedRoute?.standardPriceMode || suggestedRoute.standardPrice == null) return
     setF(s => ({ ...s, priceMode: suggestedRoute.standardPriceMode as LegFormState['priceMode'], price: String(suggestedRoute.standardPrice) }))
@@ -171,13 +224,7 @@ function LegModal({
   const onPriceModeChange = (newMode: LegFormState['priceMode']) => {
     const oldMode = f.priceMode
     if (oldMode === newMode) return
-    let nextWeight = f.weight
-    if (oldMode === 'per_ton' && newMode === 'per_kg') {
-      nextWeight = f.weight ? String(Number(f.weight) * 1000) : ''
-    } else if (oldMode === 'per_kg' && newMode === 'per_ton') {
-      nextWeight = f.weight ? String(Number(f.weight) / 1000) : ''
-    }
-    setF(s => ({ ...s, priceMode: newMode, weight: nextWeight }))
+    setF(s => ({ ...s, priceMode: newMode, weight: convertWeightForMode(s.weight, oldMode, newMode) }))
   }
 
   // f.weight is in user-unit (matches priceMode). For per_kg → input is กก., calc直接 input × price.
@@ -325,8 +372,8 @@ function LegModal({
               <Field label="รูปแบบราคา *">
                 <div className="row" style={{ gap: 16, paddingTop: 4 }}>
                   {([
-                    { v: 'per_ton', l: 'ต่อตัน', h: '฿/ตัน' },
                     { v: 'per_kg',  l: 'ต่อกิโลกรัม', h: '฿/กก.' },
+                    { v: 'per_ton', l: 'ต่อตัน', h: '฿/ตัน' },
                     { v: 'lump',    l: 'เหมา', h: '฿ ทั้งเที่ยว' },
                   ] as const).map(opt => (
                     <label key={opt.v} className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13 }}>
@@ -372,6 +419,23 @@ function LegModal({
                     onChange={e => set('price', e.target.value)}
                     placeholder="0"
                   />
+                  {lastPrice && (
+                    <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                      {priceIsAuto ? '↺ ดึงราคาล่าสุด' : 'ราคาล่าสุด'}: <strong>{db.fmt2(lastPrice.price)} {priceModeShortLabel(lastPrice.priceMode)}</strong>
+                      {lastPrice.date && <> ({lastPrice.date})</>}
+                      {priceIsAuto
+                        ? ' — แก้ไขได้'
+                        : (
+                          <>
+                            {' '}
+                            <a
+                              style={{ cursor: 'pointer', color: 'var(--primary)' }}
+                              onClick={() => applyLastPrice(lastPrice)}
+                            >ใช้ราคานี้</a>
+                          </>
+                        )}
+                    </div>
+                  )}
                 </Field>
               </div>
 
@@ -1157,6 +1221,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
       {editingLeg && (
         <LegModal
           initial={editingLeg.data}
+          editingLegId={editingLeg.index >= 0 ? (legs[editingLeg.index]?.id as string | undefined) : undefined}
           onSave={saveLeg}
           onCancel={() => setEditingLeg(null)}
         />
