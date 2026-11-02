@@ -41,6 +41,11 @@ function nowLocal(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+// คีย์เส้นทางของขา (ต้นทาง→ปลายทาง) ไม่สนช่องว่างหัวท้าย/ตัวพิมพ์
+function routeKey(l: { origin?: string; destination?: string }): string {
+  return `${(l.origin ?? '').trim().toLowerCase()}→${(l.destination ?? '').trim().toLowerCase()}`
+}
+
 interface LegCloseState {
   id: string
   deliveredWeight: string
@@ -219,6 +224,26 @@ function CloseForm({
   const [toast, setToast] = useState<ToastState | null>(null)
   const initedRef = useRef<string | null>(null)
   const legsInitedRef = useRef<string | null>(null)
+
+  // เบี้ยเลี้ยงล่าสุดที่เคยบันทึกไว้ของต้นทาง-ปลายทางเดียวกัน (จากขาที่ปิดงานแล้วของรอบอื่น)
+  const lastPerDiemByRoute = useMemo(() => {
+    const best = new Map<string, { perDiem: number; date: string; order: number }>()
+    for (const d of dispatches) {
+      if (d.id === roundId) continue
+      const dDate = (d.depart || d.date || '').slice(0, 10)
+      for (const l of d.legs ?? []) {
+        if (!l.closed || !(Number(l.perDiem) > 0)) continue
+        const key = routeKey(l)
+        const date = (l.unloadDate || l.loadDate || dDate || '').slice(0, 10)
+        const order = l.sortOrder ?? 0
+        const cur = best.get(key)
+        if (!cur || date > cur.date || (date === cur.date && order > cur.order)) best.set(key, { perDiem: Number(l.perDiem), date, order })
+      }
+    }
+    return best
+  }, [dispatches, roundId])
+  // ขาที่ระบบเติมเบี้ยเลี้ยงล่าสุดให้ (id ขา → ค่าที่เติม) — ใช้แสดงว่าดึงมาอัตโนมัติ
+  const [autoPerDiem, setAutoPerDiem] = useState<Record<string, string>>({})
   const mileageAutoFilledRef = useRef<string | null>(null)
 
   // Fuel transactions linked to this round (Supabase ledger).
@@ -382,19 +407,31 @@ function CloseForm({
 
     if (legsInitedRef.current !== legSig) {
       legsInitedRef.current = legSig
+      const autoFilled: Record<string, string> = {}
       setLegStates(
-        rl.map(l => ({
-          id: l.id || uid('lg'),
+        rl.map(l => {
+          const id = l.id || uid('lg')
+          // ขาที่ยังไม่ปิดและยังไม่มีเบี้ยเลี้ยง → เติมเบี้ยเลี้ยงล่าสุดของเส้นทางนี้ให้ (แก้ไขได้)
+          let perDiem = l.perDiem != null ? String(l.perDiem) : ''
+          if (round.roundStatus !== 'closed' && !l.closed && !(Number(l.perDiem) > 0)) {
+            const last = lastPerDiemByRoute.get(routeKey(l))
+            if (last) { perDiem = String(last.perDiem); autoFilled[id] = perDiem }
+          }
+          return {
+          id,
           // legState.deliveredWeight is the USER-input value in the leg's display unit
           // (กก. for per_kg, ตัน otherwise). Convert from canonical ตัน at load.
           deliveredWeight: tonToDwInput(l.deliveredWeight ?? null, l.priceMode),
-          perDiem: l.perDiem != null ? String(l.perDiem) : '',
+          perDiem,
           notes: l.notes || '',
           price: l.price != null ? String(l.price) : '',
           unloadDate: l.unloadDate ?? '',
-        })),
+          }
+        }),
       )
+      setAutoPerDiem(autoFilled)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [round])
 
   // เมื่อข้อมูลน้ำมันที่ผูกโหลดเสร็จ ให้แก้ค่าที่ค้างในร่างด้วยเลขไมล์จาก
@@ -920,9 +957,24 @@ function CloseForm({
                     placeholder="0"
                     disabled={isClosed}
                   />
-                  <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                    ใส่ 0 ถ้าไม่มี
-                  </div>
+                  {(() => {
+                    const last = lastPerDiemByRoute.get(routeKey(l))
+                    const isAuto = last != null && autoPerDiem[ls.id] != null && ls.perDiem === autoPerDiem[ls.id]
+                    if (!last || isClosed) return <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>ใส่ 0 ถ้าไม่มี</div>
+                    return (
+                      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                        {isAuto ? '↺ ดึงเบี้ยเลี้ยงล่าสุด' : 'ล่าสุด'}: <strong>{db.fmt(last.perDiem)} ฿</strong>
+                        {last.date && <> ({last.date})</>}
+                        {isAuto
+                          ? ' — แก้ไขได้'
+                          : <> <a style={{ cursor: 'pointer', color: 'var(--primary)' }} onClick={() => {
+                              const v = String(last.perDiem)
+                              updateLegState(i, { perDiem: v })
+                              setAutoPerDiem(m => ({ ...m, [ls.id]: v }))
+                            }}>ใช้ค่านี้</a></>}
+                      </div>
+                    )
+                  })()}
                 </Field>
                 {isManager && !isReturn && (
                   <Field label={isLump ? 'ค่าเหมา (฿)' : isPerKg ? 'ราคา (฿/กก.)' : 'ราคา (฿/ตัน)'}>
