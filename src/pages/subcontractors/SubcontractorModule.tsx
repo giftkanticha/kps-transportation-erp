@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useMemo, useEffect } from 'react'
 import type { SubDriver, SubJob, Subcontractor, User, Vehicle } from '../../types'
 import { db } from '../../lib/db'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
@@ -268,10 +268,22 @@ function DriverEditModal({ driver, onClose, onSaved }: DriverEditModalProps) {
 
 // ─── Tab 1: เปิดงาน ──────────────────────────────────────────────────────────
 
+type SubMode = 'per_kg' | 'per_ton' | 'lump'
+
+const SUB_MODE_UNIT: Record<SubMode, string> = { per_kg: 'บาท/กก.', per_ton: 'บาท/ตัน', lump: 'บาท (เหมา)' }
+
+function convertSubWeight(weight: string, from: SubMode, to: SubMode): string {
+  if (!weight) return weight
+  if (from === 'per_ton' && to === 'per_kg') return String(Number(weight) * 1000)
+  if (from === 'per_kg' && to === 'per_ton') return String(Number(weight) / 1000)
+  return weight
+}
+
 function SubOpenForm() {
   const today = new Date().toISOString().slice(0, 10)
   const { data: allSubDrivers = [] } = useList<SubDriver>('sub_drivers')
   const { data: vehicles = [] } = useList<Vehicle>('vehicles')
+  const { data: allJobs = [] } = useList<SubJob>('sub_jobs')
   const insertJob = useInsert<SubJob>('sub_jobs')
   const subDrivers = allSubDrivers.filter(d => d.status === 'active')
 
@@ -281,7 +293,7 @@ function SubOpenForm() {
     category: '',
     destination: '',
     weight: '',
-    mode: 'per_ton' as 'per_ton' | 'lump' | 'per_kg',
+    mode: 'per_kg' as SubMode,
     price: '',
   }
 
@@ -289,6 +301,38 @@ function SubOpenForm() {
   const [categoryAutoFilled, setCategoryAutoFilled] = useState(false)
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }))
+
+  // สลับหน่วยคำนวณ → แปลงน้ำหนักที่กรอกไว้ให้ตรงหน่วยใหม่ (ตัน ↔ กก.)
+  const changeMode = (to: SubMode) => setForm(f => ({ ...f, mode: to, weight: convertSubWeight(f.weight, f.mode, to) }))
+
+  // ค่าบรรทุกล่าสุดที่เคยบันทึกไว้ของปลายทางนี้ (งานรถร่วมล่าสุดที่ปลายทางตรงกัน)
+  const lastPrice = useMemo(() => {
+    const dest = form.destination.trim().toLowerCase()
+    if (!dest) return null
+    let best: SubJob | null = null
+    for (const j of allJobs) {
+      if ((j.destination ?? '').trim().toLowerCase() !== dest || !(Number(j.price) > 0)) continue
+      if (!best || (j.date || '') > (best.date || '') || ((j.date || '') === (best.date || '') && (j.code || '') > (best.code || ''))) best = j
+    }
+    if (!best) return null
+    const mode = (['per_ton', 'per_kg', 'lump'].includes(best.mode) ? best.mode : 'per_ton') as SubMode
+    return { mode, price: Number(best.price), date: best.date }
+  }, [allJobs, form.destination])
+
+  // เติมค่าบรรทุกล่าสุดให้อัตโนมัติเมื่อช่องยังว่าง (หรือยังเป็นค่าที่ระบบเติมให้) — แก้ไขได้ ไม่ทับค่าที่พิมพ์เอง
+  const [autoPrice, setAutoPrice] = useState<string | null>(null)
+  const applyLastPrice = (lp: { mode: SubMode; price: number }) => {
+    const v = String(lp.price)
+    setForm(f => ({ ...f, mode: lp.mode, price: v, weight: convertSubWeight(f.weight, f.mode, lp.mode) }))
+    setAutoPrice(v)
+  }
+  useEffect(() => {
+    if (!lastPrice) return
+    if (form.price !== '' && form.price !== autoPrice) return
+    applyLastPrice(lastPrice)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastPrice])
+  const priceIsAuto = lastPrice != null && autoPrice != null && form.price === autoPrice
 
   const handleDriverChange = (driverId: string) => {
     const driver = subDrivers.find(d => d.id === driverId)
@@ -349,6 +393,7 @@ function SubOpenForm() {
       })
       alert('เปิดงานเรียบร้อย')
       setForm(blank)
+      setAutoPrice(null)
       setCategoryAutoFilled(false)
     } catch (e) {
       alert('บันทึกไม่สำเร็จ: ' + (e instanceof Error ? e.message : String(e)))
@@ -357,6 +402,7 @@ function SubOpenForm() {
 
   const cancel = () => {
     setForm(blank)
+    setAutoPrice(null)
     setCategoryAutoFilled(false)
   }
 
@@ -427,16 +473,16 @@ function SubOpenForm() {
           <Field label="ประเภทการคำนวณ *">
             <div className="row" style={{ gap: 18, paddingTop: 4 }}>
               {([
+                ['per_kg', 'ต่อกิโลกรัม'],
                 ['per_ton', 'ต่อตัน'],
                 ['lump', 'เหมา'],
-                ['per_kg', 'ต่อกิโลกรัม'],
               ] as const).map(([k, l]) => (
                 <label key={k} className="row" style={{ gap: 6, cursor: 'pointer', fontSize: 13.5 }}>
                   <input
                     type="radio"
                     name="sc-mode"
                     checked={form.mode === k}
-                    onChange={() => set('mode', k)}
+                    onChange={() => changeMode(k)}
                     style={{ accentColor: 'var(--primary)' }}
                   />
                   <span>{l}</span>
@@ -446,6 +492,15 @@ function SubOpenForm() {
           </Field>
           <Field label={`ค่าบรรทุก (${priceLabel}) *`}>
             <input type="number" value={form.price} onChange={e => set('price', e.target.value)} placeholder="เช่น 2500" />
+            {lastPrice && (
+              <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                {priceIsAuto ? '↺ ดึงราคาล่าสุด' : 'ราคาล่าสุด'}: <strong>{db.fmt2(lastPrice.price)} {SUB_MODE_UNIT[lastPrice.mode]}</strong>
+                {lastPrice.date && <> ({lastPrice.date})</>}
+                {priceIsAuto
+                  ? ' — แก้ไขได้'
+                  : <> <a style={{ cursor: 'pointer', color: 'var(--primary)' }} onClick={() => applyLastPrice(lastPrice)}>ใช้ราคานี้</a></>}
+              </div>
+            )}
           </Field>
 
           <div style={{ padding: '14px 16px', background: 'var(--primary-50)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
