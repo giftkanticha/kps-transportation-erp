@@ -4,7 +4,8 @@ import { callRpc } from '../../lib/crud'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { useAuth } from '../../context/AuthContext'
-import type { FuelStock, FuelTransaction, Vehicle, Partner, ExpenseHeader, ExpenseLine } from '../../types'
+import type { FuelStock, FuelTransaction, FuelRecord, Vehicle, Partner, ExpenseHeader, ExpenseLine } from '../../types'
+import { isStockAdjustment, factoryBalanceAsOf } from './fuelStockHelpers'
 import { Icon, Field, PrintButton, FontScaleControl } from '../../components/ui'
 
 const FUEL_PARTNER_TYPE = 'ซัพพลายเออร์น้ำมัน'
@@ -483,7 +484,7 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
   const pumpTxs = allFuelTxs.filter(t => t.source === 'EXTERNAL_PUMP' && t.status !== 'REVERSED')
 
   const rows = type === 'in'
-    ? [...allFuelStock].sort((a, b) => b.date.localeCompare(a.date))
+    ? allFuelStock.filter(st => !isStockAdjustment(st)).sort((a, b) => b.date.localeCompare(a.date))
     : type === 'out'
     ? [...factoryTxs].sort((a, b) => b.date.localeCompare(a.date))
     : [...pumpTxs].sort((a, b) => b.date.localeCompare(a.date))
@@ -753,9 +754,139 @@ function StockHistoryModal({ type, balanceMap, onClose, canEdit, canDelete, canS
   )
 }
 
+// ─── Stock Count Adjustment Modal ─────────────────────────────────────────────
+// ปรับยอดตามนับจริง: บันทึกเป็นแถว fuel_stock ประเภท ADJUSTMENT (liters = นับได้ − ระบบ)
+// ยอดระบบอ้างอิงหน้า "สรุปน้ำมันคลังโรงงานรายวัน" ณ สิ้นวันที่นับ
+interface AdjustModalProps {
+  stocks: FuelStock[]
+  records: FuelRecord[]
+  factoryTxs: FuelTransaction[]
+  adjustedBy: string
+  onClose: () => void
+  onSaved: () => void
+}
+
+function AdjustStockModal({ stocks, records, factoryTxs, adjustedBy, onClose, onSaved }: AdjustModalProps) {
+  const todayISO = new Date().toISOString().slice(0, 10)
+  const [date, setDate] = useState(todayISO)
+  const [counted, setCounted] = useState('')
+  const [note, setNote] = useState('')
+  const [err, setErr] = useState('')
+  const [saving, setSaving] = useState(false)
+  const insertStock = useInsert<FuelStock>('fuel_stock')
+
+  const systemDaily = factoryBalanceAsOf(stocks, records, date)
+  const systemTank =
+    stocks.filter(st => st.date.slice(0, 10) <= date).reduce((sum, st) => sum + (st.liters || 0), 0) -
+    factoryTxs.filter(t => (t.date || '').slice(0, 10) <= date).reduce((sum, t) => sum + (t.liters || 0), 0)
+  const ledgerGap = systemDaily - systemTank
+  const countedN = counted.trim() === '' ? null : Number(counted)
+  const diff = countedN == null || Number.isNaN(countedN) ? null : countedN - systemDaily
+  const sameDayAdj = stocks.filter(st => isStockAdjustment(st) && st.date.slice(0, 10) === date)
+
+  const save = async () => {
+    setErr('')
+    if (!date) return setErr('กรุณาเลือกวันที่นับ')
+    if (date > todayISO) return setErr('วันที่นับต้องไม่เกินวันนี้')
+    if (countedN == null || Number.isNaN(countedN) || countedN < 0) return setErr('กรุณากรอกยอดที่นับได้ (ลิตร)')
+    if (diff == null || Math.abs(diff) < 0.01) return setErr('ยอดนับจริงตรงกับระบบแล้ว ไม่ต้องปรับ')
+    const sign = diff > 0 ? 'เพิ่ม' : 'ลด'
+    if (!confirm(
+      `ยืนยันปรับยอดคลังน้ำมัน ณ ${db.thaiDate(date)}?\n\n` +
+      `ระบบ: ${db.fmt(systemDaily)} ลิตร\nนับจริง: ${db.fmt(countedN)} ลิตร\n` +
+      `→ ${sign} ${db.fmt(Math.abs(diff))} ลิตร`,
+    )) return
+    setSaving(true)
+    try {
+      await insertStock.mutateAsync({
+        id: uid('fs'),
+        date,
+        recordedAt: new Date().toISOString(),
+        supplier: 'ปรับยอดตามนับจริง',
+        liters: Math.round(diff * 100) / 100,
+        pricePerL: 0,
+        invoiceNo: `ADJ-${date.replace(/-/g, '')}`,
+        total: 0,
+        entryKind: 'ADJUSTMENT',
+        countedLiters: countedN,
+        systemLiters: Math.round(systemDaily * 100) / 100,
+        note: note.trim() || null,
+        adjustedBy: adjustedBy || null,
+      })
+      onSaved()
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      setErr(
+        /entry_kind|counted_liters|system_liters|adjusted_by|column/i.test(msg)
+          ? 'ฐานข้อมูลยังไม่ได้อัปเดต — ต้องรัน migration 0053_fuel_stock_adjustments.sql ก่อน (' + msg + ')'
+          : 'บันทึกไม่สำเร็จ: ' + msg,
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <ModalOverlay onClose={onClose}>
+      <div style={{ background: 'var(--card)', borderRadius: 14, width: '100%', maxWidth: 520, boxShadow: '0 20px 60px rgba(0,0,0,.25)' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: 16 }}>
+          📏 ปรับยอดคลังน้ำมันตามนับจริง
+        </div>
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            วัดน้ำมันในถังหลังเติมรายการสุดท้ายของวันนั้นแล้ว · ระบบจะบันทึกส่วนต่างเป็นรายการ "ปรับยอด"
+            (ไม่มีมูลค่า ไม่นับเป็นน้ำมันรับเข้า) ให้ยอดคงเหลือ ณ สิ้นวันเท่ากับที่นับได้
+          </div>
+          <Field label="วันที่นับ">
+            <input type="date" value={date} max={todayISO} onChange={e => setDate(e.target.value)} />
+          </Field>
+          <Field label="ยอดที่นับได้จริง (ลิตร)">
+            <input type="number" inputMode="decimal" min={0} step="0.01" value={counted} autoFocus
+              onChange={e => setCounted(e.target.value)} placeholder="เช่น 3250" />
+          </Field>
+          <Field label="หมายเหตุ (ไม่บังคับ)">
+            <input value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น วัดไม้วัดระดับ / สาเหตุที่คาด" />
+          </Field>
+
+          <div style={{ background: 'var(--bg)', borderRadius: 10, padding: '12px 14px', display: 'grid', gridTemplateColumns: '1fr auto', rowGap: 6, fontSize: 13.5 }}>
+            <span>ยอดในระบบ ณ สิ้นวัน (สรุปรายวัน)</span>
+            <strong className="mono">{db.fmt(systemDaily)} ล.</strong>
+            <span>ยอดที่นับได้</span>
+            <strong className="mono">{countedN == null || Number.isNaN(countedN) ? '—' : `${db.fmt(countedN)} ล.`}</strong>
+            <span style={{ fontWeight: 700 }}>ปรับยอด</span>
+            <strong className="mono" style={{ color: diff == null ? 'var(--text-muted)' : diff < 0 ? '#A32D2D' : '#166534' }}>
+              {diff == null ? '—' : `${diff > 0 ? '+' : diff < 0 ? '−' : ''}${db.fmt(Math.abs(diff))} ล.`}
+            </strong>
+          </div>
+
+          {Math.abs(ledgerGap) >= 0.01 && (
+            <div style={{ background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8, padding: '10px 12px', fontSize: 12.5, color: '#78350F' }}>
+              ⚠️ ยอดหน้าคลัง ({db.fmt(systemTank)} ล.) กับสรุปรายวัน ({db.fmt(systemDaily)} ล.) ยังต่างกัน {db.fmt(Math.abs(ledgerGap))} ลิตร
+              — ควรเคลียร์ที่ <strong>ระบบน้ำมัน → ตรวจสอบข้อมูล</strong> ก่อนปรับยอด ไม่งั้นส่วนต่างจากรายการตกหล่นจะถูกรวมเข้าไปในการปรับยอดนี้
+            </div>
+          )}
+          {sameDayAdj.length > 0 && (
+            <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: 8, padding: '10px 12px', fontSize: 12.5, color: '#1E3A8A' }}>
+              ℹ️ วันนี้มีการปรับยอดไปแล้ว {sameDayAdj.length} ครั้ง — ยอดระบบด้านบนรวมรายการเหล่านั้นแล้ว
+            </div>
+          )}
+          {err && <div style={{ color: 'var(--red)', fontSize: 13 }}>{err}</div>}
+        </div>
+        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button className="btn outline" onClick={onClose} disabled={saving}>ยกเลิก</button>
+          <button className="btn primary" onClick={save} disabled={saving || diff == null}>
+            {saving ? 'กำลังบันทึก...' : 'บันทึกปรับยอด'}
+          </button>
+        </div>
+      </div>
+    </ModalOverlay>
+  )
+}
+
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export function FuelStockDashboard() {
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showAdjustModal, setShowAdjustModal] = useState(false)
   const [editingStock, setEditingStock] = useState<FuelStock | null>(null)
   const [historyType, setHistoryType] = useState<'in' | 'out' | 'pump' | null>(null)
 
@@ -771,7 +902,14 @@ export function FuelStockDashboard() {
   const { data: dispatches = [] } = useDispatches()
   const { data: allFuelTxs = [] } = useList<FuelTransaction>('fuel_transactions')
   const { data: allFuelStock = [] } = useList<FuelStock>('fuel_stock')
+  const { data: allFuelRecs = [] } = useList<FuelRecord>('fuel_records')
   const deleteStock = useDelete('fuel_stock')
+  // รับเข้าจริง vs ปรับยอดตามนับจริง — ยอดคงเหลือนับทั้งคู่, ยอดรับเข้า/มูลค่านับเฉพาะรับเข้า
+  const purchases = useMemo(() => allFuelStock.filter(st => !isStockAdjustment(st)), [allFuelStock])
+  const adjustments = useMemo(
+    () => allFuelStock.filter(isStockAdjustment).sort((a, b) => b.date.localeCompare(a.date) || (b.recordedAt ?? '').localeCompare(a.recordedAt ?? '')),
+    [allFuelStock],
+  )
   const factoryTxs = useMemo(
     () => allFuelTxs.filter(t => t.source === 'FACTORY_TANK' && t.status !== 'REVERSED'),
     [allFuelTxs],
@@ -795,16 +933,16 @@ export function FuelStockDashboard() {
   // KPIs
   const currentBalance = allFuelStock.reduce((s, r) => s + r.liters, 0) - factoryTxs.reduce((s, t) => s + t.liters, 0)
   const todayISO = new Date().toISOString().slice(0, 10)
-  const todayIn = allFuelStock.filter(s => s.date === todayISO).reduce((s, r) => s + r.liters, 0)
+  const todayIn = purchases.filter(s => s.date === todayISO).reduce((s, r) => s + r.liters, 0)
   const todayOut = factoryTxs.filter(t => t.date === todayISO).reduce((s, t) => s + t.liters, 0)
-  const totalStockValue = allFuelStock.reduce((s, r) => s + r.total, 0)
-  const totalLitersEver = allFuelStock.reduce((s, r) => s + r.liters, 0)
+  const totalStockValue = purchases.reduce((s, r) => s + r.total, 0)
+  const totalLitersEver = purchases.reduce((s, r) => s + r.liters, 0)
   const avgPrice = totalLitersEver > 0 ? totalStockValue / totalLitersEver : 0
 
   // Recent lists
   const recentIn = useMemo(
-    () => [...allFuelStock].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5),
-    [allFuelStock],
+    () => [...purchases].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5),
+    [purchases],
   )
   const recentOut = useMemo(
     () => [...factoryTxs].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10),
@@ -837,6 +975,11 @@ export function FuelStockDashboard() {
           <div className="page-sub">ยอดคงเหลือ · ประวัติรับเข้า-จ่ายออก</div>
         </div>
         <div className="actions">
+          {isAdmin && (
+            <button className="btn outline" onClick={() => setShowAdjustModal(true)}>
+              📏 ปรับยอดตามนับจริง
+            </button>
+          )}
           {canAdd && isAdmin && (
             <button className="btn primary" onClick={() => setShowAddModal(true)}>
               <Icon name="plus" size={15} /> เพิ่มน้ำมันเข้าคลัง
@@ -911,17 +1054,74 @@ export function FuelStockDashboard() {
             {db.fmt(totalLitersEver)} <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 500 }}>ลิตร</span>
           </div>
           <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 4 }}>
-            {allFuelStock.length} รายการ{isManager && ` · ${db.thb(totalStockValue)}`}
+            {purchases.length} รายการ{isManager && ` · ${db.thb(totalStockValue)}`}
           </div>
         </div>
       </div>
+
+      {/* Stock count adjustments */}
+      {adjustments.length > 0 && (
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div className="head">
+            <div style={{ flex: 1 }}>
+              <h3>📏 ประวัติปรับยอดตามนับจริง</h3>
+              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                {adjustments.length} ครั้ง · รวม {(() => { const t = adjustments.reduce((x, a) => x + a.liters, 0); return `${t > 0 ? '+' : t < 0 ? '−' : ''}${db.fmt(Math.abs(t))}` })()} ลิตร
+              </div>
+            </div>
+          </div>
+          <div className="tbl-wrap" style={{ border: 'none', borderRadius: 0 }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>วันที่นับ</th>
+                  <th className="right">ยอดระบบ</th>
+                  <th className="right">นับได้จริง</th>
+                  <th className="right">ปรับยอด</th>
+                  <th>หมายเหตุ</th>
+                  <th>ผู้ปรับ / บันทึกเมื่อ</th>
+                  {canDelete && <th style={{ width: 44 }}></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {adjustments.map(a => (
+                  <tr key={a.id}>
+                    <td className="mono" style={{ fontSize: 12.5 }}>{db.thaiDate(a.date)}</td>
+                    <td className="num right mono muted">{a.systemLiters != null ? db.fmt(a.systemLiters) : '—'}</td>
+                    <td className="num right mono">{a.countedLiters != null ? db.fmt(a.countedLiters) : '—'}</td>
+                    <td className="num right mono" style={{ fontWeight: 700, color: a.liters < 0 ? '#A32D2D' : '#166534' }}>
+                      {a.liters > 0 ? '+' : a.liters < 0 ? '−' : ''}{db.fmt(Math.abs(a.liters))}
+                    </td>
+                    <td style={{ fontSize: 12, maxWidth: 220 }}>{a.note || '—'}</td>
+                    <td className="muted" style={{ fontSize: 11.5 }}>
+                      {a.adjustedBy || '—'}
+                      {a.recordedAt && <div>{new Date(a.recordedAt).toLocaleString('th-TH', { dateStyle: 'short', timeStyle: 'short' })}</div>}
+                    </td>
+                    {canDelete && (
+                      <td>
+                        <button className="btn ghost icon sm" style={{ color: 'var(--red)' }} title="ลบรายการปรับยอด"
+                          onClick={async () => {
+                            if (!confirm(`ลบรายการปรับยอด ${db.thaiDate(a.date)} (${db.fmt(a.liters)} ลิตร)?`)) return
+                            await deleteStock.mutateAsync(a.id)
+                          }}>
+                          <Icon name="trash" size={13} />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Stock In Recent */}
       <div className="card" style={{ marginBottom: 18 }}>
         <div className="head">
           <div style={{ flex: 1 }}>
             <h3>📥 ประวัติน้ำมันเข้าคลัง (Stock In) — 5 รายการล่าสุด</h3>
-            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>รวม {allFuelStock.length} รายการทั้งหมด</div>
+            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>รวม {purchases.length} รายการทั้งหมด</div>
           </div>
           <button className="btn sm outline" onClick={() => setHistoryType('in')}>📂 ดูประวัติเข้าทั้งหมด</button>
         </div>
@@ -1090,6 +1290,16 @@ export function FuelStockDashboard() {
         )}
       </div>
 
+      {showAdjustModal && isAdmin && (
+        <AdjustStockModal
+          stocks={allFuelStock}
+          records={allFuelRecs}
+          factoryTxs={factoryTxs}
+          adjustedBy={legacyUser?.name ?? ''}
+          onClose={() => setShowAdjustModal(false)}
+          onSaved={() => setShowAdjustModal(false)}
+        />
+      )}
       {showAddModal && isAdmin && <AddStockModal onClose={() => setShowAddModal(false)} onSaved={() => setShowAddModal(false)} />}
       {editingStock && <EditStockModal stock={editingStock} onClose={() => setEditingStock(null)} onSaved={() => setEditingStock(null)} />}
       {historyType && (

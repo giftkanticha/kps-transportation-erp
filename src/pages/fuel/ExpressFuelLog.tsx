@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react'
 import { uid } from '../../lib/db'
+import { deleteOne, updateOne } from '../../lib/crud'
 import { useList, useInsert, useUpdate, useDelete } from '../../hooks/useTable'
 import { useDispatches } from '../../hooks/useDispatches'
 import { Icon } from '../../components/ui/Icon'
@@ -156,19 +157,33 @@ async function persistRow(
     reversalOf: null,
   })
 
-  await insertFuelRec.mutateAsync({
-    id: fuelRecId,
-    code: `EXP-${row.date.replace(/-/g, '')}-${fuelRecId.slice(-6)}`,
-    vehicleId: row.vehicleId,
-    driverId: vehicle?.driverId || null,
-    station: row.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
-    liters,
-    pricePerL,
-    total,
-    odometer,
-    date: row.date,
-    type: 'diesel',
-  })
+  // ต้องลงครบทั้ง 2 ตาราง: fuel_transactions (หน้าคลัง) + fuel_records (สรุปรายวัน/P&L)
+  // ถ้าตารางที่สองบันทึกไม่สำเร็จ ให้ลบรายการแรกทิ้ง กันน้ำมันถูกตัดสต็อคแค่ฝั่งเดียว
+  try {
+    await insertFuelRec.mutateAsync({
+      id: fuelRecId,
+      code: `EXP-${row.date.replace(/-/g, '')}-${fuelRecId.slice(-6)}`,
+      vehicleId: row.vehicleId,
+      driverId: vehicle?.driverId || null,
+      station: row.source === 'FACTORY_TANK' ? 'ถังโรงงาน' : 'ปั๊มภายนอก',
+      liters,
+      pricePerL,
+      total,
+      odometer,
+      date: row.date,
+      type: 'diesel',
+    })
+  } catch (e) {
+    // ผู้ใช้ที่ไม่ใช่แอดมินอาจลบไม่ได้ (RLS) → fallback เป็น REVERSED แทน
+    try {
+      await deleteOne('fuel_transactions', txId)
+    } catch {
+      try {
+        await updateOne<FuelTransaction>('fuel_transactions', txId, { status: 'REVERSED', reversedAt: new Date().toISOString() })
+      } catch { /* error below still surfaces */ }
+    }
+    throw e
+  }
 
   return { txId, fuelRecId }
 }

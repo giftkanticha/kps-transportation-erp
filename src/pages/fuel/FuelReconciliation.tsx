@@ -23,6 +23,9 @@ export function FuelReconciliation() {
   const { data: allFuelTxs = [], isLoading: txsLoading } = useList<FuelTransaction>('fuel_transactions')
   const { data: dispatches = [] } = useDispatches()
   const insertFuelTx = useInsert<FuelTransaction>('fuel_transactions')
+  const insertFuelRec = useInsert<FuelRecord>('fuel_records')
+  const [fixingFactory, setFixingFactory] = useState(false)
+  const [factoryLog, setFactoryLog] = useState<string[]>([])
   const { data: legacyRecords = [], isLoading: recordsLoading } = useList<FuelRecord>('fuel_records')
   const { data: fuelStock = [] } = useList<FuelStock>('fuel_stock')
   // "ยังไม่ซิงค์" ต้องเทียบกับ fuel_transactions ที่โหลดครบแล้วเท่านั้น — ถ้ากด
@@ -78,6 +81,85 @@ export function FuelReconciliation() {
       Math.abs(t.liters - lr.liters) < 0.01,
     )
   })
+
+  // ── ถังโรงงาน: จับคู่ 1:1 ระหว่าง 2 ตาราง ─────────────────────────────────
+  // หน้า "สรุปน้ำมันคลังโรงงานรายวัน" ตัดสต็อคจาก fuel_records (station=ถังโรงงาน)
+  // ส่วนหน้าคลังใช้ fuel_transactions (FACTORY_TANK) — ทั้งสองต้องตรงกันทีละรายการ
+  //   factoryTxOnly  = ตัดสต็อคในคลังแล้ว แต่สรุปรายวันไม่ได้ตัด (ยอดคงเหลือรายวันสูงเกินจริง)
+  //   factoryRecOnly = สรุปรายวันตัด แต่ไม่มีในคลัง (มักเป็นรายการซ้ำ → ยอดรายวันต่ำเกินจริง)
+  const { factoryTxOnly, factoryRecOnly } = useMemo(() => {
+    const d10 = (d: string) => (d ?? '').slice(0, 10)
+    const recs = legacyRecords.filter(isFactory)
+    const usedRec = new Set<string>()
+    const txOnly: FuelTransaction[] = []
+    const factoryTxs = fuelTxs
+      .filter(t => t.source === 'FACTORY_TANK')
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+    for (const t of factoryTxs) {
+      const rec = recs.find(r =>
+        !usedRec.has(r.id) &&
+        r.vehicleId === t.vehicleId &&
+        d10(r.date) === d10(t.date) &&
+        Math.abs(r.liters - t.liters) < 0.01,
+      )
+      if (rec) usedRec.add(rec.id)
+      else txOnly.push(t)
+    }
+    const recOnly = recs
+      .filter(r => !usedRec.has(r.id))
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''))
+    return { factoryTxOnly: txOnly, factoryRecOnly: recOnly }
+  }, [legacyRecords, fuelTxs])
+  const factoryTxOnlyLiters = factoryTxOnly.reduce((s, t) => s + t.liters, 0)
+  const factoryRecOnlyLiters = factoryRecOnly.reduce((s, r) => s + r.liters, 0)
+
+  // สร้าง fuel_records ที่ขาดหาย ให้สรุปรายวันตัดสต็อคตรงกับคลัง
+  const handleFixFactoryMissing = async () => {
+    if (referenceDataLoading) {
+      alert('ข้อมูลกำลังโหลด กรุณารอสักครู่แล้วลองใหม่')
+      return
+    }
+    if (!confirm(`สร้างรายการตัดสต็อคในสรุปรายวัน ${factoryTxOnly.length} รายการ (${fmt(factoryTxOnlyLiters)} ลิตร)?`)) return
+    setFixingFactory(true)
+    const log: string[] = []
+    let failed = 0
+    const existingCodes = new Set(legacyRecords.map(r => r.code))
+    for (const t of factoryTxOnly) {
+      const vehicle = vehicles.find(v => v.id === t.vehicleId)
+      const round = t.tripId ? dispatches.find(d => d.id === t.tripId) : undefined
+      const recId = uid('frec')
+      // น้ำมันปิดรอบที่รอบยังอยู่ ใช้รหัสเดียวกับที่หน้าปิดรอบใช้ (TRIP-{code}-CLOSE)
+      // เพื่อให้แก้/ปิดรอบซ้ำแล้วอัปเดตรายการเดิม ไม่สร้างซ้ำ
+      const tripCode = round && t.tripFuelRole === 'TRIP_CLOSING' ? `TRIP-${round.code}-CLOSE` : null
+      const code = tripCode && !existingCodes.has(tripCode)
+        ? tripCode
+        : `RECON-${(t.date || '').slice(0, 10).replace(/-/g, '')}-${recId.slice(-6)}`
+      existingCodes.add(code)
+      try {
+        await insertFuelRec.mutateAsync({
+          id: recId,
+          code,
+          vehicleId: t.vehicleId,
+          driverId: vehicle?.driverId || null,
+          station: 'ถังโรงงาน',
+          liters: t.liters,
+          pricePerL: t.pricePerL,
+          total: t.total || t.liters * t.pricePerL,
+          odometer: 0,
+          date: t.date,
+          accountingDate: tripCode && round?.date ? round.date.slice(0, 10) : null,
+          type: 'diesel',
+        })
+        log.push(`✅ ${vehicle?.plate ?? t.vehicleId} · ${t.date} · ${fmt(t.liters)} ล.`)
+      } catch (e) {
+        failed += 1
+        log.push(`❌ ${vehicle?.plate ?? t.vehicleId} · ${t.date}: ${e instanceof Error ? e.message : String(e)}`)
+      }
+    }
+    if (failed > 0) alert(`เสร็จ — สำเร็จ ${log.length - failed} · ล้มเหลว ${failed}`)
+    setFactoryLog(log)
+    setFixingFactory(false)
+  }
 
   // ── Sync: create FuelTransactions for legacy-only records ─────────────────
 
@@ -188,7 +270,7 @@ export function FuelReconciliation() {
         </div>
         <div style={{ padding: '16px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20 }}>
           <div>
-            <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginBottom: 6 }}>รับเข้าทั้งหมด</div>
+            <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginBottom: 6 }}>รับเข้าทั้งหมด (รวมปรับยอดนับจริง)</div>
             <div style={{ fontFamily: 'monospace', fontSize: 20, fontWeight: 700, color: '#166534' }}>{fmt(stockIn)} ล.</div>
           </div>
           <div>
@@ -204,9 +286,70 @@ export function FuelReconciliation() {
         </div>
         {!stockOk && (
           <div style={{ padding: '10px 20px', borderTop: '1px solid #FDE68A', background: '#FFFBEB', fontSize: 12, color: '#78350F' }}>
-            ⚠️ ต่างกัน {fmt(stockDiff)} ลิตร — อาจเพราะรายการที่ยังไม่ได้ซิงค์ ({legacyOnly.length} รายการ)
+            ⚠️ ต่างกัน {fmt(stockDiff)} ลิตร — ดูรายการในกล่อง "ตรวจตัดสต็อคถังโรงงาน" ด้านล่าง
           </div>
         )}
+      </div>
+
+      {/* Factory tank 1:1 check */}
+      <div style={{ borderRadius: 12, border: `1px solid ${factoryTxOnly.length + factoryRecOnly.length > 0 ? '#FECACA' : '#E2E8F0'}`, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,.06)', background: '#fff', marginBottom: 18 }}>
+        <div style={{ padding: '12px 18px', borderBottom: '1px solid #E2E8F0', background: '#F8FAFC', fontWeight: 600, fontSize: 14 }}>
+          🏭 ตรวจตัดสต็อคถังโรงงาน (คลัง ↔ สรุปน้ำมันคลังโรงงานรายวัน)
+        </div>
+        <div style={{ padding: '16px 20px' }}>
+          {factoryTxOnly.length === 0 && factoryRecOnly.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '16px 0', color: '#166534', fontWeight: 600 }}>
+              ✅ ตรงกันทุกรายการ
+            </div>
+          ) : (
+            <>
+              {factoryTxOnly.length > 0 && (
+                <div style={{ marginBottom: 18 }}>
+                  <div style={{ marginBottom: 10, fontSize: 13, color: '#374151' }}>
+                    🔴 <strong style={{ color: '#DC2626' }}>{factoryTxOnly.length} รายการ · {fmt(factoryTxOnlyLiters)} ลิตร</strong>{' '}
+                    ตัดสต็อคในคลังแล้ว แต่ <strong>สรุปรายวันไม่ได้ตัด</strong> (ยอดคงเหลือรายวันจะสูงกว่าจริง)
+                  </div>
+                  <FactoryTable
+                    rows={factoryTxOnly.map(t => ({ id: t.id, vehicleId: t.vehicleId, date: t.date, liters: t.liters, note: t.note ?? t.entryMethod }))}
+                    vehicles={vehicles}
+                  />
+                  <button
+                    onClick={handleFixFactoryMissing}
+                    disabled={fixingFactory || referenceDataLoading}
+                    style={{
+                      marginTop: 12,
+                      background: (fixingFactory || referenceDataLoading) ? '#9CA3AF' : '#DC2626', color: '#fff', border: 'none',
+                      borderRadius: 8, padding: '10px 24px', cursor: (fixingFactory || referenceDataLoading) ? 'default' : 'pointer',
+                      fontSize: 14, fontWeight: 600, fontFamily: 'inherit',
+                    }}
+                  >
+                    {fixingFactory ? '⏳ กำลังบันทึก...' : `➕ ตัดสต็อคในสรุปรายวันให้ครบ ${factoryTxOnly.length} รายการ`}
+                  </button>
+                </div>
+              )}
+              {factoryRecOnly.length > 0 && (
+                <div>
+                  <div style={{ marginBottom: 10, fontSize: 13, color: '#374151' }}>
+                    🟠 <strong style={{ color: '#C2410C' }}>{factoryRecOnly.length} รายการ · {fmt(factoryRecOnlyLiters)} ลิตร</strong>{' '}
+                    สรุปรายวันตัดสต็อค แต่ <strong>ไม่มีในคลัง</strong> — ถ้าเป็นรายการซ้ำ ให้ลบที่ "ประวัติการเติม" ·
+                    ถ้าเป็นรายการจริง ให้กด "ซิงค์ข้อมูล" ด้านล่าง
+                  </div>
+                  <FactoryTable
+                    rows={factoryRecOnly.map(r => ({ id: r.id, vehicleId: r.vehicleId, date: r.date, liters: r.liters, note: r.code }))}
+                    vehicles={vehicles}
+                  />
+                </div>
+              )}
+            </>
+          )}
+          {factoryLog.length > 0 && (
+            <div style={{ marginTop: 16, borderRadius: 8, background: '#F0FDF4', border: '1px solid #BBF7D0', padding: '12px 16px', maxHeight: 200, overflowY: 'auto' }}>
+              {factoryLog.map((line, i) => (
+                <div key={i} style={{ fontSize: 11, color: '#374151', fontFamily: 'monospace', lineHeight: 1.7 }}>{line}</div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Per-vehicle table */}
@@ -349,6 +492,37 @@ export function FuelReconciliation() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function FactoryTable({ rows, vehicles }: {
+  rows: { id: string; vehicleId: string; date: string; liters: number; note?: string | null }[]
+  vehicles: Vehicle[]
+}) {
+  return (
+    <div style={{ overflowX: 'auto', maxHeight: 260, borderRadius: 8, border: '1px solid #F1F5F9' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ background: '#F8FAFC', position: 'sticky', top: 0 }}>
+            {['วันที่', 'ทะเบียน', 'ลิตร', 'หมายเหตุ'].map((h, i) => (
+              <th key={i} style={{ padding: '6px 12px', textAlign: i === 2 ? 'right' : 'left', color: '#64748B', fontWeight: 600 }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.id} style={{ borderTop: '1px solid #F1F5F9', background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+              <td style={{ padding: '5px 12px', color: '#64748B' }}>{(r.date || '').slice(0, 10)}</td>
+              <td style={{ padding: '5px 12px', fontFamily: 'monospace', color: 'var(--primary)', fontWeight: 600 }}>
+                {vehicles.find(v => v.id === r.vehicleId)?.plate ?? r.vehicleId}
+              </td>
+              <td style={{ padding: '5px 12px', textAlign: 'right', fontFamily: 'monospace' }}>{fmt(r.liters)}</td>
+              <td style={{ padding: '5px 12px', color: '#9CA3AF', fontSize: 11 }}>{r.note ?? ''}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

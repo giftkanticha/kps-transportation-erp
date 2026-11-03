@@ -767,7 +767,7 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
   const removeLeg = useDelete('dispatch_legs')
   const updateDispatch = useUpdate<Dispatch>('dispatch')
   const updateFuelTx = useUpdate<FuelTransaction>('fuel_transactions')
-  const deleteFuelRec = useDelete('fuel_records')
+  const updateFuelRec = useUpdate<FuelRecord>('fuel_records')
   const deleteDispatch = useDelete('dispatch')
   const insertApproval = useInsert<EditApprovalRequest>('edit_approvals')
 
@@ -1373,9 +1373,16 @@ export function DispatchRoundDetail({ setActive, setSubject, subject }: Props) {
                   patch: { tripId: null, status: noRoundNeeded ? 'INTERNAL_DEDUCTED' : 'FLOATING' },
                 })
               }
-              // 2) Delete the fuel_records mirror (TRIP-{code}-CLOSE etc.).
+              // 2) เก็บ fuel_records mirror (TRIP-{code}-CLOSE) ไว้ — น้ำมันใน
+              //    fuel_transactions ยังตัดสต็อคอยู่ (แค่ปลดรอบ) ถ้าลบ mirror
+              //    หน้า "สรุปน้ำมันคลังโรงงานรายวัน" จะไม่ตัดน้ำมันก้อนนี้ และยอด
+              //    คงเหลือจะสูงกว่าจริง เปลี่ยนแค่รหัสให้หลุดจาก prefix TRIP-{code}-
+              //    กันรอบใหม่ที่ใช้รหัสเดิมมาเขียนทับ
               for (const rec of allFuelRecs.filter(r => r.code?.startsWith(`TRIP-${round.code}-`))) {
-                await deleteFuelRec.mutateAsync(rec.id)
+                await updateFuelRec.mutateAsync({
+                  id: rec.id,
+                  patch: { code: `UNLINKED-${rec.code!.slice(5)}-${rec.id.slice(-6)}` },
+                })
               }
               // 3) Delete the round — dispatch_legs cascade automatically.
               await deleteDispatch.mutateAsync(round.id)
@@ -1526,7 +1533,7 @@ function DeleteRoundModal({
                 <li>น้ำมัน <strong>{linkedFuelTxs.length}</strong> รายการที่ผูกกับรอบนี้จะกลายเป็น "น้ำมันลอย" (ผูกใหม่ได้)</li>
               )}
               {mirrorFuelRecs.length > 0 && (
-                <li>บันทึก fuel_records mirror <strong>{mirrorFuelRecs.length}</strong> ของรอบนี้จะถูกลบด้วย</li>
+                <li>น้ำมันปิดรอบ <strong>{mirrorFuelRecs.length}</strong> รายการ ยังคงตัดสต็อคคลังโรงงานตามเดิม (ไม่ถูกลบ)</li>
               )}
               {isClosed && (
                 <li>รอบนี้สถานะ <strong>CLOSED</strong> — รายงาน P&L รายเดือนจะหายส่วนนี้</li>
