@@ -270,7 +270,7 @@ export function FuelReconciliation() {
         </div>
         <div style={{ padding: '16px 20px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20 }}>
           <div>
-            <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginBottom: 6 }}>รับเข้าทั้งหมด</div>
+            <div style={{ fontSize: 12, color: '#64748B', fontWeight: 600, marginBottom: 6 }}>รับเข้าทั้งหมด (รวมปรับยอดนับจริง)</div>
             <div style={{ fontFamily: 'monospace', fontSize: 20, fontWeight: 700, color: '#166534' }}>{fmt(stockIn)} ล.</div>
           </div>
           <div>

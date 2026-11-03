@@ -3,6 +3,7 @@ import { db } from '../../lib/db'
 import { useList } from '../../hooks/useTable'
 import type { FuelRecord, FuelStock } from '../../types'
 import { Field, PrintButton, FontScaleControl } from '../../components/ui'
+import { isStockAdjustment } from './fuelStockHelpers'
 
 const THAI_MONTHS_FULL = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
@@ -44,17 +45,21 @@ export function FuelInventorySummary() {
     const rows = []
     for (let d = 1; d <= days; d++) {
       const iso = isoDate(year, month, d)
-      const dayIn = allStocks.filter(s => s.date === iso).reduce((sum, s) => sum + s.liters, 0)
+      const dayStocks = allStocks.filter(s => s.date === iso)
+      // รับเข้าจริง กับ ปรับยอดตามนับจริง แยกคอลัมน์ — ปรับยอดติดลบได้
+      const dayIn = dayStocks.filter(s => !isStockAdjustment(s)).reduce((sum, s) => sum + s.liters, 0)
+      const dayAdj = dayStocks.filter(isStockAdjustment).reduce((sum, s) => sum + s.liters, 0)
       const dayOut = factoryFuelings.filter(f => f.date === iso).reduce((sum, f) => sum + f.liters, 0)
       const brought = balance
-      balance = brought + dayIn - dayOut
-      rows.push({ day: d, date: `${String(d).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year + 543}`, brought, in: dayIn, out: dayOut, balance })
+      balance = brought + dayIn + dayAdj - dayOut
+      rows.push({ day: d, date: `${String(d).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year + 543}`, brought, in: dayIn, adj: dayAdj, out: dayOut, balance })
     }
     return rows
   }, [allStocks, factoryFuelings, year, month, days, monthStartISO])
 
   const monthTotals = useMemo(() => ({
     totalIn: dailyRows.reduce((s, r) => s + r.in, 0),
+    totalAdj: dailyRows.reduce((s, r) => s + r.adj, 0),
     totalOut: dailyRows.reduce((s, r) => s + r.out, 0),
     opening: dailyRows[0]?.brought ?? 0,
     closing: dailyRows[dailyRows.length - 1]?.balance ?? 0,
@@ -138,6 +143,7 @@ export function FuelInventorySummary() {
                 <th className="right">ยอดยกมา (ลิตร)</th>
                 <th className="right">น้ำมันเข้า (ลิตร)</th>
                 <th className="right">น้ำมันออก (ลิตร)</th>
+                <th className="right">ปรับยอดนับจริง (ลิตร)</th>
                 <th className="right">คงเหลือ (ลิตร)</th>
               </tr>
             </thead>
@@ -152,6 +158,9 @@ export function FuelInventorySummary() {
                   <td className="num right mono" style={{ color: r.out > 0 ? '#A32D2D' : 'var(--text-muted)' }}>
                     {r.out > 0 ? `−${db.fmt(r.out)}` : '—'}
                   </td>
+                  <td className="num right mono" style={{ color: r.adj < 0 ? '#A32D2D' : r.adj > 0 ? '#166534' : 'var(--text-muted)', fontWeight: r.adj !== 0 ? 600 : 400 }}>
+                    {r.adj !== 0 ? `${r.adj > 0 ? '+' : '−'}${db.fmt(Math.abs(r.adj))}` : '—'}
+                  </td>
                   <td className="num right mono" style={{ fontWeight: 700, color: 'var(--primary)' }}>
                     {db.fmt(r.balance)}
                   </td>
@@ -162,6 +171,9 @@ export function FuelInventorySummary() {
                 <td className="num right mono">—</td>
                 <td className="num right mono" style={{ color: '#166534' }}>+{db.fmt(monthTotals.totalIn)}</td>
                 <td className="num right mono" style={{ color: '#A32D2D' }}>−{db.fmt(monthTotals.totalOut)}</td>
+                <td className="num right mono" style={{ color: monthTotals.totalAdj < 0 ? '#A32D2D' : '#166534' }}>
+                  {monthTotals.totalAdj !== 0 ? `${monthTotals.totalAdj > 0 ? '+' : '−'}${db.fmt(Math.abs(monthTotals.totalAdj))}` : '—'}
+                </td>
                 <td className="num right mono" style={{ color: 'var(--primary)' }}>{db.fmt(monthTotals.closing)}</td>
               </tr>
             </tbody>

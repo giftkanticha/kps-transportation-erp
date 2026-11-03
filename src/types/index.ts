@@ -418,6 +418,12 @@ export interface FuelStock {
   invoiceNo: string
   total: number
   expenseHeaderId?: string | null  // FK → expense_headers when this purchase is also booked as AP
+  /** PURCHASE = รับน้ำมันเข้า · ADJUSTMENT = ปรับยอดตามนับจริง (liters ติดลบได้) — migration 0053 */
+  entryKind?: 'PURCHASE' | 'ADJUSTMENT'
+  countedLiters?: number | null
+  systemLiters?: number | null
+  note?: string | null
+  adjustedBy?: string | null
 }
 
 // Manager-set reference price per source per date. Drivers' fuel entries
